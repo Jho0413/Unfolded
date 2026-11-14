@@ -5,7 +5,7 @@
 //   /dev/board?scene=m1&t=3400              demo-m1 at 3400 ms, via sceneAt
 //   /dev/board?scene=m1-late-highlight&t=…  demo-m1 with a highlight after the slide
 //
-// Production builds answer 404 unless FAKE_APIS=1 (app/dev/devOnly.ts).
+// Production servers answer 404 unless in fake mode (app/dev/devOnly.ts).
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -13,7 +13,8 @@ import { FRAME_BORDER } from "@/player/primitives/style";
 import { Whiteboard } from "@/player/Whiteboard";
 import { CANVAS } from "@/shared/scene";
 import { DevShell } from "../DevShell";
-import { devPagesEnabled, first } from "../devOnly";
+import { devPagesEnabled } from "../devOnly";
+import { first, type SearchParams } from "../query";
 import { M1_CUE_TIMES, SCENES, isScene, sceneState } from "./scenes";
 
 export const metadata: Metadata = {
@@ -24,9 +25,9 @@ export const metadata: Metadata = {
 export default async function DevBoardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+  searchParams: Promise<SearchParams>;
 }) {
-  if (!devPagesEnabled()) notFound();
+  if (!(await devPagesEnabled())) notFound();
 
   const params = await searchParams;
   const sceneParam = first(params.scene) ?? "fixed";

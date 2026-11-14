@@ -70,8 +70,9 @@ app/
   api/lessons/[lessonId]/signals/route.ts     POST: record a learner signal or "step n started" (section 5.4)
   api/runs/[lessonId]/[file]/route.ts         GET: serve step JSON, audio and media from runs/ (no path traversal)
   api/agent/token/route.ts          GET: ElevenLabs conversation token
-  dev/board/page.tsx                dev only: renders a fixed BoardState (renderer tests)
-  dev/player/page.tsx               dev only: the player with a fake two-step lesson (player tests)
+  dev/board/page.tsx                dev only: renders a fixed BoardState, or demo-m1 at ?t= via sceneAt (renderer tests); 404 in production unless in fake mode (FAKE_APIS=1, no REPLAY_RUN)
+  dev/board/scenes.ts               the dev page's fixed BoardState and demo-m1 scenes
+  dev/player/page.tsx               dev only: the player with a fake two-step lesson (player tests); same gate (dev/devOnly.ts)
   dev/player/audio/route.ts         dev only: that lesson's silent audio (or broken, or missing)
 instrumentation.ts                  register(): validates env once at server start (not at build)
 shared/                             imported by server and browser (the contract)
@@ -85,6 +86,7 @@ lib/                                server-only (import "server-only")
   pipeline/plan.ts, step.ts, sketch.ts, prompts/
   narration/cues.ts                 pure: strip markers, cue offsets -> times
   narration/tts.ts                  ElevenLabs TTS with timestamps
+  agent/token.ts                    the Q&A agent's conversation token (fixture when FAKE_APIS=1)
   media/fal.ts
   runs/store.ts                     read/write runs/<lessonId>/
   fakes/                            fake Claude/ElevenLabs/fal for tests (FAKE_APIS=1)
@@ -249,7 +251,8 @@ sequenceDiagram
   - Budget: about 25 US dollars of fal credits per teammate. So it's one image per lesson plan, a saved cover is never regenerated, replay never calls fal, and tests use the fal fake.
 - **Files reach the browser through `GET /api/runs/<lessonId>/<file>`.** `runs/` is outside `public/`, and `next start` won't serve files added after the build.
   - The player fetches each step's audio as a blob and plays it from a `blob:` URL. That keeps seeking reliable without HTTP Range support in the route.
-  - The route only serves names matching `^[a-z0-9.-]+$` from inside the run folder.
+  - The route only serves names matching `^[a-z0-9][a-z0-9.-]{0,99}$` (so never `.` or `..`) with a known extension (`.json`, `.mp3`, `.png`, `.jpg`, `.jpeg`, `.webp`) from inside the run folder, and never a symlink or a folder. A bad `lessonId` or file name → 400; a file that isn't there → 404.
+  - `lib/runs/store.ts` writes every file atomically (a temporary file, then a rename, or a hard link for step versions so they never replace a file), so a reader never sees half a file. A new step version is saved with `saveStepVersion`: its audio `step-<n>.v<k>.mp3` first (creating it claims version k; if k is taken, it tries the next version, and gives up with an error after 100 tries), then `step-<n>.v<k>.json`, so an older version is never overwritten and a listed version always has its audio.
 
 ### 5.2 Cue markers become times (`lib/narration/cues.ts`, pure)
 
@@ -264,6 +267,7 @@ sequenceDiagram
 | A marker mid-word (`ro[[c]]w`) | its time is the start of `w` |
 | Two markers back to back | both get the same time |
 | A marker at the end | the last character's end time |
+| A cue named like an `Object.prototype` key (`constructor`) | it gets its own time, like any other cue |
 | Unicode (é, emoji, CJK) in the narration | the walk matches characters one by one, so the cues still land correctly |
 | The alignment skips or adds characters (normalisation) | the walk resyncs on the next matching character, and the cue takes the nearest following time |
 | `alignment` is null, or the walk can't match at all | error `no alignment`: the step fails (section 6.2), logged with the text and response |
@@ -287,14 +291,16 @@ sceneAt(objects: BoardObject[], timed: { action; startMs; durationMs }[], tMs: n
   - `show`, `highlight`, `unhighlight` and `write` take effect when they start. `hide` takes effect when it ends, so the renderer can fade it out using progress.
   - `move` slides in a straight line from where its target was when the move started to where its anchor was then. Its path doesn't change if the anchor moves later.
   - An action is in `active` while `startMs <= tMs < startMs + durationMs`. A 0 ms action is complete at its start and never active.
+  - An action that changes nothing is never in `active`: one that, once complete, would leave the board as it would be with every earlier action complete (for a `hide`, which takes effect when it ends: with the earlier actions as they are then, so a shorter `hide` during a longer one is active). For example a `show` of a visible object, a `highlight` in the colour its cells already have, or a `write` of the value already there. So the renderer doesn't fade in an object, value or highlight that is already there. The check is per action, not per cell: a highlight that changes some of its cells is active, and fades in all of them, including those that already had its colour.
+  - A `show` that starts while a `hide` of the same object is in progress takes over with no jump: the renderer shows the larger of the two opacities, so the object keeps fading until the show overtakes the hide, then fades in. Once the show ends, the hide leaves `active` (the show applies after it, so the object stays visible). A `hide` during a `show` mirrors this with the smaller opacity: the object keeps fading in until the hide overtakes the show.
   - `unhighlight` with a `color` clears only that colour. Without one, it clears every colour.
   - A whole-matrix highlight sets every cell in `cellHighlight`. A matrix's own `highlight` stays `null`.
   - Actions on unknown or out-of-range targets are ignored and never listed in `active`. `validate.ts` rejects them first.
   - When a `hide` on a moved part ends, its copy leaves `copies`. Anchors naming that part then resolve to the source cells, and a later `move` of it makes a fresh copy.
   - A copy is independent of its matrix once made: hiding or moving the whole matrix leaves its copies where they are.
-  - `player/sceneAt.ts` also exports `timeline(actions, cueTimes)`, which builds `timed` in lesson mode, and `resolveAnchor(board, anchor)`, which gives the renderer arrow ends.
+  - `player/sceneAt.ts` also exports `timeline(actions, cueTimes)`, which builds `timed` in lesson mode, and `resolveAnchor(board, anchor)`, which gives the renderer arrow ends. The renderer reuses its target helpers (`partKey`, `isPart`, `coversCell`, `highlightColor`) rather than copying them.
 - Back, Replay and scrubbing are just seeks on the audio element. There's no animation state to undo.
-- `Whiteboard.tsx` renders `BoardState` as SVG on each animation frame. It interpolates from each action's progress, and exposes state as `data-*` attributes for tests.
+- `Whiteboard.tsx` renders `BoardState` as SVG on each animation frame. Positions (moves included) come from `sceneAt`; the renderer only fades shows, hides, highlights and writes by each action's progress, and exposes state as `data-*` attributes for tests.
 - Motion is only used for UI chrome, such as panels and buttons, not for board objects, so the board always matches the clock.
 
 ### 5.4 Adaptation
@@ -431,6 +437,9 @@ The developer gets the full error in the server log, tagged with the route, less
 | Player | Browser blocks autoplay | "Press play to start." | Play button |
 | Player | Audio fails to load or decode | "Couldn't play the audio. Retry?" | Retry |
 | Route | `lessonId` doesn't match `^[a-z0-9-]{1,40}$`, or `n` isn't a step in the plan | 400 "No such lesson or step." | Back to upload |
+| Run file | `GET /api/runs/<lessonId>/<file>` with a bad `lessonId` or file name, an extension it doesn't serve, a symlink, a folder or another non-regular file | 400 "No such lesson or file." (a symlink, folder or other non-regular file is logged; a bad name isn't, as any URL can be typed) | The page shows its own error for the step or image |
+| Run file | The file isn't in the run folder | 404 `No saved file "<file>" in lesson "<lessonId>".` | As above |
+| Run file | Reading the file fails for another reason | 500 "Couldn't read this file." (the error is logged) | As above |
 | Ask | Token route fails, or the agent can't connect | "Questions are unavailable right now." | The lesson carries on; close the panel |
 | Ask | Session drops mid-question | "Q&A ended unexpectedly." | Ask again |
 | Ask | Microphone permission denied | "Mic is off. Type your question; the answer will appear as text." | Typed input (text-only session) |
@@ -442,7 +451,8 @@ The developer gets the full error in the server log, tagged with the route, less
 
 - **Starting a session:** the learner presses **Ask**, or presses the `A` key (Space stays play/pause).
   1. The player moves to `asking` and pauses the narration. Ask also works while a step is loading (section 6.1).
-  2. The browser calls `GET /api/agent/token`, and the server gets a WebRTC conversation token with `ELEVENLABS_API_KEY`.
+  2. The browser calls `GET /api/agent/token`, and the server gets a WebRTC conversation token with `ELEVENLABS_API_KEY` (ElevenLabs' `GET /v1/convai/conversation/token?agent_id=…`).
+     - It answers `{ conversationToken }`, never cached. On failure it answers `{ error: "Questions are unavailable right now." }`: 503 when Q&A isn't set up (no `ELEVENLABS_AGENT_ID`, or a replay run), 502 when ElevenLabs fails or times out (`config.agentToken.timeoutMs`). Anything else is a 500. The reason goes to the server log, never the key.
   3. `startSession({ conversationToken })` starts the session through `qa/conversation.ts`.
      - That adapter is the only file that imports `@elevenlabs/react`, which also needs a `ConversationProvider` around the lesson page.
      - With `NEXT_PUBLIC_FAKE_APIS=1` the adapter is a scripted fake: it replays canned agent turns and calls the tool handlers directly, so Playwright can test Q&A without a network.
@@ -489,7 +499,7 @@ The developer gets the full error in the server log, tagged with the route, less
 | `ELEVENLABS_VOICE_ID` | narration and the agent (one voice) |
 | `ELEVENLABS_AGENT_ID` | the token route (from the CLI's tracking file) |
 | `FAL_KEY` | `lib/media/fal.ts` (optional: without it, every image is hidden) |
-| `FAKE_APIS` | `1` swaps all three providers for `lib/fakes/` (tests and CI) |
+| `FAKE_APIS` | `1` swaps all three providers for `lib/fakes/` (tests and CI), and lets a production server serve the dev-only `/dev/board` (unless `REPLAY_RUN` is set, which wins) |
 | `NEXT_PUBLIC_FAKE_APIS` | `1` swaps the browser's agent conversation for the scripted fake. It's inlined at build time, so CI builds with it set. |
 | `REPLAY_RUN` | serve a saved run from `runs/` |
 
@@ -502,9 +512,11 @@ The developer gets the full error in the server log, tagged with the route, less
 | `REPLAY_RUN=<id>` | the run folder exists | all keys (Q&A is off) |
 | `next build` | none: env isn't checked at build | all keys |
 
-- `lib/env.ts` validates the env once, at server start, from `instrumentation.ts` `register()`, with zod. Code behind it trusts the values. A missing required key stops the server, and the error names the key.
+- `lib/env.ts` validates the env once, at server start, from `instrumentation.ts` `register()`, with zod. Code behind it trusts the values. A missing required key stops the server (it logs an error naming the key and exits with code 1, since Next would otherwise serve 500s).
+- The mode is picked in this order: `REPLAY_RUN` set → replay; else `FAKE_APIS=1` → fake; else real. An empty value (`KEY=`, as copied from `.env.example`) counts as unset.
+- A build made with `NEXT_PUBLIC_FAKE_APIS=1` (for example, left over from a local `npm run e2e`) refuses to start in real mode, since the browser would use the fake agent: run `npm run build` again first. `next.config.ts` bakes that build-time value in as `BUILT_WITH_BROWSER_FAKES`, so the check never depends on the shell `npm start` runs in. The reverse, `FAKE_APIS=1` on a normal build, starts with a warning.
 - Keys are only read in `lib/` and the API routes, which import `"server-only"`. The browser never sees a key.
-- All of these live in `lib/config.ts`: model ids, effort per request type, `maxNarrationChars`, `maxPdfMb`, `coverTimeoutMs`, `maxBoardObjects` (the cap on the board a sketch request sends, section 8), the image cap per lesson (E1) and the `runs/` path.
+- All of these live in `lib/config.ts`: model ids, effort per request type, `maxNarrationChars`, `maxPdfMb`, `coverTimeoutMs`, `maxBoardObjects` (the cap on the board a sketch request sends, section 8), the image cap per lesson (E1), the agent token's URL, timeout and fixture (section 8), and the `runs/` path.
 
 ## 10. Testing: how we prove it works
 

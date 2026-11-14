@@ -13,7 +13,7 @@
 import type { FetchStep } from "@/player/stepLoader";
 import type { StepResponse } from "@/shared/lesson";
 import { m1, M1_CUE_TIMES } from "../board/scenes";
-import { first } from "../devOnly";
+import { first, type SearchParams } from "../query";
 
 export const FAKE_STEP_COUNT = 2;
 
@@ -42,8 +42,6 @@ export interface FakeOptions {
   debug: boolean;
 }
 
-type Params = { [key: string]: string | string[] | undefined };
-
 function oneOf<T extends string>(
   kinds: readonly T[],
   v: string | undefined,
@@ -52,7 +50,7 @@ function oneOf<T extends string>(
 }
 
 /** The page's query, checked once here: anything unknown gets the default. */
-export function parseFakeOptions(params: Params): FakeOptions {
+export function parseFakeOptions(params: SearchParams): FakeOptions {
   const fail = first(params.fail);
   const audio = first(params.audio);
   const delay = Number(first(params.delay) ?? 0);

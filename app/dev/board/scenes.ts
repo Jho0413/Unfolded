@@ -7,8 +7,9 @@ import { sceneAt, type TimedAction, timeline } from "@/player/sceneAt";
 /**
  * A fixed BoardState covering every matrix and text feature: row, column and
  * cell highlights in both colours, a whole-matrix highlight, text sizes, a
- * highlighted text, a hidden object, a show and a hide in progress, and a
- * copy of a row that carries its source cells' highlight.
+ * highlighted text, a hidden object, a show and a hide in progress, and
+ * copies of a row and of a single cell that carry their source cells'
+ * highlight.
  */
 export const FIXED: BoardState = {
   objects: [
@@ -124,7 +125,10 @@ export const FIXED: BoardState = {
       highlight: null,
     },
   ],
-  copies: [{ source: { id: "m", row: 1 }, x: 900, y: 560, visible: true }],
+  copies: [
+    { source: { id: "m", row: 1 }, x: 900, y: 560, visible: true },
+    { source: { id: "m", row: 2, col: 0 }, x: 1150, y: 560, visible: true },
+  ],
   active: [
     {
       action: { do: "hide", target: { id: "fading" }, durationMs: 400 },

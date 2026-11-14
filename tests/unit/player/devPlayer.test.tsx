@@ -1,6 +1,7 @@
 // The dev-only /dev/player page and its fake lesson (ROADMAP P5): the query
 // it accepts, the fake step requests, the silent audio, and that page and
-// audio route are not reachable in a production server unless FAKE_APIS=1.
+// audio route are not reachable in a production server unless in fake mode
+// (app/dev/devOnly.ts; the gate's modes are in tests/unit/app/dev-board-gate.test.tsx).
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GET as audioRoute } from "@/app/dev/player/audio/route";
 import {
@@ -12,9 +13,35 @@ import {
 } from "@/app/dev/player/fakeLesson";
 import DevPlayerPage from "@/app/dev/player/page";
 import { silentWav } from "@/app/dev/player/silentWav";
+import { resetEnvForTests } from "@/lib/env";
 import { StepResponse } from "@/shared/lesson";
 
-afterEach(() => vi.unstubAllEnvs());
+// connection() resolves once a request arrives (outside Next there is none).
+vi.mock("next/server", () => ({ connection: () => Promise.resolve() }));
+
+/** A production server in real mode: keys set, no fakes (lib/env.ts). */
+function realMode() {
+  vi.stubEnv("NODE_ENV", "production");
+  vi.stubEnv("FAKE_APIS", undefined);
+  vi.stubEnv("NEXT_PUBLIC_FAKE_APIS", undefined);
+  vi.stubEnv("BUILT_WITH_BROWSER_FAKES", undefined);
+  vi.stubEnv("REPLAY_RUN", undefined);
+  vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+  vi.stubEnv("ELEVENLABS_API_KEY", "test-key");
+  vi.stubEnv("ELEVENLABS_VOICE_ID", "test-voice");
+}
+
+/** As e2e and CI run the production build. */
+function fakeMode() {
+  realMode();
+  vi.stubEnv("FAKE_APIS", "1");
+  vi.stubEnv("BUILT_WITH_BROWSER_FAKES", "1");
+}
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  resetEnvForTests();
+});
 
 const DEFAULTS: FakeOptions = {
   fail: "none",
@@ -102,39 +129,40 @@ describe("/dev/player/audio", () => {
     audioRoute(new Request(`http://localhost/dev/player/audio?kind=${kind}`));
 
   it("ok: the silent track", async () => {
-    const res = get("ok");
+    const res = await get("ok");
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toBe("audio/wav");
     const bytes = new Uint8Array(await res.arrayBuffer());
     expect(bytes).toEqual(silentWav(FAKE_AUDIO_MS));
   });
   it("broken: 200, but not audio", async () => {
-    const res = get("broken");
+    const res = await get("broken");
     expect(res.status).toBe(200);
     expect(await res.text()).not.toMatch(/^RIFF/);
   });
-  it("missing: 404", () => {
-    expect(get("missing").status).toBe(404);
+  it("missing: 404", async () => {
+    expect((await get("missing")).status).toBe(404);
   });
-  it("404s in production without FAKE_APIS", () => {
-    vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("FAKE_APIS", "");
-    expect(get("ok").status).toBe(404);
+  it("404s in production without FAKE_APIS", async () => {
+    realMode();
+    expect((await get("ok")).status).toBe(404);
+  });
+  it("serves in production in fake mode", async () => {
+    fakeMode();
+    expect((await get("ok")).status).toBe(200);
   });
 });
 
 describe("/dev/player gate", () => {
   const props = { searchParams: Promise.resolve({}) };
   it("404s in production without FAKE_APIS", async () => {
-    vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("FAKE_APIS", "");
+    realMode();
     await expect(DevPlayerPage(props)).rejects.toThrow(
       /NEXT_HTTP_ERROR_FALLBACK;404/,
     );
   });
   it("renders in production with FAKE_APIS=1", async () => {
-    vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("FAKE_APIS", "1");
+    fakeMode();
     await expect(DevPlayerPage(props)).resolves.toBeTruthy();
   });
 });
