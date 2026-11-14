@@ -552,6 +552,9 @@ describe("POST /api/lessons: the cover (L4)", () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     vi.stubEnv("FAKE_APIS", undefined);
     vi.stubEnv("REPLAY_RUN", undefined);
+    // CI builds with browser fakes; real mode refuses to start on such a build.
+    vi.stubEnv("NEXT_PUBLIC_FAKE_APIS", undefined);
+    vi.stubEnv("BUILT_WITH_BROWSER_FAKES", undefined);
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     vi.stubEnv("ELEVENLABS_API_KEY", "test-key");
     vi.stubEnv("ELEVENLABS_VOICE_ID", "test-voice");
