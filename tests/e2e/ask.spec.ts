@@ -476,11 +476,11 @@ test.describe("Ask robustness (issue #84)", () => {
     await expect(state(page)).toHaveAttribute("data-state", "paused");
   });
 
-  test(`the session start rejects, and the websocket fails too: "${ASK.unavailable}"`, async ({
+  test(`WebRTC can't connect, and the websocket can't either: "${ASK.unavailable}"`, async ({
     page,
   }) => {
     await page.route("**/api/agent/token", (route) =>
-      route.fulfill({ json: { conversationToken: "fake-start-reject" } }),
+      route.fulfill({ json: { conversationToken: "fake-connect-fail" } }),
     );
     await page.route("**/api/agent/signed-url", (route) =>
       route.fulfill({ json: { signedUrl: "wss://fake-connect-fail" } }),
@@ -497,6 +497,30 @@ test.describe("Ask robustness (issue #84)", () => {
       "webrtc",
       "websocket",
     ]);
+  });
+
+  test("WebRTC hangs: at the timeout the websocket connects, and a typed question is answered", async ({
+    page,
+  }) => {
+    test.slow(); // waits out ATTEMPT_TIMEOUT_MS (8 s)
+    await page.route("**/api/agent/token", (route) =>
+      route.fulfill({ json: { conversationToken: "fake-connect-hang" } }),
+    );
+    await open(page);
+    await toPlaying(page);
+    await page.getByRole("button", { name: "Ask", exact: true }).click();
+    const panel = page.getByTestId("ask-panel");
+    await expect(panel).toHaveAttribute("data-phase", "connected", {
+      timeout: 15_000,
+    });
+    await expect(panel).toHaveAttribute("data-transport", "websocket");
+    expect(await page.evaluate(() => window.__qaFake?.starts)).toEqual([
+      "webrtc",
+      "websocket",
+    ]);
+    await typeQuestion(page, "What is this?");
+    await expect(transcriptAgent(page)).toContainText("row times a column");
+    await expect(notice(page)).toHaveCount(0);
   });
 
   test("the token route fails: the websocket with the server's (fake) signed URL connects", async ({

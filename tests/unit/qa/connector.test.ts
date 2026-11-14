@@ -143,6 +143,74 @@ describe("deciding the session (typed questions never wait on the mic)", () => {
     c.connected();
     expect(c.current).toMatchObject({ phase: "connected", textOnly: false });
   });
+
+  it("the token is fetched while the mic prompt is still open", async () => {
+    const mic = deferred<boolean>();
+    const { c, deps } = setup({ requestMicrophone: () => mic.promise });
+    c.open();
+    await settle();
+    expect(deps.fetchToken).toHaveBeenCalledOnce();
+    expect(c.current.phase).toBe("waiting");
+  });
+
+  it("useMic asks for the mic first; refused, the working session stays", async () => {
+    const mic = vi.fn(async () => true);
+    const { c, conversation, starts } = setup({ requestMicrophone: mic });
+    c.open();
+    c.typing();
+    await settle();
+    c.connected();
+    mic.mockResolvedValueOnce(false);
+    conversation.end.mockClear();
+    await c.useMic();
+    expect(conversation.end).not.toHaveBeenCalled();
+    expect(starts).toHaveLength(1);
+    expect(c.current).toMatchObject({
+      phase: "connected",
+      micDenied: true,
+      notice: CONNECTOR_MESSAGES.micOff,
+    });
+  });
+
+  it("Use the mic, and voice fails on both transports: back to a text session, with a message", async () => {
+    const { c, starts } = setup();
+    c.open();
+    c.typing();
+    await settle();
+    c.connected();
+    await c.useMic();
+    await settle();
+    c.error("voice blocked over WebRTC");
+    await settle();
+    c.error("voice blocked over the websocket too");
+    await settle();
+    expect(starts.map((s) => [s.transport, s.textOnly])).toEqual([
+      ["webrtc", true],
+      ["webrtc", false],
+      ["websocket", false],
+      ["webrtc", true],
+    ]);
+    expect(c.current).toMatchObject({
+      phase: "connecting",
+      textOnly: true,
+      notice: CONNECTOR_MESSAGES.voiceFailed,
+    });
+    c.connected();
+    expect(c.current).toMatchObject({ phase: "connected", textOnly: true });
+  });
+
+  it("a mic refused after typing decided text-only is still recorded", async () => {
+    const mic = deferred<boolean>();
+    const { c } = setup({ requestMicrophone: () => mic.promise });
+    c.open();
+    c.typing();
+    await settle();
+    c.connected();
+    mic.resolve(false);
+    await settle();
+    expect(c.current.micDenied).toBe(true);
+    expect(c.current.phase).toBe("connected");
+  });
 });
 
 describe("no session after the panel gave up (the timeout race)", () => {
@@ -193,6 +261,25 @@ describe("no session after the panel gave up (the timeout race)", () => {
     c.open();
     await settle();
     expect(starts).toEqual([]);
+    expect(c.current).toMatchObject({
+      phase: "failed",
+      notice: CONNECTOR_MESSAGES.unavailable,
+    });
+  });
+
+  it("a hung token route still ends: the attempt timer covers the credentials", async () => {
+    const { c, deps } = setup({
+      fetchToken: vi.fn(() => new Promise<string | null>(() => {})),
+      fetchSignedUrl: vi.fn(() => new Promise<string | null>(() => {})),
+    });
+    c.open();
+    c.typing();
+    await settle();
+    await vi.advanceTimersByTimeAsync(ATTEMPT_TIMEOUT_MS);
+    await settle();
+    expect(deps.fetchSignedUrl).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(ATTEMPT_TIMEOUT_MS);
+    await settle();
     expect(c.current).toMatchObject({
       phase: "failed",
       notice: CONNECTOR_MESSAGES.unavailable,
@@ -334,58 +421,19 @@ describe("WebRTC blocked: the websocket fallback", () => {
     c.connected();
     expect(sent).toEqual([]);
   });
-});
 
-describe("review fixes", () => {
-  it("the token is fetched while the mic prompt is still open", async () => {
-    const mic = deferred<boolean>();
-    const { c, deps } = setup({ requestMicrophone: () => mic.promise });
-    c.open();
-    await settle();
-    expect(deps.fetchToken).toHaveBeenCalledOnce();
-    expect(c.current.phase).toBe("waiting");
-  });
-
-  it("a hung token route still ends: the attempt timer covers the credentials", async () => {
-    const { c, deps } = setup({
-      fetchToken: vi.fn(() => new Promise<string | null>(() => {})),
-      fetchSignedUrl: vi.fn(() => new Promise<string | null>(() => {})),
-    });
-    c.open();
-    c.typing();
-    await settle();
-    await vi.advanceTimersByTimeAsync(ATTEMPT_TIMEOUT_MS);
-    await settle();
-    expect(deps.fetchSignedUrl).toHaveBeenCalledOnce();
-    await vi.advanceTimersByTimeAsync(ATTEMPT_TIMEOUT_MS);
-    await settle();
-    expect(c.current).toMatchObject({
-      phase: "failed",
-      notice: CONNECTOR_MESSAGES.unavailable,
-    });
-  });
-
-  it("late callbacks from the abandoned WebRTC attempt don't touch the websocket attempt", async () => {
-    const webrtcStart = deferred<void>();
+  it("WebRTC hangs: at the timeout the websocket starts at once (no wait on the hung start) and connects", async () => {
     const { c, starts, conversation } = setup();
     conversation.start.mockImplementationOnce((o: StartOptions) => {
       starts.push(o);
-      return webrtcStart.promise;
+      return new Promise<void>(() => {}); // never settles
     });
     c.open();
     await settle();
-    await vi.advanceTimersByTimeAsync(ATTEMPT_TIMEOUT_MS); // WebRTC too slow
-    await settle();
-    // Waiting for the abandoned start to settle: its late connect and error are ignored.
-    expect(starts.map((s) => s.transport)).toEqual(["webrtc"]);
-    conversation.end.mockClear();
-    c.connected();
-    expect(conversation.end).toHaveBeenCalledOnce();
-    c.error("ICE failed");
-    expect(c.current.phase).toBe("connecting");
-    webrtcStart.resolve();
+    await vi.advanceTimersByTimeAsync(ATTEMPT_TIMEOUT_MS);
     await settle();
     expect(starts.map((s) => s.transport)).toEqual(["webrtc", "websocket"]);
+    expect(conversation.end).toHaveBeenCalled();
     c.connected();
     expect(c.current).toMatchObject({
       phase: "connected",
@@ -393,36 +441,22 @@ describe("review fixes", () => {
     });
   });
 
-  it("useMic asks for the mic first; refused, the working session stays", async () => {
-    const mic = vi.fn(async () => true);
-    const { c, conversation, starts } = setup({ requestMicrophone: mic });
-    c.open();
-    c.typing();
-    await settle();
-    c.connected();
-    mic.mockResolvedValueOnce(false);
-    conversation.end.mockClear();
-    await c.useMic();
-    expect(conversation.end).not.toHaveBeenCalled();
-    expect(starts).toHaveLength(1);
-    expect(c.current).toMatchObject({
-      phase: "connected",
-      micDenied: true,
-      notice: CONNECTOR_MESSAGES.micOff,
+  it("late callbacks from the abandoned WebRTC attempt don't touch the websocket attempt", async () => {
+    const { c, starts, conversation } = setup({
+      fetchSignedUrl: () => new Promise<string | null>(() => {}),
     });
-  });
-
-  it("a mic refused after typing decided text-only is still recorded", async () => {
-    const mic = deferred<boolean>();
-    const { c } = setup({ requestMicrophone: () => mic.promise });
     c.open();
-    c.typing();
     await settle();
+    c.error("ICE failed");
+    await settle();
+    // The websocket attempt is waiting for its signed URL: no attempt owns callbacks.
+    conversation.end.mockClear();
     c.connected();
-    mic.resolve(false);
-    await settle();
-    expect(c.current.micDenied).toBe(true);
-    expect(c.current.phase).toBe("connected");
+    expect(conversation.end).toHaveBeenCalledOnce();
+    c.error("late WebRTC error");
+    c.disconnected("error");
+    expect(c.current.phase).toBe("connecting");
+    expect(starts.map((s) => s.transport)).toEqual(["webrtc"]);
   });
 
   it("with the websocket preferred, a failing websocket falls back to WebRTC", async () => {

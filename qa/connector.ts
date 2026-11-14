@@ -7,15 +7,15 @@
 //   browser's mic prompt still unanswered) -> text-only at once. A text-only session can switch
 //   to voice later (useMic, a click, which is when the browser may ask).
 // - A question sent before the session connects is queued and sent after the context on connect.
+//   A switch to voice that fails on both transports goes back to a text session.
 // - Each attempt has a generation: after every await, a stale attempt (the panel closed,
 //   failed, or moved on) stops, so nothing starts after the panel has given up.
 // - WebRTC first (or the transport that last worked on this page). If it fails before
-//   connecting (no credentials, start rejects, an error or a disconnect arrives, or it takes
-//   longer than ATTEMPT_TIMEOUT_MS, credentials included), the other transport is tried once:
-//   a websocket with a signed URL when WebRTC is blocked on venue Wi-Fi. Before the second
-//   attempt starts, the first one's start is allowed to settle (up to SETTLE_MS) and ended, so
-//   the single-session SDK never has two starts in flight and a late callback from the first
-//   isn't taken for the second.
+//   connecting (no credentials, the start rejects, an error or a disconnect arrives, or it takes
+//   longer than ATTEMPT_TIMEOUT_MS, credentials included), the other transport is tried once, at
+//   once: a websocket with a signed URL when WebRTC is blocked on venue Wi-Fi. The conversation
+//   starts each session fresh (qa/sdkSessions.ts), so a hung WebRTC start can't block it, and
+//   the abandoned start's late callbacks are dropped there and ignored here.
 // - Failures are logged and shown with the section 7 messages: "Questions are unavailable right
 //   now." when no session starts, "Q&A ended unexpectedly." when a session drops or a question
 //   can't be sent.
@@ -30,13 +30,13 @@ import type {
 
 /** How long one connect attempt may take, credentials included, before it counts as failed. */
 export const ATTEMPT_TIMEOUT_MS = 8000;
-/** How long an abandoned attempt's start may take to settle before the next one starts. */
-export const SETTLE_MS = 2000;
 
 export const CONNECTOR_MESSAGES = {
   unavailable: QA_UNAVAILABLE,
   ended: MESSAGES.qaEnded,
   micOff: "Mic is off. Type your question; the answer will appear as text.",
+  voiceFailed:
+    "Voice couldn't connect. Keep typing; the answer will appear as text.",
 } as const;
 
 /**
@@ -82,6 +82,15 @@ export const INITIAL_CONNECTOR_STATE: ConnectorState = {
   notice: null,
 };
 
+/** One connect attempt; on failure before connecting, `canFallBack` tries the other transport. */
+type Attempt = {
+  transport: Transport;
+  textOnly: boolean;
+  canFallBack: boolean;
+  /** A text session switching to voice: if voice fails everywhere, back to text. */
+  micSwitch: boolean;
+};
+
 type Credentials =
   | { transport: "webrtc"; conversationToken: string }
   | { transport: "websocket"; signedUrl: string };
@@ -97,13 +106,7 @@ export class AskConnector {
   private decide: ((textOnly: boolean) => void) | null = null;
   private timer: unknown = null;
   /** The attempt whose callbacks count; null between attempts (callbacks are then stale). */
-  private attempt: {
-    transport: Transport;
-    textOnly: boolean;
-    canFallBack: boolean;
-  } | null = null;
-  /** The last start, so the next attempt can wait for it to settle. */
-  private lastStart: Promise<unknown> = Promise.resolve();
+  private attempt: Attempt | null = null;
   private preferred: Transport = "webrtc";
   private readonly setTimer: (fn: () => void, ms: number) => unknown;
   private readonly clearTimer: (handle: unknown) => void;
@@ -138,7 +141,11 @@ export class AskConnector {
       const textOnly = await decided;
       if (gen !== this.gen) return;
       this.set({ phase: "connecting", textOnly });
-      await this.tryTransport(gen, transport, textOnly, credentials, true);
+      await this.tryTransport(
+        gen,
+        { transport, textOnly, canFallBack: true, micSwitch: false },
+        credentials,
+      );
     })();
   }
 
@@ -165,10 +172,8 @@ export class AskConnector {
     const transport = this.preferred;
     await this.tryTransport(
       next,
-      transport,
-      false,
+      { transport, textOnly: false, canFallBack: true, micSwitch: true },
       this.credentials(transport).catch(() => null),
-      true,
     );
   }
 
@@ -284,18 +289,15 @@ export class AskConnector {
     return signedUrl === null ? null : { transport, signedUrl };
   }
 
-  /** One attempt; on failure before connecting, `canFallBack` tries the other transport once. */
   private async tryTransport(
     gen: number,
-    transport: Transport,
-    textOnly: boolean,
+    attempt: Attempt,
     credentials: Promise<Credentials | null>,
-    canFallBack: boolean,
   ): Promise<void> {
-    const fail = (why: string, err?: unknown) => {
+    const fail = (why: string) => {
       if (gen !== this.gen) return;
-      this.deps.log.warn(`[qa] ${transport} attempt failed: ${why}`, err ?? "");
-      this.attemptFailedFor(transport, textOnly, canFallBack);
+      this.deps.log.warn(`[qa] ${attempt.transport} attempt failed: ${why}`);
+      this.attemptFailedFor(attempt);
     };
     // The timer covers the credentials too: a hung token route still ends in a message.
     this.stopTimer();
@@ -306,21 +308,17 @@ export class AskConnector {
     const creds = await credentials;
     if (gen !== this.gen) return;
     if (creds === null) return fail("no credentials");
-    // Let an abandoned attempt's start settle first (bounded), and end it.
-    await Promise.race([
-      this.lastStart.catch(() => {}),
-      new Promise((r) => this.setTimer(() => r(undefined), SETTLE_MS)),
-    ]);
-    if (gen !== this.gen) return;
-    this.attempt = { transport, textOnly, canFallBack };
-    const options: StartOptions = { ...creds, textOnly };
-    const start = this.deps.conversation.start(options);
-    this.lastStart = start;
+    this.attempt = attempt;
+    const options: StartOptions = { ...creds, textOnly: attempt.textOnly };
     try {
-      await start;
+      // Resolves once connected; rejects when the connection fails (e.g. WebRTC blocked).
+      await this.deps.conversation.start(options);
     } catch (err) {
-      if (gen !== this.gen || this.attempt?.transport !== transport) return;
-      this.deps.log.error(`[qa] ${transport} session failed to start`, err);
+      if (gen !== this.gen) return;
+      this.deps.log.error(
+        `[qa] ${attempt.transport} session failed to start`,
+        err,
+      );
       fail("start rejected");
     }
   }
@@ -330,32 +328,33 @@ export class AskConnector {
     const attempt = this.attempt;
     if (attempt === null) return; // a stale callback from an abandoned attempt
     this.deps.log.warn(`[qa] ${attempt.transport} attempt failed: ${why}`);
-    this.attemptFailedFor(
-      attempt.transport,
-      attempt.textOnly,
-      attempt.canFallBack,
-    );
+    this.attemptFailedFor(attempt);
   }
 
-  private attemptFailedFor(
-    transport: Transport,
-    textOnly: boolean,
-    canFallBack: boolean,
-  ): void {
+  private attemptFailedFor(failed: Attempt): void {
     this.stopTimer();
     this.attempt = null;
     this.deps.conversation.end();
-    if (canFallBack) {
-      const next = other(transport);
-      this.deps.log.info(`[qa] trying the ${next} connection instead`);
-      // A fresh generation, so the abandoned attempt can't report back.
-      const gen = ++this.gen;
+    // A fresh generation each time, so the abandoned attempt can't report back.
+    if (failed.canFallBack) {
+      const transport = other(failed.transport);
+      this.deps.log.info(`[qa] trying the ${transport} connection instead`);
       void this.tryTransport(
-        gen,
-        next,
-        textOnly,
-        this.credentials(next).catch(() => null),
-        false,
+        ++this.gen,
+        { ...failed, transport, canFallBack: false },
+        this.credentials(transport).catch(() => null),
+      );
+      return;
+    }
+    if (failed.micSwitch) {
+      // Voice failed on both transports: back to typing, as before the click.
+      this.deps.log.info("[qa] voice failed; back to a text session");
+      const transport = this.preferred;
+      this.set({ textOnly: true, notice: CONNECTOR_MESSAGES.voiceFailed });
+      void this.tryTransport(
+        ++this.gen,
+        { transport, textOnly: true, canFallBack: true, micSwitch: false },
+        this.credentials(transport).catch(() => null),
       );
       return;
     }
