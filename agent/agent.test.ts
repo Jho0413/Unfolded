@@ -1,12 +1,13 @@
 // The agent config in agent/ (ARCHITECTURE.md section 8) must match the one
 // tool list in shared/tools.ts and use the one voice, ELEVENLABS_VOICE_ID.
 import { existsSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { CLIENT_TOOLS } from "@/shared/tools";
 
-const dir = path.dirname(new URL(import.meta.url).pathname);
+const dir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(dir, "..");
 const json = (file: string) =>
   JSON.parse(readFileSync(path.join(dir, file), "utf8"));

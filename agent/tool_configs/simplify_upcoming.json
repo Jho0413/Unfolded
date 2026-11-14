@@ -3,7 +3,6 @@
   "name": "simplify_upcoming",
   "description": "Ask for the upcoming steps to be made simpler.",
   "expects_response": false,
-  "response_timeout_secs": 10,
   "parameters": {
     "type": "object",
     "description": "Why to simplify",

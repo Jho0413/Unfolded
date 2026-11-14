@@ -3,7 +3,6 @@
   "name": "draw_scene",
   "description": "Sketch something on the board. Returns nothing: describe it aloud while it appears.",
   "expects_response": false,
-  "response_timeout_secs": 10,
   "parameters": {
     "type": "object",
     "description": "What to sketch",
