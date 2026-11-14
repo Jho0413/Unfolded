@@ -103,8 +103,8 @@ test.describe("fixed BoardState", () => {
     await expect(cell(row, 1, 2)).toHaveAttribute("data-value", "6");
     await expect(cell(row, 1, 0)).toHaveAttribute("data-highlight", "none");
     await expect(cell(row, 1, 2)).toHaveAttribute("data-highlight", "warn");
-    expect(await numberAttr(row, "data-x")).toBe(900);
-    expect(await numberAttr(row, "data-y")).toBe(560);
+    expect(await numberAttr(row, "data-cx")).toBe(900);
+    expect(await numberAttr(row, "data-cy")).toBe(560);
   });
 });
 
@@ -137,15 +137,32 @@ test.describe("demo-m1 through sceneAt", () => {
     await expect(cell(b, 0, 1)).toHaveAttribute("data-highlight", "none");
   });
 
+  test("a highlight in progress fades in with its progress", async ({
+    page,
+  }) => {
+    // col at 2000, 300 ms: halfway at 2150. row (1000) is complete.
+    await at(page, 2150);
+    const b = object(page, "b");
+    await expect(cell(b, 0, 0)).toHaveAttribute(
+      "data-highlight-opacity",
+      "0.5",
+    );
+    await expect(cell(b, 0, 1)).toHaveAttribute("data-highlight-opacity", "0");
+    await expect(cell(object(page, "a"), 0, 0)).toHaveAttribute(
+      "data-highlight-opacity",
+      "1",
+    );
+  });
+
   test("move: copies slide, interpolated from progress", async ({ page }) => {
     // slide starts at 3000 and lasts 800 ms: halfway at 3400.
     await at(page, 3400);
     const row = copy(page, "a:r0");
     const col = copy(page, "b:c0");
     // a row 0 centre (224, 184) -> (850, 184); b col 0 (472, 208) -> (1000, 208).
-    expect(await numberAttr(row, "data-x")).toBeCloseTo(537);
-    expect(await numberAttr(row, "data-y")).toBeCloseTo(184);
-    expect(await numberAttr(col, "data-x")).toBeCloseTo(736);
+    expect(await numberAttr(row, "data-cx")).toBeCloseTo(537);
+    expect(await numberAttr(row, "data-cy")).toBeCloseTo(184);
+    expect(await numberAttr(col, "data-cx")).toBeCloseTo(736);
     // The source matrix stays whole.
     await expect(object(page, "a").locator("[data-cell]")).toHaveCount(4);
   });
@@ -154,7 +171,7 @@ test.describe("demo-m1 through sceneAt", () => {
     await at(page, 4000);
     const row = copy(page, "a:r0");
     const col = copy(page, "b:c0");
-    expect(await numberAttr(row, "data-x")).toBe(850);
+    expect(await numberAttr(row, "data-cx")).toBe(850);
     await expect(cell(row, 0, 0)).toHaveAttribute("data-value", "1");
     await expect(cell(row, 0, 1)).toHaveAttribute("data-value", "2");
     await expect(cell(row, 0, 0)).toHaveAttribute("data-highlight", "accent");
@@ -187,16 +204,27 @@ test.describe("demo-m1 through sceneAt", () => {
   test("write replaces a text's text", async ({ page }) => {
     await at(page, 5900);
     await expect(object(page, "sum")).toHaveAttribute("data-text", "1·5 + 2·7");
+    // total at 6000, 300 ms: the new text fades in with progress.
+    await at(page, 6150);
+    await expect(object(page, "sum")).toHaveAttribute("data-text", "19");
+    await expect(object(page, "sum")).toHaveAttribute(
+      "data-value-opacity",
+      "0.5",
+    );
     await at(page, 6400);
     await expect(object(page, "sum")).toHaveAttribute("data-text", "19");
+    await expect(object(page, "sum")).toHaveAttribute(
+      "data-value-opacity",
+      "1",
+    );
   });
 
   test("move: a whole object slides to a cell", async ({ page }) => {
     // drop at 6500, 600 ms: sum (925, 420) -> c(0, 0) centre (1232, 184).
     await at(page, 6800);
     const sum = object(page, "sum");
-    expect(await numberAttr(sum, "data-x")).toBeCloseTo(1078.5);
-    expect(await numberAttr(sum, "data-y")).toBeCloseTo(302);
+    expect(await numberAttr(sum, "data-cx")).toBeCloseTo(1078.5);
+    expect(await numberAttr(sum, "data-cy")).toBeCloseTo(302);
   });
 
   test("done: written cell, copies fade out, then leave", async ({ page }) => {

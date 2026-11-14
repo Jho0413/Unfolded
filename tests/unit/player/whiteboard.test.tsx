@@ -52,8 +52,29 @@ describe("coversCell and cellProgress", () => {
       },
       progress: 0.4,
     };
-    expect(cellProgress([hl], "highlight", "m", 0, 1)).toBe(0.4);
-    expect(cellProgress([hl], "highlight", "m", 0, 0)).toBe(1);
+    expect(cellProgress([hl], "highlight", "m", 0, 1, "accent")).toBe(0.4);
+    expect(cellProgress([hl], "highlight", "m", 0, 0, "accent")).toBe(1);
+  });
+  it("doesn't borrow the progress of an overwritten highlight", () => {
+    const hl: ActiveAction = {
+      action: { do: "highlight", target: { id: "m" }, durationMs: 300 },
+      progress: 0.4,
+    };
+    // A 0 ms warn highlight since: the cell is warn, shown at once.
+    expect(cellProgress([hl], "highlight", "m", 0, 0, "warn")).toBe(1);
+  });
+  it("a write in progress fades its value in", () => {
+    const write: ActiveAction = {
+      action: {
+        do: "write",
+        target: { id: "m", row: 0, col: 0 },
+        value: "9",
+        durationMs: 300,
+      },
+      progress: 0.5,
+    };
+    expect(cellProgress([write], "write", "m", 0, 0, "9")).toBe(0.5);
+    expect(cellProgress([write], "write", "m", 0, 0, "other")).toBe(1);
   });
 });
 
@@ -66,6 +87,6 @@ describe("Whiteboard", () => {
     expect(html).toContain('viewBox="0 0 1600 900"');
     expect(html).toContain('data-object-id="m"');
     expect(html).toContain('data-copy-of="m:r1"');
-    expect(html).toContain('data-highlight="warn"');
+    expect(html).toMatch(/data-cell="1,2"[^>]*data-highlight="warn"/);
   });
 });
