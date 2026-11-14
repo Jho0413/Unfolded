@@ -195,11 +195,10 @@ describe("stripMarkers", () => {
 });
 
 describe("cue names that collide with Object.prototype", () => {
-  it("a cue named constructor gets a time", () => {
+  it("A cue named like an Object.prototype key (constructor): it gets its own time, like any other cue", () => {
     const narration = "Call the [[constructor]]constructor now";
     const { text } = stripMarkers(narration);
     const times = narrationCueTimes(narration, byCodePoint(text));
-    expect(Object.hasOwn(times, "constructor")).toBe(true);
     expect(times).toEqual({ constructor: at(9) });
   });
 

@@ -611,7 +611,7 @@ describe("sceneAt: robustness", () => {
     expect(timeline([action], {})).toEqual([]);
   });
 
-  it("timeline keeps an action cued on constructor once cues.ts gives it a time", () => {
+  it("timeline keeps an action cued on constructor when narrationCueTimes times it", () => {
     const action = {
       cue: "constructor",
       do: "show" as const,
@@ -619,6 +619,7 @@ describe("sceneAt: robustness", () => {
       durationMs: 400,
     };
     const text = "Call the constructor now";
+    // One alignment entry per code point, 100 ms apart: the cue is at "c", entry 9.
     const cueTimes = narrationCueTimes(
       "Call the [[constructor]]constructor now",
       {

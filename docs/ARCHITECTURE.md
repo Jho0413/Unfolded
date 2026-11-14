@@ -259,6 +259,7 @@ sequenceDiagram
 | A marker mid-word (`ro[[c]]w`) | its time is the start of `w` |
 | Two markers back to back | both get the same time |
 | A marker at the end | the last character's end time |
+| A cue named like an `Object.prototype` key (`constructor`) | it gets its own time, like any other cue |
 | Unicode (é, emoji, CJK) in the narration | the walk matches characters one by one, so the cues still land correctly |
 | The alignment skips or adds characters (normalisation) | the walk resyncs on the next matching character, and the cue takes the nearest following time |
 | `alignment` is null, or the walk can't match at all | error `no alignment`: the step fails (section 6.2), logged with the text and response |
