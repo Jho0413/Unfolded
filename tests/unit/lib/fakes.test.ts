@@ -20,6 +20,7 @@ describe("lib/fakes", () => {
   });
 
   it("readFixture() rejects a path outside the fixtures folder", async () => {
-    await expect(readFixture("../env.ts")).rejects.toThrow("bad fixture name");
+    for (const name of ["../env.ts", "..", "sub/x.json"])
+      await expect(readFixture(name)).rejects.toThrow("bad fixture name");
   });
 });

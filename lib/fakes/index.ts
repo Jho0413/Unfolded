@@ -13,7 +13,7 @@ export function fakesEnabled(): boolean {
 
 /** A recorded response from lib/fakes/fixtures/, parsed as JSON. */
 export async function readFixture<T = unknown>(name: string): Promise<T> {
-  if (path.basename(name) !== name)
+  if (!/^[\w-][\w.-]*\.json$/.test(name))
     throw new Error(`bad fixture name: ${name}`);
   const text = await readFile(path.join(config.fixturesDir, name), "utf8");
   return JSON.parse(text) as T;

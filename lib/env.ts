@@ -16,12 +16,14 @@ import { LessonId } from "@/shared/lesson";
 import { config } from "@/lib/config";
 
 // `KEY=` in .env.local (as copied from .env.example) means "not set", not "set to ''".
-const optional = z.preprocess(
-  (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
-  z.string().optional(),
-);
+const blankToUndefined = (v: unknown) => {
+  if (typeof v !== "string") return v;
+  const t = v.trim();
+  return t === "" ? undefined : t;
+};
+const optional = z.preprocess(blankToUndefined, z.string().optional());
 const flag = z.preprocess(
-  (v) => (v === "" ? undefined : v),
+  blankToUndefined,
   z.enum(["0", "1"], { error: 'must be "1" or "0"' }).optional(),
 );
 
@@ -71,7 +73,7 @@ export interface ParseEnvOptions {
   /**
    * The build inlined NEXT_PUBLIC_FAKE_APIS=1, so the browser runs the scripted fake
    * conversation. Such a build (e.g. left over from a local `npm run e2e`) must not start
-   * in real mode.
+   * in real mode. The reverse (FAKE_APIS=1 on a real build) only logs a warning.
    */
   builtWithBrowserFakes?: boolean;
 }
@@ -120,11 +122,19 @@ export function parseEnv(
     return { ...keys, mode: "replay", replayRun: id.data };
   }
 
-  if (raw.FAKE_APIS === "1") return { ...keys, mode: "fake" };
+  if (raw.FAKE_APIS === "1") {
+    if (!options.builtWithBrowserFakes) {
+      // Allowed (route tests, debugging), but Ask would try the real ElevenLabs agent.
+      console.warn(
+        "[env] FAKE_APIS=1, but this build's browser uses the real Q&A agent (built without NEXT_PUBLIC_FAKE_APIS=1).",
+      );
+    }
+    return { ...keys, mode: "fake" };
+  }
 
   if (options.builtWithBrowserFakes) {
     throw new EnvError(
-      "This build was made with NEXT_PUBLIC_FAKE_APIS=1 (e.g. by npm run e2e), so the browser would use the fake Q&A agent. Run `npm run build` again without it, or start with FAKE_APIS=1.",
+      "NEXT_PUBLIC_FAKE_APIS=1 without FAKE_APIS=1: the browser would use the fake Q&A agent with real providers. Rebuild without NEXT_PUBLIC_FAKE_APIS (npm run build; e.g. after npm run e2e), or set FAKE_APIS=1.",
     );
   }
   const missing = REAL_REQUIRED.filter((k) => keys[k] === undefined);
@@ -147,8 +157,11 @@ let cached: Env | undefined;
 /** Validates process.env and caches the result. Called once, from instrumentation.ts. */
 export function loadEnv(): Env {
   cached = parseEnv(process.env, {
-    // Written out in full so Next inlines the value this build was made with.
-    builtWithBrowserFakes: process.env.NEXT_PUBLIC_FAKE_APIS === "1",
+    // Inlined by next.config.ts `env` from NEXT_PUBLIC_FAKE_APIS at build time. Under
+    // `next dev` and Vitest it's read live, which matches what the browser gets there.
+    builtWithBrowserFakes:
+      (process.env.BUILT_WITH_BROWSER_FAKES ??
+        process.env.NEXT_PUBLIC_FAKE_APIS) === "1",
   });
   return cached;
 }

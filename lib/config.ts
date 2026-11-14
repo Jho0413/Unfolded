@@ -3,7 +3,7 @@
 import "server-only";
 import path from "node:path";
 
-/** Claude effort levels we use, per request type (ARCHITECTURE.md section 5). */
+/** Claude effort levels we use, per request type (ARCHITECTURE.md section 5.1). S3 may widen it. */
 export type Effort = "low" | "medium" | "high";
 
 export const config = {

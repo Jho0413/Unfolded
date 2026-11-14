@@ -68,7 +68,18 @@ describe("Real (npm start)", () => {
 
 describe("FAKE_APIS=1 (tests, CI)", () => {
   it("requires no keys", () => {
+    expect(
+      parseEnv({ FAKE_APIS: "1" }, { builtWithBrowserFakes: true }).mode,
+    ).toBe("fake");
+  });
+
+  it("on a build without browser fakes, starts but warns", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(parseEnv({ FAKE_APIS: "1" }).mode).toBe("fake");
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("real Q&A agent"),
+    );
+    warn.mockRestore();
   });
 
   it("runs on a build made with NEXT_PUBLIC_FAKE_APIS=1", () => {
@@ -79,6 +90,10 @@ describe("FAKE_APIS=1 (tests, CI)", () => {
 
   it('rejects a FAKE_APIS value other than "1" or "0"', () => {
     expect(() => parseEnv({ FAKE_APIS: "true" })).toThrow("FAKE_APIS");
+  });
+
+  it("trims whitespace around values", () => {
+    expect(parseEnv({ FAKE_APIS: "1 " }).mode).toBe("fake");
   });
 
   it("FAKE_APIS=0 is real mode", () => {
@@ -134,9 +149,16 @@ describe("next build", () => {
     vi.stubEnv("NEXT_PHASE", "phase-production-server");
     await expect(register()).rejects.toThrow("ANTHROPIC_API_KEY");
   });
+});
 
-  it("getEnv() validates lazily, so importing lib/env never reads the env", () => {
-    clearKeys();
+describe("getEnv", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    resetEnvForTests();
+  });
+
+  it("validates on first use when register() hasn't run", () => {
+    for (const key of ALL_KEYS) vi.stubEnv(key, undefined);
     vi.stubEnv("FAKE_APIS", "1");
     expect(getEnv().mode).toBe("fake");
   });
