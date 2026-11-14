@@ -36,8 +36,8 @@ export function timeline(
 ): TimedAction[] {
   const out: TimedAction[] = [];
   for (const action of actions) {
+    if (!Object.hasOwn(cueTimes, action.cue)) continue;
     const startMs = cueTimes[action.cue];
-    if (startMs === undefined) continue;
     out.push({ action, startMs, durationMs: action.durationMs });
   }
   return out;
@@ -289,7 +289,12 @@ function apply(
       if (!isPart(t)) state.visible = false;
       else {
         const copy = board.copyByKey.get(partKey(t));
-        if (copy) copy.visible = false; // a part that never moved: no change
+        // The copy is removed: the part anchors to its source cells again,
+        // and a later move makes a fresh copy. A part that never moved: no change.
+        if (copy) {
+          board.copies.splice(board.copies.indexOf(copy), 1);
+          board.copyByKey.delete(partKey(t));
+        }
       }
       break;
     case "highlight":
@@ -352,6 +357,28 @@ function planMove(board: Board, action: Action): MovePlan | undefined {
   return from && to ? { from, to } : undefined;
 }
 
+/**
+ * Whether an action names a real target (an object, or an in-range part of a
+ * matrix), so it belongs in `active`. Ignored actions never do.
+ */
+function targetsValid(
+  base: Board,
+  action: Action,
+  plan: MovePlan | undefined,
+): boolean {
+  const t = action.target;
+  if (!base.byId.has(t.id)) return false;
+  if (isPart(t) && !matrixPart(base, t)) return false;
+  if (action.do === "move") return plan !== undefined;
+  if (action.do === "show") return !isPart(t);
+  if (action.do === "write") {
+    const kind = base.byId.get(t.id)?.object.kind;
+    if (kind === "text") return !isPart(t);
+    return kind === "matrix" && t.row !== undefined && t.col !== undefined;
+  }
+  return true;
+}
+
 /** Applies `entries` (all started by `tMs`) to a copy of `base`, in order. */
 function run(
   base: Board,
@@ -408,7 +435,15 @@ export function sceneAt(
     objects: board.states,
     copies: board.copies,
     active: started
-      .filter((e) => e.durationMs > 0 && tMs < e.startMs + e.durationMs)
-      .map((e) => ({ action: e.action, progress: progressAt(e, tMs) })),
+      .filter(
+        (e, i) =>
+          e.durationMs > 0 &&
+          tMs < e.startMs + e.durationMs &&
+          targetsValid(base, e.action, plans[i]),
+      )
+      .map((e) => ({
+        action: structuredClone(e.action),
+        progress: progressAt(e, tMs),
+      })),
   };
 }

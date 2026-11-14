@@ -203,7 +203,8 @@ describe("sceneAt: visibility", () => {
       ],
       2000,
     );
-    expect(copy(s, "m", 0)?.visible).toBe(false);
+    expect(copy(s, "m", 0)).toBeUndefined();
+    expect(s.copies).toEqual([]);
     expect(obj(s, "m").visible).toBe(true);
   });
 });
@@ -434,6 +435,41 @@ describe("sceneAt: move", () => {
     expect(copy(s, "m", 0, 0)).toMatchObject({ x: 400, y: 300 });
   });
 
+  it("after a hide, the part anchors to its source again and a new move makes a fresh copy", () => {
+    const timed = [
+      at(0, {
+        do: "move",
+        target: { id: "m", row: 0 },
+        to: { x: 800, y: 300 },
+        durationMs: 0,
+      }),
+      at(100, { do: "hide", target: { id: "m", row: 0 }, durationMs: 0 }),
+      at(200, {
+        do: "move",
+        target: { id: "t" },
+        to: { id: "m", row: 0 },
+        durationMs: 0,
+      }),
+      at(300, {
+        do: "move",
+        target: { id: "m", row: 0 },
+        to: { x: 300, y: 600 },
+      }),
+    ];
+    const anchored = sceneAt(board(), timed, 250);
+    expect(anchored.copies).toEqual([]);
+    expect(obj(anchored, "t").object).toMatchObject({ x: 164, y: 124 });
+    const moving = sceneAt(board(), timed, 500);
+    expect(moving.copies).toEqual([
+      {
+        source: { id: "m", row: 0 },
+        x: (164 + 300) / 2,
+        y: (124 + 600) / 2,
+        visible: true,
+      },
+    ]);
+  });
+
   it("moving a whole object moves the object itself, not a copy", () => {
     const s = sceneAt(
       board(),
@@ -530,18 +566,48 @@ describe("sceneAt: write", () => {
 
 describe("sceneAt: robustness", () => {
   it("ignores actions on unknown or out-of-range targets", () => {
+    const timed = [
+      at(0, { do: "highlight", target: { id: "nope" } }),
+      at(0, { do: "highlight", target: { id: "m", row: 7 } }),
+      at(0, { do: "write", target: { id: "m", row: 0 }, value: "x" }),
+      at(0, { do: "move", target: { id: "m", col: 9 }, to: { x: 0, y: 0 } }),
+      at(0, { do: "move", target: { id: "t" }, to: { id: "nope" } }),
+      at(0, { do: "write", target: { id: "t", row: 0 }, value: "x" }),
+      at(0, { do: "show", target: { id: "h", row: 0 } }),
+    ];
+    // Mid-animation too: ignored actions are never listed as active.
+    for (const t of [200, 1000])
+      expect(sceneAt(board(), timed, t)).toEqual(sceneAt(board(), [], t));
+  });
+
+  it("a move on an arrow is ignored and never active", () => {
+    const objects: BoardObject[] = [
+      ...board(),
+      { kind: "arrow", id: "r", from: { id: "t" }, to: { x: 0, y: 0 } },
+    ];
     const s = sceneAt(
-      board(),
-      [
-        at(0, { do: "highlight", target: { id: "nope" } }),
-        at(0, { do: "highlight", target: { id: "m", row: 7 } }),
-        at(0, { do: "write", target: { id: "m", row: 0 }, value: "x" }),
-        at(0, { do: "move", target: { id: "m", col: 9 }, to: { x: 0, y: 0 } }),
-        at(0, { do: "move", target: { id: "t" }, to: { id: "nope" } }),
-      ],
-      1000,
+      objects,
+      [at(0, { do: "move", target: { id: "r" }, to: { x: 1, y: 1 } })],
+      200,
     );
-    expect(s).toEqual(sceneAt(board(), [], 1000));
+    expect(s.active).toEqual([]);
+  });
+
+  it("the active actions are copies: changing the output never changes the input", () => {
+    const timed = [at(0, { do: "highlight", target: { id: "t" } })];
+    const s = sceneAt(board(), timed, 100);
+    s.active[0].action.durationMs = 1;
+    expect(timed[0].action.durationMs).toBe(400);
+  });
+
+  it("timeline ignores cue names that only exist on Object.prototype", () => {
+    const action = {
+      cue: "constructor",
+      do: "show" as const,
+      target: { id: "h" },
+      durationMs: 400,
+    };
+    expect(timeline([action], {})).toEqual([]);
   });
 
   it("never mutates its inputs", () => {
@@ -658,7 +724,7 @@ describe("sceneAt: demo-m1.step.json", () => {
         ["", ""],
       ],
     });
-    expect(b.copies.map((c) => c.visible)).toEqual([false, false]);
+    expect(b.copies).toEqual([]);
     expect(b.active).toEqual([]);
   });
 });

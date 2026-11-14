@@ -284,7 +284,9 @@ sceneAt(objects: BoardObject[], timed: { action; startMs; durationMs }[], tMs: n
   - An action is in `active` while `startMs <= tMs < startMs + durationMs`. A 0 ms action is complete at its start and never active.
   - `unhighlight` with a `color` clears only that colour. Without one, it clears every colour.
   - A whole-matrix highlight sets every cell in `cellHighlight`. A matrix's own `highlight` stays `null`.
-  - Actions on unknown or out-of-range targets are ignored. `validate.ts` rejects them first.
+  - Actions on unknown or out-of-range targets are ignored and never listed in `active`. `validate.ts` rejects them first.
+  - When a `hide` on a moved part ends, its copy leaves `copies`. Anchors naming that part then resolve to the source cells, and a later `move` of it makes a fresh copy.
+  - A copy is independent of its matrix once made: hiding or moving the whole matrix leaves its copies where they are.
   - `player/sceneAt.ts` also exports `timeline(actions, cueTimes)`, which builds `timed` in lesson mode, and `resolveAnchor(board, anchor)`, which gives the renderer arrow ends.
 - Back, Replay and scrubbing are just seeks on the audio element. There's no animation state to undo.
 - `Whiteboard.tsx` renders `BoardState` as SVG on each animation frame. It interpolates from each action's progress, and exposes state as `data-*` attributes for tests.
