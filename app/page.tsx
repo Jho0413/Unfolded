@@ -1,8 +1,16 @@
-// The upload page (ROADMAP L1): a PDF in, the lesson's plan out, then into the lesson.
+// The upload page (ROADMAP L1): a PDF in, the lesson's plan out, then into the lesson. In
+// replay mode (REPLAY_RUN, ARCHITECTURE.md section 5.5) it goes straight to the saved lesson.
+import { redirect } from "next/navigation";
+import { connection } from "next/server";
+import { getEnv } from "@/lib/env";
 import { INK, PAGE_BG } from "@/player/primitives/style";
 import { UploadForm } from "./UploadForm";
 
-export default function Home() {
+export default async function Home() {
+  // Decided per request: a prerendered page would fix the build's env, not the server's.
+  await connection();
+  const env = getEnv();
+  if (env.mode === "replay") redirect(`/lesson/${env.replayRun}`);
   return (
     <main
       style={{
