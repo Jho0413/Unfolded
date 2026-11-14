@@ -5,13 +5,22 @@ import { BoardState, Sketch, Step } from "./scene";
 
 /** `lessonId` in routes and run folders (ARCHITECTURE.md section 7). */
 export const LESSON_ID_RE = /^[a-z0-9-]{1,40}$/;
-/** File names served from a run folder (ARCHITECTURE.md section 5.1). */
-export const RUN_FILE_RE = /^[a-z0-9.-]+$/;
+/**
+ * File names in a run folder (ARCHITECTURE.md section 5.1). The first character can't be a
+ * dot, so "." and ".." are never names, and the length stays well under the OS limit.
+ */
+export const RUN_FILE_RE = /^[a-z0-9][a-z0-9.-]{0,99}$/;
 
 export const LessonId = z.string().regex(LESSON_ID_RE);
 export type LessonId = z.infer<typeof LessonId>;
 
 export const RunFileName = z.string().regex(RUN_FILE_RE);
+
+/** True for `/api/runs/<lessonId>/<file>`, with both parts following the rules above. */
+export function isRunFileUrl(url: string): boolean {
+  const m = /^\/api\/runs\/([^/]+)\/([^/]+)$/.exec(url);
+  return m !== null && LESSON_ID_RE.test(m[1]) && RUN_FILE_RE.test(m[2]);
+}
 
 export const MAX_PLAN_STEPS = 12;
 
@@ -61,7 +70,12 @@ export const StepResponse = z.object({
   /** Step version `k` (step-<n>.v<k>.json), reported back in the "started" signal. */
   version: z.number().int().min(1),
   /** Served by GET /api/runs/<lessonId>/<file>, never a model-written URL. */
-  audioUrl: z.string().regex(/^\/api\/runs\/[a-z0-9-]{1,40}\/[a-z0-9.-]+$/),
+  audioUrl: z
+    .string()
+    .refine(
+      (url) => isRunFileUrl(url) && url.endsWith(".mp3"),
+      "not a /api/runs/<lessonId>/<file>.mp3 URL",
+    ),
   cueTimes: CueTimes,
 });
 export type StepResponse = z.infer<typeof StepResponse>;
