@@ -12,7 +12,7 @@
     "test": "vitest run",
     "e2e": "playwright test",
     "spike:s3": "tsx --conditions=react-server scripts/s3-spike.ts",
-    "agent:push": "sh -c \"set -a; . ./.env.local; set +a; cd agent && elevenlabs tools push && elevenlabs agents push\" && prettier --write agent",
+    "agent:push": "sh -c 'set -a; for f in .env .env.local; do [ -f \"$f\" ] && . \"./$f\"; done; set +a; AGENT_PUSH=1 vitest run agent/agent.test.ts && cd agent && elevenlabs tools push && elevenlabs agents push' && prettier --write agent",
     "make:m1": "tsx --conditions=react-server --env-file-if-exists=.env.local scripts/make-m1.ts"
   },
   "dependencies": {
