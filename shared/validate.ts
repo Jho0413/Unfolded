@@ -77,6 +77,8 @@ export const errors = {
   offCanvas: () => "off canvas",
   duplicateId: (id: string) => `duplicate id "${id}"`,
   narrationTooLong: () => "narration too long",
+  narrationEmpty: () => "narration empty",
+  cantAnchorToArrow: (id: string) => `can't anchor to "${id}"`,
 } as const;
 
 function schemaErrors(error: z.ZodError): string[] {
@@ -121,7 +123,7 @@ function objectOnCanvas(obj: BoardObject): boolean {
 
 function latexParses(tex: string): boolean {
   try {
-    katex.renderToString(tex, { throwOnError: true });
+    katex.renderToString(tex, { throwOnError: true, strict: "ignore" });
     return true;
   } catch {
     return false;
@@ -217,7 +219,13 @@ function checkObjects(
       out.push(errors.invalidLatex(obj.id));
     if (obj.kind === "arrow") {
       for (const end of [obj.from, obj.to])
-        if (!isPoint(end)) checkTarget(end, known, out);
+        if (!isPoint(end)) {
+          // An arrow's centre is the midpoint of its ends, so an arrow end
+          // naming an arrow (itself, or a cycle) has no position.
+          const target = checkTarget(end, known, out);
+          if (target?.kind === "arrow")
+            out.push(errors.cantAnchorToArrow(target.id));
+        }
     }
   }
 }
@@ -244,6 +252,7 @@ export function checkStep(step: Step, limits: StepLimits): string[] {
   }
   if (spoken.length > limits.maxNarrationChars)
     out.push(errors.narrationTooLong());
+  if (spoken.length === 0) out.push(errors.narrationEmpty());
 
   const objects = byId(step.objects);
   checkObjects(step.objects, objects, new Set(), out);

@@ -80,11 +80,11 @@ export type SketchRequest = z.infer<typeof SketchRequest>;
 export const SketchResponse = z.object({ sketch: Sketch });
 export type SketchResponse = z.infer<typeof SketchResponse>;
 
-/** POST /api/lessons/:id/signals body (ARCHITECTURE.md section 5.4). */
+/** POST /api/lessons/:id/signals body (ARCHITECTURE.md section 5.4). Strict, so a body never matches two kinds. */
 export const Signal = z.union([
-  z.object({ question: z.string().min(1) }),
-  z.object({ simplify: z.string().min(1) }),
-  z.object({
+  z.strictObject({ question: z.string().min(1) }),
+  z.strictObject({ simplify: z.string().min(1) }),
+  z.strictObject({
     started: z.number().int().min(0),
     version: z.number().int().min(1),
   }),

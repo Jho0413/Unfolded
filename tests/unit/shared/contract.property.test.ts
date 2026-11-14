@@ -1,7 +1,8 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { CLIENT_TOOL_NAMES, CLIENT_TOOLS } from "@/shared/tools";
-import { CELL, cellCentre, OBJECT_ID_RE, Step } from "@/shared/scene";
+import { z } from "zod";
+import { CELL, cellCentre, OBJECT_ID_RE, Sketch, Step } from "@/shared/scene";
 import { LessonPlan, LessonPlanOutput } from "@/shared/lesson";
 import { parseNarration } from "@/shared/validate";
 
@@ -100,6 +101,28 @@ describe("geometry", () => {
 });
 
 describe("schema details", () => {
+  it("the Step and Sketch JSON schemas use anyOf, never oneOf (structured output doesn't list oneOf)", () => {
+    for (const schema of [Step, Sketch]) {
+      const json = JSON.stringify(z.toJSONSchema(schema, { io: "input" }));
+      expect(json).not.toContain('"oneOf"');
+      expect(json).toContain('"anyOf"');
+    }
+  });
+
+  it("a cue must look like a marker name", () => {
+    const base = {
+      title: "t",
+      narration: "n",
+      objects: [{ kind: "text", id: "t", x: 1, y: 1, text: "" }],
+    };
+    expect(
+      Step.safeParse({
+        ...base,
+        actions: [{ cue: "Row 1", do: "show", target: { id: "t" } }],
+      }).success,
+    ).toBe(false);
+  });
+
   it("durationMs defaults to 400 and is capped at 3000", () => {
     const base = {
       title: "t",

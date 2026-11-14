@@ -108,7 +108,9 @@ export const ImageObject = z.object({
   hidden,
 });
 
-export const BoardObject = z.discriminatedUnion("kind", [
+// Plain z.union, not discriminatedUnion: zod emits `anyOf` for it, which
+// structured output supports (`oneOf` is not on its list).
+export const BoardObject = z.union([
   MatrixObject,
   TextObject,
   LatexObject,
@@ -159,7 +161,7 @@ const actionShapes = {
 
 /** Builds the action union with extra fields on every member (cue, atMs). */
 function actionUnion<E extends z.ZodRawShape>(extra: E) {
-  return z.discriminatedUnion("do", [
+  return z.union([
     z.object({ ...actionShapes.show, ...extra }),
     z.object({ ...actionShapes.hide, ...extra }),
     z.object({ ...actionShapes.highlight, ...extra }),
@@ -174,7 +176,9 @@ export type Action = z.infer<typeof Action>;
 export type ActionKind = Action["do"];
 
 /** An action fired when its cue's word is spoken. */
-export const CuedAction = actionUnion({ cue: z.string() });
+export const CuedAction = actionUnion({
+  cue: z.string().regex(OBJECT_ID_RE),
+});
 export type CuedAction = z.infer<typeof CuedAction>;
 
 /** An action fired at a time offset, with no narration (Q&A sketches). */

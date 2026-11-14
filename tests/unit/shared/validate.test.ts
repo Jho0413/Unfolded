@@ -448,12 +448,52 @@ describe("validate: ARCHITECTURE.md section 4 table", () => {
   });
 
   it("Narration longer than config.maxNarrationChars after the markers are stripped: rejected: narration too long", () => {
-    const s = stepWith((s) => (s.narration = "[[one]]abcde  [[two]]fgh"));
-    // Stripped: "abcde fgh" = 9 characters.
+    const s = stepWith((s) => (s.narration = "  [[one]]abcde  [[two]]fgh \n"));
+    // Stripped, trimmed and collapsed: "abcde fgh" = 9 characters.
     expectValid(validateStep(s, { maxNarrationChars: 9 }));
     expectErrors(
       validateStep(s, { maxNarrationChars: 8 }),
       "narration too long",
+    );
+  });
+
+  it("Narration with nothing left after the markers are stripped (only markers or spaces): rejected: narration empty", () => {
+    expectErrors(
+      validateStep(
+        stepWith((s) => (s.narration = " [[one]]  [[two]]\n ")),
+        limits,
+      ),
+      "narration empty",
+    );
+  });
+
+  it('An arrow end that names an arrow (itself, or arrows anchored to each other): rejected: can\'t anchor to "x"', () => {
+    expectErrors(
+      validateStep(
+        stepWith((s) =>
+          s.objects.push({
+            kind: "arrow",
+            id: "x",
+            from: { id: "x" },
+            to: { id: "m" },
+          }),
+        ),
+        limits,
+      ),
+      `can't anchor to "x"`,
+    );
+    expectErrors(
+      validateStep(
+        stepWith((s) =>
+          s.objects.push(
+            { kind: "arrow", id: "x", from: { id: "y" }, to: { id: "m" } },
+            { kind: "arrow", id: "y", from: { id: "x" }, to: { id: "m" } },
+          ),
+        ),
+        limits,
+      ),
+      `can't anchor to "x"`,
+      `can't anchor to "y"`,
     );
   });
 
@@ -498,6 +538,18 @@ describe("validate: ARCHITECTURE.md section 4 table", () => {
     );
     // With fresh: true the board is empty, so the id is free.
     expectValid(validateSketch(reuse, { board: lessonBoard, fresh: true }));
+    // A fresh sketch's own ids still resolve.
+    expectValid(
+      validateSketch(
+        {
+          ...reuse,
+          actions: [
+            { atMs: 0, do: "highlight", target: { id: "t" }, durationMs: 400 },
+          ],
+        },
+        { board: lessonBoard, fresh: true },
+      ),
+    );
   });
 });
 
