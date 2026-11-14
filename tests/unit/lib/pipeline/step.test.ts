@@ -7,7 +7,7 @@ import { config } from "@/lib/config";
 import { resetEnvForTests } from "@/lib/env";
 import { readFixture } from "@/lib/fakes";
 import { fakeClaude, fakeMessage } from "@/lib/fakes/claude";
-import { STEP_OUTPUT_FORMAT } from "@/lib/pipeline/outputFormat";
+import { STEP_OUTPUT_FORMAT, WireStep } from "@/lib/pipeline/outputFormat";
 import { STEP_SYSTEM_PROMPT } from "@/lib/pipeline/prompts/step";
 import {
   buildStepRequest,
@@ -258,10 +258,10 @@ describe("buildStepRequest", () => {
     );
   });
 
-  it("the step output format is the SDK's JSON schema for Step", () => {
+  it("the step output format is the SDK's JSON schema for the wire step, not the contract's Step", () => {
     expect(STEP_OUTPUT_FORMAT).toEqual({
       type: "json_schema",
-      schema: zodOutputFormat(Step).schema,
+      schema: zodOutputFormat(WireStep).schema,
     });
   });
 

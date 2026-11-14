@@ -1,15 +1,19 @@
-// Step generation (ARCHITECTURE.md sections 4, 5.1 and 6.2): Claude writes a Step with
-// structured output, validate.ts checks it, a rejection is retried once with the errors, and
+// Step generation (ARCHITECTURE.md sections 4, 5.1 and 6.2): Claude writes a step in the wire
+// format with structured output, it is converted to a Step and validate.ts checks it, a
+// rejection is retried once with the errors, and
 // a second rejection, a refusal, a cut-off or a provider error fails the step.
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import type { LessonPlanOutput, Signal } from "@/shared/lesson";
 import type { Step } from "@/shared/scene";
-import { validateStep, type ValidationResult } from "@/shared/validate";
+import type { ValidationResult } from "@/shared/validate";
 import { config } from "@/lib/config";
 import { getEnv } from "@/lib/env";
 import { fakeClaude } from "@/lib/fakes/claude";
-import { STEP_OUTPUT_FORMAT } from "@/lib/pipeline/outputFormat";
+import {
+  STEP_OUTPUT_FORMAT,
+  validateWireStep,
+} from "@/lib/pipeline/outputFormat";
 import {
   retryPrompt,
   STEP_SYSTEM_PROMPT,
@@ -180,7 +184,9 @@ async function attempt(
     };
   }
   return {
-    result: validateStep(json, { maxNarrationChars: config.maxNarrationChars }),
+    result: validateWireStep(json, {
+      maxNarrationChars: config.maxNarrationChars,
+    }),
     content: message.content,
   };
 }
