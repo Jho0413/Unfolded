@@ -1,7 +1,12 @@
 // Shared look and the progress-driven effects of the whiteboard primitives.
 // Everything here is a pure function of the BoardState, so the board always
 // matches the clock (ARCHITECTURE.md section 5.3): no animation state.
-import type { ActiveAction, HighlightColor, Target } from "@/shared/scene";
+import type {
+  Action,
+  ActiveAction,
+  HighlightColor,
+  Target,
+} from "@/shared/scene";
 
 /** Light theme (ARCHITECTURE.md section 1). */
 export const INK = "#1f2937";
@@ -60,8 +65,22 @@ export function fadeOpacity(
 }
 
 /**
- * Progress (0..1) of the latest in-progress action of kind `kind` on a
- * matrix cell, or 1 if none: a new highlight or written value fades in.
+ * Whether an in-progress action set what a cell or object shows now: a
+ * highlight in the colour it has, or a write of the value it has. Then it
+ * fades in with that action's progress, and never borrows the progress of an
+ * action whose result was since overwritten.
+ */
+function setsCurrent(action: Action, current: string | null): boolean {
+  if (action.do === "highlight") return (action.color ?? "accent") === current;
+  if (action.do === "write") return action.value === current;
+  return false;
+}
+
+/**
+ * Progress (0..1) of the latest in-progress action of kind `kind` on matrix
+ * cell (r, c) that set its `current` highlight or value, or 1 if none: a new
+ * highlight or written value fades in. An unhighlight takes effect at once
+ * (sceneAt clears the colour when it starts), so it doesn't fade out.
  */
 export function cellProgress(
   active: readonly ActiveAction[],
@@ -69,10 +88,16 @@ export function cellProgress(
   id: string,
   r: number,
   c: number,
+  current: string | null,
 ): number {
   let p = 1;
   for (const { action, progress } of active)
-    if (action.do === kind && coversCell(action.target, id, r, c)) p = progress;
+    if (
+      action.do === kind &&
+      coversCell(action.target, id, r, c) &&
+      setsCurrent(action, current)
+    )
+      p = progress;
   return p;
 }
 
@@ -81,6 +106,7 @@ export function objectProgress(
   active: readonly ActiveAction[],
   kind: "highlight" | "write",
   id: string,
+  current: string | null,
 ): number {
   let p = 1;
   for (const { action, progress } of active)
@@ -88,7 +114,8 @@ export function objectProgress(
       action.do === kind &&
       action.target.id === id &&
       action.target.row === undefined &&
-      action.target.col === undefined
+      action.target.col === undefined &&
+      setsCurrent(action, current)
     )
       p = progress;
   return p;

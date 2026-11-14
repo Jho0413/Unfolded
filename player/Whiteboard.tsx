@@ -5,7 +5,8 @@
 // Moves are already interpolated by sceneAt.
 import type { BoardState } from "@/shared/scene";
 import { CANVAS } from "@/shared/scene";
-import { Copy, Matrix, copyKey } from "./primitives/Matrix";
+import { partKey } from "./sceneAt";
+import { Copy, Matrix } from "./primitives/Matrix";
 import { Text } from "./primitives/Text";
 import { BOARD_BG, FONT } from "./primitives/style";
 
@@ -30,11 +31,21 @@ export function Whiteboard({
     >
       <rect width={CANVAS.w} height={CANVAS.h} fill={BOARD_BG} />
       {objects.map((s) => {
-        switch (s.object.kind) {
+        const object = s.object;
+        switch (object.kind) {
           case "matrix":
-            return <Matrix key={s.object.id} state={s} active={active} />;
+            return (
+              <Matrix
+                key={object.id}
+                matrix={object}
+                state={s}
+                active={active}
+              />
+            );
           case "text":
-            return <Text key={s.object.id} state={s} active={active} />;
+            return (
+              <Text key={object.id} text={object} state={s} active={active} />
+            );
           default:
             // latex, arrow and image arrive with P7 and E1.
             return null;
@@ -46,8 +57,9 @@ export function Whiteboard({
         if (source?.object.kind !== "matrix") return null;
         return (
           <Copy
-            key={copyKey(copy)}
+            key={partKey(copy.source)}
             copy={copy}
+            matrix={source.object}
             source={source}
             active={active}
           />

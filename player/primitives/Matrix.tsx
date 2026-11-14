@@ -8,6 +8,7 @@ import {
   type ObjectState,
   type PartCopy,
 } from "@/shared/scene";
+import { partKey } from "@/player/sceneAt";
 import {
   CELL_FONT,
   COPY_STROKE,
@@ -39,8 +40,15 @@ interface CellProps {
 /** One cell: highlight behind, value on top. Both fade in while being set. */
 function Cell({ matrix, r, c, x, y, highlight, active }: CellProps) {
   const value = matrix.rows[r][c];
-  const hlProgress = cellProgress(active, "highlight", matrix.id, r, c);
-  const writeProgress = cellProgress(active, "write", matrix.id, r, c);
+  const hlProgress = cellProgress(
+    active,
+    "highlight",
+    matrix.id,
+    r,
+    c,
+    highlight,
+  );
+  const writeProgress = cellProgress(active, "write", matrix.id, r, c, value);
   return (
     <g
       data-cell={`${r},${c}`}
@@ -48,6 +56,8 @@ function Cell({ matrix, r, c, x, y, highlight, active }: CellProps) {
       data-col={c}
       data-value={value}
       data-highlight={highlightAttr(highlight)}
+      data-highlight-opacity={opacityAttr(highlight ? hlProgress : 0)}
+      data-value-opacity={opacityAttr(writeProgress)}
     >
       {highlight && (
         <rect
@@ -106,13 +116,15 @@ function Brackets({
 }
 
 export function Matrix({
+  matrix,
   state,
   active,
 }: {
+  /** `state.object`, narrowed by the caller. */
+  matrix: MatrixObject;
   state: ObjectState;
   active: readonly ActiveAction[];
 }) {
-  const matrix = state.object as MatrixObject;
   const nRows = matrix.rows.length;
   const nCols = matrix.rows[0].length;
   const w = nCols * CELL.w;
@@ -124,8 +136,10 @@ export function Matrix({
       data-kind="matrix"
       data-visible={String(state.visible)}
       data-opacity={opacityAttr(opacity)}
-      data-x={matrix.x}
-      data-y={matrix.y}
+      data-left={matrix.x}
+      data-top={matrix.y}
+      data-cx={matrix.x + w / 2}
+      data-cy={matrix.y + h / 2}
       opacity={opacity}
       visibility={state.visible ? undefined : "hidden"}
     >
@@ -161,27 +175,24 @@ export function Matrix({
   );
 }
 
-/** "a:r0", "a:c1", "a:r0c1": the same part key sceneAt uses. */
-export function copyKey(copy: PartCopy): string {
-  const { id, row, col } = copy.source;
-  return `${id}:${row !== undefined ? `r${row}` : ""}${col !== undefined ? `c${col}` : ""}`;
-}
-
 /**
  * A moved copy of a matrix row, column or cell, centred on (copy.x, copy.y).
  * Its values and highlight come from the source cells as they are now, so a
- * later write or highlight on the part shows on the copy too.
+ * later write or highlight on the part shows on the copy too. Its cells keep
+ * their source indices: the first cell of a copy of row 1 is data-cell="1,0".
  */
 export function Copy({
   copy,
+  matrix,
   source,
   active,
 }: {
   copy: PartCopy;
+  /** The source matrix, `source.object` narrowed by the caller. */
+  matrix: MatrixObject;
   source: ObjectState;
   active: readonly ActiveAction[];
 }) {
-  const matrix = source.object as MatrixObject;
   const { row, col } = copy.source;
   const rows = row !== undefined ? [row] : matrix.rows.map((_, r) => r);
   const cols = col !== undefined ? [col] : matrix.rows[0].map((_, c) => c);
@@ -192,11 +203,11 @@ export function Copy({
   const opacity = copy.visible ? fadeOpacity(active, copy.source) : 0;
   return (
     <g
-      data-copy-of={copyKey(copy)}
+      data-copy-of={partKey(copy.source)}
       data-visible={String(copy.visible)}
       data-opacity={opacityAttr(opacity)}
-      data-x={copy.x}
-      data-y={copy.y}
+      data-cx={copy.x}
+      data-cy={copy.y}
       opacity={opacity}
       visibility={copy.visible ? undefined : "hidden"}
     >
