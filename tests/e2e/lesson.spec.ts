@@ -8,7 +8,7 @@ import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { MESSAGES } from "@/player/machine";
 import { NO_SUCH_LESSON, STEP_NOT_IN_RUN } from "@/shared/lesson";
-import { isRealRun, savedRun, savedStepTitle } from "./support/savedRun";
+import { savedRun, savedStepTitle } from "./support/savedRun";
 
 test.use({
   launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
@@ -138,10 +138,9 @@ test("?debug=1 shows the player's clock overlay", async ({ page }) => {
 });
 
 test("Real run stand-in: /lesson/demo-m1 plays", async ({ page }) => {
-  // A real run (from `npm run make:m1`) is used as it is and never removed; otherwise a
-  // fake one, marked as such, is saved for this test only.
-  const real = await isRealRun("demo-m1");
-  await using run = real ? null : await savedRun("demo-m1");
+  // The e2e runs folder never holds a real run (./support/runsDir.ts), so this is always the
+  // stand-in; the real run (C1's make:m1) is checked by hand.
+  await using run = await savedRun("demo-m1");
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/lesson/demo-m1");
   await expectState(page, "playing", 0);
@@ -150,7 +149,7 @@ test("Real run stand-in: /lesson/demo-m1 plays", async ({ page }) => {
     audio.currentTime = Math.min(audio.duration, 7.5);
   });
   await expectState(page, "paused", 0);
-  await screenshot(page, run === null ? "demo-m1-real" : "demo-m1-fake-run");
+  await screenshot(page, `${run.lessonId}-fake-run`);
 });
 
 test("the plan's cover shows as the page header", async ({ page }) => {

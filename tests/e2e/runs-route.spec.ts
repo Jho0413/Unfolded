@@ -5,8 +5,7 @@ import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { RUNS_ROUTE_ERRORS } from "@/app/api/runs/[lessonId]/[file]/errors";
 
-// The server's config.runsDir. lib/config.ts imports "server-only", so it can't be imported here.
-const RUNS_DIR = path.join(process.cwd(), "runs");
+import { RUNS_DIR } from "./support/runsDir";
 
 // fullyParallel runs these tests on several workers, each with its own before/after hooks,
 // so each test gets its own lesson folder.

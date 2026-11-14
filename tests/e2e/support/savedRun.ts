@@ -1,36 +1,14 @@
-// Saved lesson runs for the lesson page tests (ROADMAP P6): runs/<lessonId>/ written the way
-// lib/runs/store.ts lays it out (plan.json, step-<n>.v<k>.json and step-<n>.v<k>.mp3), from
+// Saved lesson runs for the lesson page tests (ROADMAP P6): runs-e2e/<lessonId>/ (./runsDir.ts),
+// never the real runs/, written the way lib/runs/store.ts lays it out (plan.json, step-<n>.v<k>.json and step-<n>.v<k>.mp3), from
 // the demo-m1 step fixture and the dev board's cue times, with a silent MP3 of known length.
 // No provider is called: this stands in for a run made by `npm run make:m1` (C1).
-import { access, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { M1_CUE_TIMES } from "@/app/dev/board/scenes";
 import demoM1 from "@/lib/fakes/fixtures/demo-m1.step.json";
 import type { LessonPlan, SavedStep } from "@/shared/lesson";
 import { Step } from "@/shared/scene";
-
-// The server's config.runsDir. lib/config.ts imports "server-only", so it can't be imported here.
-export const RUNS_DIR = path.join(process.cwd(), "runs");
-
-/**
- * Marks a run folder as written by these tests. A leading dot is never a run file name, so
- * the runs route can't serve it, and a fake folder left by an interrupted run is never taken
- * for a real one.
- */
-export const FAKE_RUN_MARKER = ".e2e-fake-run";
-
-/** True when runs/<lessonId>/ exists and these tests didn't write it. */
-export async function isRealRun(lessonId: string): Promise<boolean> {
-  const dir = path.join(RUNS_DIR, lessonId);
-  const exists = (p: string) =>
-    access(p).then(
-      () => true,
-      () => false,
-    );
-  return (
-    (await exists(dir)) && !(await exists(path.join(dir, FAKE_RUN_MARKER)))
-  );
-}
+import { RUNS_DIR } from "./runsDir";
 
 /** A 1x1 PNG, for a saved cover. */
 const PNG_1PX = Buffer.from(
@@ -85,7 +63,6 @@ export async function savedRun(
   // A folder left by an interrupted run must not change the results.
   await rm(dir, { recursive: true, force: true });
   await mkdir(dir, { recursive: true });
-  await writeFile(path.join(dir, FAKE_RUN_MARKER), "");
   if (cover?.saved) await writeFile(path.join(dir, cover.name), PNG_1PX);
   const plan: LessonPlan = {
     title: "Matrix multiplication",
