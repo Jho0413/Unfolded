@@ -7,6 +7,7 @@
 // The in-flight generations live in this server process, which is enough for the one local
 // server the app runs on (ARCHITECTURE.md section 1).
 import "server-only";
+import { ZodError } from "zod";
 import {
   LessonPlan,
   MAX_PLAN_STEPS,
@@ -19,6 +20,8 @@ import { generateStep } from "@/lib/pipeline/step";
 import {
   failureEvent,
   idleStepState,
+  type StepGenEvent,
+  type StepGenState,
   stepTransition,
 } from "@/lib/pipeline/stepGeneration";
 import {
@@ -59,12 +62,21 @@ const inFlight = new Map<string, Promise<StepOutcome>>();
 /** Steps whose last generation failed (section 6.2 `failed`), until one succeeds. */
 const failedSteps = new Set<string>();
 
+/** Tests only: forget every in-flight generation and remembered failure. */
+export function resetStepRequestsForTests(): void {
+  inFlight.clear();
+  failedSteps.clear();
+}
+
+const REQUEST: StepGenEvent = { type: "request" };
+
 /** Step n of a lesson, generating it if it isn't saved. The lessonId is already checked. */
 export function requestStep(lessonId: string, n: number): Promise<StepOutcome> {
   const key = `${lessonId}/${n}`;
   const running = inFlight.get(key);
   // generating x request: wait for this generation, never start a second one.
-  if (running !== undefined) return running;
+  if (running !== undefined && effectOf("generating", REQUEST) === "wait")
+    return running;
   // Registered before the first await, so a request arriving while this one reads the run
   // folder joins it instead of starting its own generation.
   const outcome = resolveStep(lessonId, n, key).finally(() =>
@@ -87,21 +99,36 @@ async function resolveStep(
 
     const saved = await latestSavedStep(lessonId, n);
     const state = idleStepState(saved !== undefined, failedSteps.has(key));
-    const next = stepTransition(state, { type: "request" });
-    if (next.outcome === "transition" && next.effect === "serve" && saved)
+    if (effectOf(state, REQUEST) === "serve" && saved)
       return { kind: "ok", response: saved };
     if (state === "failed")
       console.info(`${where}: generating again after a failure`);
 
     const response = await generate(lessonId, n, plan);
-    failedSteps.delete(key);
+    settle(key, { type: "saved" });
     return { kind: "ok", response };
   } catch (err) {
-    failedSteps.add(key);
     const event = failureEvent(err);
+    // A failure outside the table (a bug, a failed save) fails the step too.
+    if (event === undefined) failedSteps.add(key);
+    else settle(key, event);
     console.error(`${where}: failed (${event?.type ?? "internal"})`, err);
     return { kind: "failed", status: event === undefined ? 500 : 502 };
   }
+}
+
+/** What section 6.2 does for this cell; undefined for a cell that can't happen. */
+function effectOf(state: StepGenState, event: StepGenEvent) {
+  const next = stepTransition(state, event);
+  return next.outcome === "transition" ? next.effect : undefined;
+}
+
+/** Records where a generation's result leaves the step (section 6.2, generating x result). */
+function settle(key: string, event: StepGenEvent): void {
+  const next = stepTransition("generating", event);
+  if (next.outcome === "transition" && next.to === "failed")
+    failedSteps.add(key);
+  else failedSteps.delete(key);
 }
 
 /** Writes, narrates and saves step n as a new version. Throws when any part fails. */
@@ -129,18 +156,26 @@ async function generate(
   return stepResponse(lessonId, n, version, saved);
 }
 
-/** The newest saved version of step n as the route answers it, or undefined if none is saved. */
+/**
+ * The newest saved version of step n as the route answers it, or undefined if none is saved.
+ * A newest file that isn't a SavedStep (damaged, or saved under an older contract) is logged
+ * and counts as unsaved, so a request generates a new version instead of failing forever.
+ */
 async function latestSavedStep(
   lessonId: string,
   n: number,
 ): Promise<StepResponse | undefined> {
   const version = stepVersions(await listRunFiles(lessonId), n).at(-1);
   if (version === undefined) return undefined;
-  const saved = await readRunJson(
-    lessonId,
-    stepFileName(n, version),
-    SavedStep,
-  );
+  const file = stepFileName(n, version);
+  let saved: SavedStep | undefined;
+  try {
+    saved = await readRunJson(lessonId, file, SavedStep);
+  } catch (err) {
+    if (!(err instanceof ZodError || err instanceof SyntaxError)) throw err;
+    console.warn(`${TAG} ${lessonId}/${file} is not a saved step`, err);
+    return undefined;
+  }
   return saved && stepResponse(lessonId, n, version, saved);
 }
 

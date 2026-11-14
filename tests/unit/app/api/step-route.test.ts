@@ -14,6 +14,7 @@ import { STEP_ROUTE_ERRORS } from "@/app/api/lessons/[lessonId]/steps/[n]/errors
 import { config } from "@/lib/config";
 import { resetEnvForTests } from "@/lib/env";
 import { readFixture } from "@/lib/fakes";
+import { resetStepRequestsForTests } from "@/lib/pipeline/lessonStep";
 import {
   type FakeClaude,
   fakeClaude,
@@ -154,6 +155,8 @@ beforeEach(async () => {
   await writeRunJson(LESSON, PLAN_FILE, PLAN);
 });
 afterEach(async () => {
+  // Each test starts with no generation running and no failure remembered.
+  resetStepRequestsForTests();
   state.messages = undefined;
   state.ttsError = undefined;
   await rm(state.runs, { recursive: true, force: true });
@@ -359,6 +362,18 @@ describe("section 6.2: ready", () => {
     const second = await post(LESSON, "0");
     expect(await second.json()).toEqual(await first.json());
     expect(claude.calls).toHaveLength(1);
+  });
+  it("ready x request, but the newest saved file isn't a SavedStep: logged, and a new version is generated", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await writeRunJson(LESSON, "step-0.v1.json", { step: "damaged" });
+    const claude = script(validReply);
+    const res = await post(LESSON, "0");
+    expect(res.status).toBe(200);
+    expect(StepResponse.parse(await res.json()).version).toBe(2);
+    expect(claude.calls).toHaveLength(1);
+    expect(warn.mock.calls.flat().join(" ")).toContain(
+      `${LESSON}/step-0.v1.json is not a saved step`,
+    );
   });
 });
 
