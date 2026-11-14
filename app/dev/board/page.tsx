@@ -6,17 +6,16 @@
 //   /dev/board?scene=m1-late-highlight&t=…  demo-m1 with a highlight after the slide
 //   /dev/board?scene=arrows&t=…             arrows following moving objects
 //
-// Production servers answer 404 unless in fake mode (FAKE_APIS=1 without
-// REPLAY_RUN, lib/env.ts), which is how e2e and CI run the production build,
-// so it is never reachable in a real `npm start`. The gate reads the env per
-// request, not at build time.
+// Production servers answer 404 unless in fake mode (app/dev/devOnly.ts).
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { connection } from "next/server";
-import { fakesEnabled } from "@/lib/fakes";
+import { FRAME_BORDER } from "@/player/primitives/style";
 import { Whiteboard } from "@/player/Whiteboard";
-import { HIGHLIGHT, INK } from "@/player/primitives/style";
+import { CANVAS } from "@/shared/scene";
+import { DevShell } from "../DevShell";
+import { devPagesEnabled } from "../devOnly";
+import { first, type SearchParams } from "../query";
 import { SCENES, SCENE_TIMES, isScene, sceneState } from "./scenes";
 
 export const metadata: Metadata = {
@@ -24,19 +23,12 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-function first(v: string | string[] | undefined): string | undefined {
-  return Array.isArray(v) ? v[0] : v;
-}
-
 export default async function DevBoardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+  searchParams: Promise<SearchParams>;
 }) {
-  // Without this, `next build` prerenders the page and fixes the gate with
-  // the build's env: a plain build would 404 even under FAKE_APIS=1.
-  await connection();
-  if (process.env.NODE_ENV === "production" && !fakesEnabled()) notFound();
+  if (!(await devPagesEnabled())) notFound();
 
   const params = await searchParams;
   const sceneParam = first(params.scene) ?? "fixed";
@@ -47,33 +39,12 @@ export default async function DevBoardPage({
   const times = scene === "fixed" ? undefined : SCENE_TIMES[scene];
 
   return (
-    <main
+    <DevShell
+      note="Dev only: renderer test page, not part of the product."
       data-testid="dev-board"
       data-scene={scene}
       data-t={times ? tMs : undefined}
-      style={{
-        fontFamily: "system-ui, sans-serif",
-        background: "#f8fafc",
-        color: INK,
-        minHeight: "100vh",
-        padding: 16,
-        boxSizing: "border-box",
-      }}
     >
-      <p
-        role="note"
-        style={{
-          margin: "0 0 12px",
-          padding: "6px 12px",
-          background: HIGHLIGHT.warn.fill,
-          border: `1px solid ${HIGHLIGHT.warn.stroke}`,
-          borderRadius: 6,
-          display: "inline-block",
-          fontWeight: 600,
-        }}
-      >
-        Dev only: renderer test page, not part of the product.
-      </p>
       <nav
         style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 8 }}
       >
@@ -109,8 +80,8 @@ export default async function DevBoardPage({
       )}
       <div
         style={{
-          maxWidth: 1600,
-          border: "1px solid #e2e8f0",
+          maxWidth: CANVAS.w,
+          border: `1px solid ${FRAME_BORDER}`,
           borderRadius: 8,
           overflow: "hidden",
           boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
@@ -118,6 +89,6 @@ export default async function DevBoardPage({
       >
         <Whiteboard state={state} />
       </div>
-    </main>
+    </DevShell>
   );
 }

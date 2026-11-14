@@ -76,6 +76,11 @@ export type TransitionResult =
 export const MESSAGES = {
   pressPlay: "Press play to start",
   audioFailed: "Couldn't play the audio. Retry?",
+  /** A step request that fails without the server's message (network down, unreadable reply). */
+  stepFailed: "Couldn't make this step. Retry?",
+  /** `n` is 0-based; the player shows the 1-based step. */
+  loading: (n: number) => `Loading step ${n + 1}…`,
+  finished: "End of the lesson.",
   qaEnded: "Q&A ended unexpectedly.",
   nothingToAsk: "nothing to ask about",
   /** `n` is 0-based here; the message names the 1-based step the agent tool used. */
