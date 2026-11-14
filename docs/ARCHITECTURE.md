@@ -349,7 +349,7 @@ sceneAt(objects: BoardObject[], timed: { action; startMs; durationMs }[], tMs: n
 - Steps are **versioned** (`v1`, `v2`, ...) because a signal can regenerate one. `signals.json` records which version of each step started playing.
 - Starting the app with `REPLAY_RUN=<lessonId>`:
   - The upload page redirects to `/lesson/<lessonId>`, decided on each request (the page waits for `connection()`), so the build's env never fixes it.
-  - The routes serve each step's *played* version, or its latest version if it never played, from the folder. They never call Claude, ElevenLabs or fal. Until A1 records played versions in `signals.json`, the step route serves the latest.
+  - The routes serve each step's *played* version, or its latest version if it never played, from the folder. They never call Claude, ElevenLabs or fal. Until A1 records played versions in `signals.json`, the step route serves the latest. Any lesson saved in `runs/` replays this way, not only `REPLAY_RUN`'s (the redirect goes to that one).
   - A step that isn't in the folder fails, with "This step isn't in the saved run." (the step route's 404; a saved file that isn't a `SavedStep` counts as missing). A bad `n` or a lesson with no `plan.json` gets the usual "No such lesson or step." (section 7).
 - Q&A needs the network, so in replay mode the Ask panel says "Q&A needs a connection".
 

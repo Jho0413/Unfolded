@@ -13,6 +13,7 @@ afterEach(() => {
 
 describe("smoke", () => {
   it("renders the home page heading", async () => {
+    vi.stubEnv("REPLAY_RUN", undefined);
     vi.stubEnv("FAKE_APIS", "1");
     expect(renderToStaticMarkup(await Home())).toContain("<h1>Whiteboard</h1>");
   });

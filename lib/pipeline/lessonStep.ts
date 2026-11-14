@@ -85,8 +85,7 @@ export function requestStep(lessonId: string, n: number): Promise<StepOutcome> {
     return running;
   // Registered before the first await, so a request arriving while this one reads the run
   // folder joins it instead of starting its own generation.
-  const replay = getEnv().mode === "replay";
-  const outcome = resolveStep(lessonId, n, key, replay).finally(() =>
+  const outcome = resolveStep(lessonId, n, key).finally(() =>
     inFlight.delete(key),
   );
   inFlight.set(key, outcome);
@@ -97,7 +96,6 @@ async function resolveStep(
   lessonId: string,
   n: number,
   key: string,
-  replay: boolean,
 ): Promise<StepOutcome> {
   const where = `${TAG} ${lessonId} step ${n}`;
   try {
@@ -107,7 +105,7 @@ async function resolveStep(
 
     const saved = await latestSavedStep(lessonId, n);
     // Replay serves the latest saved version: the played one (signals.json) comes with A1.
-    if (replay)
+    if (getEnv().mode === "replay")
       return saved ? { kind: "ok", response: saved } : { kind: "notInRun" };
     const state = idleStepState(saved !== undefined, failedSteps.has(key));
     if (effectOf(state, REQUEST) === "serve" && saved)

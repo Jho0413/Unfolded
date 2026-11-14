@@ -31,6 +31,12 @@ runsDir.path = mkdtempSync(path.join(tmpdir(), "upload-page-"));
 mkdirSync(path.join(runsDir.path, "saved-run"));
 afterAll(() => rmSync(runsDir.path, { recursive: true, force: true }));
 
+/** Not replay, whatever the shell has set. */
+function fakeMode() {
+  vi.stubEnv("REPLAY_RUN", undefined);
+  vi.stubEnv("FAKE_APIS", "1");
+}
+
 afterEach(() => {
   vi.unstubAllEnvs();
   resetEnvForTests();
@@ -47,13 +53,13 @@ describe("upload page", () => {
   });
 
   it("not replay: shows the upload form", async () => {
-    vi.stubEnv("FAKE_APIS", "1");
+    fakeMode();
     const html = renderToStaticMarkup(await Home());
     expect(html).toContain("Upload a paper");
   });
 
   it("is decided per request, not at build time (waits for connection())", async () => {
-    vi.stubEnv("FAKE_APIS", "1");
+    fakeMode();
     await Home();
     expect(connection).toHaveBeenCalledTimes(1);
   });

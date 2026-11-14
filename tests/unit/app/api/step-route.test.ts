@@ -497,7 +497,7 @@ describe("replay mode (REPLAY_RUN): the saved run only, no provider call", () =>
     return step;
   }
 
-  it("a saved step is served as its latest version; replay never calls the fakes", async () => {
+  it("a saved step is served as its latest version, with no fake called", async () => {
     const step = await saveStep(0, [1]);
     await saveStep(0, [2]);
     const claude = replay();
