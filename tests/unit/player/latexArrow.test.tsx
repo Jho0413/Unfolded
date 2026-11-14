@@ -8,7 +8,12 @@ import { FIXED, sceneState } from "@/app/dev/board/scenes";
 import { Whiteboard } from "@/player/Whiteboard";
 import { estimateSize, renderLatex } from "@/player/primitives/katex";
 import { arrowGeometry, targetBox } from "@/player/primitives/arrowGeometry";
-import { ARROW, TEXT_SIZE, textBox } from "@/player/primitives/style";
+import {
+  ARROW,
+  LATEX_ERROR,
+  TEXT_SIZE,
+  textBox,
+} from "@/player/primitives/style";
 import {
   type Anchor,
   type BoardState,
@@ -255,7 +260,7 @@ describe("renderLatex (model-written tex)", () => {
 
   it("property: tex the validator accepts renders with no error, and tex it rejects still renders, never throws (one KATEX_OPTIONS)", () => {
     const token = fc.constantFrom(
-      ..."\\frac \\sqrt \\def \\a \\href \\url \\rule \\left( \\right) \\text x 1 em ^ _ { } ( ) & \\\\ \\undefinedcmd".split(
+      ..."\\frac \\sqrt \\def \\a \\href \\url \\htmlClass \\includegraphics \\rule \\left( \\right) \\text x 1 em ^ _ { } ( ) & \\\\ \\undefinedcmd".split(
         " ",
       ),
       " ",
@@ -273,11 +278,11 @@ describe("renderLatex (model-written tex)", () => {
         const rejected =
           !result.ok && result.errors.includes(errors.invalidLatex("x"));
         // Rejected tex shows as KaTeX's error text or a red unknown or
-        // refused command; accepted tex shows neither.
+        // refused command; accepted tex shows neither (no token sets a colour).
         const html = renderLatex(t).html!;
         return rejected
           ? html.includes('class="katex')
-          : !html.includes("katex-error") && !html.includes("#cc0000");
+          : !html.includes("katex-error") && !html.includes(LATEX_ERROR);
       }),
     );
   });
