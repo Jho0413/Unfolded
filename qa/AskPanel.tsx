@@ -5,6 +5,7 @@
 // into machine events (ask, closeAsk, agentDisconnected). The panel shows the
 // Ask messages of section 7 itself, so the page shouldn't also show the
 // machine's "Q&A ended unexpectedly." notice.
+import { stripVoiceTags } from "./voiceTags";
 import {
   type FormEvent,
   useCallback,
@@ -290,7 +291,8 @@ export function AskPanel({
           <ol data-testid="ask-transcript" style={transcriptStyle}>
             {messages.map((m, i) => (
               <li key={i} data-role={m.role}>
-                <strong>{m.role === "user" ? "You" : "Tutor"}:</strong> {m.text}
+                <strong>{m.role === "user" ? "You" : "Tutor"}:</strong>{" "}
+                {m.role === "agent" ? stripVoiceTags(m.text) : m.text}
               </li>
             ))}
           </ol>
