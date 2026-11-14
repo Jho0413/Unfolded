@@ -46,6 +46,17 @@ describe("canSend (a control is enabled exactly when the machine changes)", () =
     expect(canSend(failed, { type: "back" }, ctx)).toBe(false);
     expect(canSend(failed, { type: "retry" }, ctx)).toBe(true);
   });
+  it("after a failure, Next skips forward except on the last step", () => {
+    const failed = (step: number): PlayerState => ({
+      kind: "failed",
+      step,
+      message: "x",
+    });
+    expect(canSend(failed(0), { type: "next" }, ctx)).toBe(true);
+    expect(canSend(failed(ctx.stepCount - 1), { type: "next" }, ctx)).toBe(
+      false,
+    );
+  });
   it("every control is off while loading", () => {
     const loading: PlayerState = { kind: "loading", step: 0, autoplay: true };
     for (const type of ["back", "replay", "resume", "pause", "next"] as const)

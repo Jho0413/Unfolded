@@ -464,7 +464,10 @@ const TABLE: Record<(typeof STATES)[number], Record<Column, Case[]>> = {
     ask: F("ask", rejected(MESSAGES.nothingToAsk)),
     closeAsk: F("closeAsk", CANT),
     agentDisconnected: F("agentDisconnected", CANT),
-    next: F("next", IGNORED),
+    next: [
+      [failed(1), ev.of("next"), to(loading(2, true), load(2))],
+      [failed(2), ev.of("next"), IGNORED],
+    ],
     back: [
       [failed(1), ev.of("back"), to(loading(0, true), load(0))],
       [failed(0), ev.of("back"), IGNORED],
