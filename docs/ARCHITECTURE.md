@@ -62,9 +62,10 @@ Both modes draw through the same renderer, from the same scene contract.
 
 ```
 app/
-  page.tsx                          upload page
+  page.tsx, UploadForm.tsx          upload page: PDF in, the plan as a list of step titles, then Start the lesson
+  upload.ts                         the upload form field and the section 7 upload and plan messages (page and route)
   lesson/[lessonId]/page.tsx        player page
-  api/lessons/route.ts              POST: PDF -> lesson plan
+  api/lessons/route.ts              POST: PDF -> lesson plan, saved as runs/<id>/plan.json and paper.json
   api/lessons/[lessonId]/steps/[n]/route.ts   POST: generate step n (script + audio + cue times), or return it if it's ready; after a failure, a new POST tries again (section 6.2)
   api/sketch/route.ts               POST: Q&A drawing request -> sketch
   api/lessons/[lessonId]/signals/route.ts     POST: record a learner signal or "step n started" (section 5.4)
@@ -242,11 +243,12 @@ sequenceDiagram
 - **The paper goes to Claude directly.**
   - It's uploaded once with the Files API (`client.files.upload`).
   - Every plan and step request then references it by `file_id`, as a `document` block.
-  - The upload size cap (`config.maxPdfMb`) is our own choice, not Claude's limit. We don't parse the PDF ourselves: when Claude rejects it (too many pages, encrypted, unreadable), we return the upload error in section 7.
+  - The upload size cap (`config.maxPdfMb`) is our own choice, not Claude's limit. We don't parse the PDF, but `lib/pipeline/pdf.ts` checks its bytes before uploading: the `%PDF-` header within the first 1024 bytes, the size, an `/Encrypt` entry and a count of `/Type /Page` objects over `config.maxPdfPages` (Claude's 600-page limit). That catches the common cases without a paid request. When Claude rejects a PDF the checks missed (pages hidden in compressed object streams, an unreadable file), it answers 400, and we return the same upload error in section 7.
+  - The run folder gets `paper.json` (`{ fileId, filename }`, the paper's Files API id for the step requests) and then `plan.json`, last, so a lesson the page can open is always complete. The lesson id is the plan title's slug plus 8 random hex characters. `POST /api/lessons` answers `{ lessonId, plan }`, or `{ error }` with a section 7 message: 400 for no file or not a PDF, 413 over the size cap, 422 for an encrypted PDF, too many pages or a PDF Claude rejects, 502 when Claude fails to plan or upload, and 500 for anything else. The reason goes to the server log.
 - **Caching.** The document block carries `cache_control: { type: "ephemeral", ttl: "1h" }`, so later step requests reuse the cached paper. The 1-hour cache outlasts long Q&A pauses and rehearsals. Its writes cost more than the 5-minute cache's, but each request type writes the paper only once. For the cache to work:
   - The step system prompt must be byte-identical for every step.
   - The plan, goal and signals go *after* the document block.
-  - The plan request uses a different output format, so it builds its own cache.
+  - The plan request uses a different output format, so it builds its own cache. Its document block uses the 5-minute cache, which covers the plan's one retry.
   - A sketch request carries no paper (its body has no lesson), so it has no document block and no cache: just the board and the description (section 8).
 - **Structured output.** Requests stream: `client.messages.stream({ output_config: { format } })`, then `await stream.finalMessage()`. For a step, `format` is `lib/pipeline/outputFormat.ts`'s JSON schema for the wire format (`zodOutputFormat(WireStep).schema`, from `@anthropic-ai/sdk/helpers/zod`; section 4), and a sketch uses `WireSketch`.
   - The generator checks `stop_reason` first: `refusal`, `max_tokens` and `model_context_window_exceeded` fail the step (section 6.2). Each attempt has a total deadline (`config.step.timeoutMs`, an abort signal), since the SDK's own `timeout` stops counting once a stream's headers arrive. Otherwise it parses the text itself with `validateWireStep` (the wire schema, the conversion, then `validateStep`), not the SDK's `parsed_output` (whose parser throws before a refusal can be seen). So a schema failure, including constraints the API can't enforce (number ranges, item counts), a conversion error and a `validate.ts` rejection give the same error list for the one retry.
@@ -447,7 +449,7 @@ The developer gets the full error in the server log, tagged with the route, less
 |---|---|---|---|
 | Upload | No file, or not a PDF | "Please choose a PDF." | Pick again |
 | Upload | Over `config.maxPdfMb`, or Claude rejects the document (too many pages, encrypted, unreadable) | "This PDF is too large or locked." | Another PDF |
-| Plan | Invalid plan twice, refusal, or Claude error | "Couldn't read this paper." | Retry, or another PDF |
+| Plan | Invalid plan twice (zod, or fewer than `config.plan.minSteps` steps), refusal, a cut-off, or a Claude or Files API error | "Couldn't read this paper." | Retry, or another PDF |
 | Step | Any `failed` cause in section 6.2 | "Couldn't make this step." | Retry (player `failed` state) |
 | Step | Replay mode, and the step isn't in the run | "This step isn't in the saved run." | Back, or another step |
 | Plan or step | fal error or timeout, or no `FAL_KEY` | Nothing: the plan or step shows without the illustration | The image is hidden and the error is logged |
@@ -540,7 +542,7 @@ The developer gets the full error in the server log, tagged with the route, less
 - The mode is picked in this order: `REPLAY_RUN` set → replay; else `FAKE_APIS=1` → fake; else real. An empty value (`KEY=`, as copied from `.env.example`) counts as unset.
 - A build made with `NEXT_PUBLIC_FAKE_APIS=1` (for example, left over from a local `npm run e2e`) refuses to start in real mode, since the browser would use the fake agent: run `npm run build` again first. `next.config.ts` bakes that build-time value in as `BUILT_WITH_BROWSER_FAKES`, so the check never depends on the shell `npm start` runs in. The reverse, `FAKE_APIS=1` on a normal build, starts with a warning.
 - Keys are only read in `lib/` and the API routes, which import `"server-only"`. The browser never sees a key.
-- All of these live in `lib/config.ts`: model ids, effort per request type, `maxNarrationChars`, the step and sketch requests' output caps, total deadlines and fake-mode fixtures, `maxPdfMb`, `coverTimeoutMs`, `maxBoardObjects` (the cap on the board a sketch request sends, section 8), the image cap per lesson (E1), the agent token's URL, timeout and fixture (section 8), and the `runs/` path.
+- All of these live in `lib/config.ts`: model ids, effort per request type, `maxNarrationChars`, the step and sketch requests' output caps, total deadlines and fake-mode fixtures, `maxPdfMb`, `maxPdfPages`, the plan request's step minimum, output cap, deadline and fake-mode fixtures (the plan and the paper's upload), `coverTimeoutMs`, `maxBoardObjects` (the cap on the board a sketch request sends, section 8), the image cap per lesson (E1), the agent token's URL, timeout and fixture (section 8), and the `runs/` path.
 
 ## 10. Testing: how we prove it works
 

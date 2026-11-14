@@ -21,6 +21,22 @@ export const config = {
   } satisfies Record<string, Effort>,
   /** Narration cap after cue markers are stripped (`narration too long`, ARCHITECTURE.md section 4). */
   maxNarrationChars: 1500,
+  /** The plan request and the paper's upload (ARCHITECTURE.md section 5.1). */
+  plan: {
+    /** Fewer steps is a rejection (retried once). The most is shared/lesson.ts MAX_PLAN_STEPS. */
+    minSteps: 5,
+    /** Output cap, thinking included. A cut-off fails the plan. */
+    maxTokens: 16_000,
+    /**
+     * Deadline for the Files API upload, and for each plan attempt (the SDK's own retries
+     * included) until the whole streamed answer is in.
+     */
+    timeoutMs: 180_000,
+    /** Served when FAKE_APIS=1, in the Messages API's response shape. */
+    fixture: "claude-plan.message.json",
+    /** The paper's upload, served when FAKE_APIS=1, in the Files API's response shape. */
+    uploadFixture: "claude-file-upload.json",
+  },
   /** A step request (ARCHITECTURE.md sections 5.1 and 6.2). */
   step: {
     /** Output cap, thinking included. A cut-off fails the step. */
@@ -53,6 +69,8 @@ export const config = {
   },
   /** Upload cap: our own choice, not Claude's limit (ARCHITECTURE.md section 5.1). */
   maxPdfMb: 32,
+  /** Claude's page limit for a PDF document (a 1M-context model), checked before uploading. */
+  maxPdfPages: 600,
   /** How long the plan route waits for the fal cover before returning without it. */
   coverTimeoutMs: 4000,
   /** Cap on `board.objects` in a POST /api/sketch body (ARCHITECTURE.md section 8). */

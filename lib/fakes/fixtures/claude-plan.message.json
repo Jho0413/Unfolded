@@ -1,0 +1,33 @@
+{
+  "model": "claude-sonnet-5-5",
+  "id": "msg_011Ch3EbPY7AVrGaJAd5X2co",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"title\":\"Attention Is All You Need: How the Transformer Works\",\"steps\":[{\"title\":\"Why Drop Recurrence?\",\"goal\":\"Show an RNN as a chain of hidden states h_t computed from h_{t-1} and the input at position t, so each step must wait for the previous one. Draw boxes in a row with arrows left to right on a short sentence and mark the sequential bottleneck, plus the long path between distant words.\"},{\"title\":\"Encoder-Decoder Big Picture\",\"goal\":\"Sketch the encoder mapping (x1..xn) to z=(z1..zn) and the decoder producing (y1..ym) one symbol at a time, auto-regressively, feeding earlier outputs back in. Draw two stacks of N=6 layers with an arrow from encoder to decoder, as in Figure 1.\"},{\"title\":\"Queries, Keys, Values\",\"goal\":\"Introduce attention as a query matched against keys to get weights over values, with the output a weighted sum. Use a tiny 3-word example with 2-d vectors and show the dot products of one query with each key, turning into weights.\"},{\"title\":\"Scaled Dot-Product Attention\",\"goal\":\"Write Attention(Q,K,V)=softmax(QK^T/√d_k)V and trace the matrix shapes on a small example. Explain why dividing by √d_k matters: dot products of d_k random components have variance d_k, which pushes softmax into flat-gradient regions.\"},{\"title\":\"Multi-Head Attention\",\"goal\":\"Show h=8 heads, each with learned projections W_i^Q, W_i^K, W_i^V down to d_k=d_v=64 from d_model=512, then concat and project with W^O. Draw parallel boxes merging into one, and explain that heads attend to different information, avoiding the averaging of a single head.\"},{\"title\":\"Three Uses and Masking\",\"goal\":\"Show the three attention types: encoder self-attention, decoder self-attention, and encoder-decoder attention, where queries come from the decoder and keys and values from the encoder. Draw a 4x4 grid with the upper triangle set to -∞ before softmax, so position i can't see later positions.\"},{\"title\":\"Feed-Forward, Residuals, Norm\",\"goal\":\"Write FFN(x)=max(0,xW1+b1)W2+b2 applied to each position separately, with 512→2048→512. Draw one layer as x flowing through a sub-layer with a skip connection into LayerNorm(x+Sublayer(x)).\"},{\"title\":\"Embeddings and Positional Encoding\",\"goal\":\"Explain that without recurrence the model has no sense of order, so sinusoidal vectors are added to the token embeddings: PE(pos,2i)=sin(pos/10000^{2i/d_model}), PE(pos,2i+1)=cos(...). Show a few dimensions of waves with different wavelengths for positions 0, 1, 2 and the sum with an embedding. Mention the final linear plus softmax producing next-token probabilities.\"},{\"title\":\"Why Self-Attention Wins\",\"goal\":\"Walk through Table 1 comparing self-attention, recurrent, and convolutional layers on complexity per layer, sequential operations, and maximum path length. Draw the path between the first and last word of a length-n sequence: O(1) for attention versus O(n) for an RNN.\"},{\"title\":\"Training and Results\",\"goal\":\"Briefly show the learning-rate schedule as a rise over 4000 warmup steps then inverse-sqrt decay, with dropout and label smoothing as regularizers. Then show the headline results: 28.4 BLEU on EN-DE and 41.8 on EN-FR at a fraction of the training cost.\"}],\"coverPrompt\":\"A glowing web of luminous threads linking every bead on a long necklace to every other bead at once, with some threads brighter and thicker than others, set against a deep dark background in warm gold and blue.\"}"
+    }
+  ],
+  "container": null,
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+    "input_tokens": 17,
+    "cache_creation_input_tokens": 39223,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 39223,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 1298,
+    "service_tier": "standard",
+    "inference_geo": "global",
+    "speed": "standard",
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    }
+  },
+  "diagnostics": null
+}

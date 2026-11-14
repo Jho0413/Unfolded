@@ -13,6 +13,7 @@ import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
+import { LessonPlanOutput } from "@/shared/lesson";
 import {
   type Action,
   Anchor,
@@ -166,7 +167,7 @@ export function wireToSketch(wire: WireSketch): Converted<Sketch> {
 }
 
 /** The same "path: message" form as validate.ts's schema errors. */
-function schemaErrors(error: z.ZodError): string[] {
+export function schemaErrors(error: z.ZodError): string[] {
   return error.issues.map((issue) => {
     const path = issue.path.map(String).join(".");
     return path ? `${path}: ${issue.message}` : issue.message;
@@ -215,3 +216,9 @@ export function validateWireSketch(
     validateSketch(sketch, ctx),
   );
 }
+
+/** A plan has no action unions, so it goes on the wire as the contract's own schema. */
+export const PLAN_OUTPUT_FORMAT: Anthropic.JSONOutputFormat = {
+  type: "json_schema",
+  schema: zodOutputFormat(LessonPlanOutput).schema,
+};
