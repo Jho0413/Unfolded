@@ -15,10 +15,17 @@ import {
   useState,
 } from "react";
 import { MESSAGES } from "@/player/machine";
+import { z } from "zod";
 import { AgentTokenResponse, QA_UNAVAILABLE } from "@/shared/lesson";
+import {
+  AskConnector,
+  type ConnectorPhase,
+  type ConnectorState,
+  INITIAL_CONNECTOR_STATE,
+} from "./connector";
 import { buildContextUpdate, type QaContext } from "./context";
 import { useQaConversation } from "./conversation";
-import type { AskApi, QaMessage, QaTools } from "./types";
+import type { AskApi, QaConversation, QaMessage, QaTools } from "./types";
 
 export const ASK_MESSAGES = {
   unavailable: QA_UNAVAILABLE,
@@ -47,9 +54,8 @@ export type AskPanelProps = {
   onAgentDisconnected: () => void;
 };
 
-/** "connecting" lives only in phaseRef; the render derives it from `open`. */
-/** How long a session may take to connect before Ask says it's unavailable. */
-const CONNECT_TIMEOUT_MS = 15_000;
+// TODO(#84): use shared/lesson.ts's AgentSignedUrlResponse once Jason's signed-url PR lands.
+const AgentSignedUrlResponse = z.object({ signedUrl: z.string().min(1) });
 
 export type { AskApi };
 
@@ -64,8 +70,6 @@ class AgentLink {
   }
 }
 
-type Phase = "idle" | "connecting" | "connected" | "failed";
-
 export function AskPanel({
   open,
   replay,
@@ -75,26 +79,24 @@ export function AskPanel({
   onClose,
   onAgentDisconnected,
 }: AskPanelProps) {
-  const [phase, setPhase] = useState<Phase>("idle");
-  const [notice, setNotice] = useState<string | null>(null);
+  const [session, setSession] = useState<ConnectorState>(
+    () => INITIAL_CONNECTOR_STATE,
+  );
   // A tool's message (a failed sketch), apart from the session's own notice,
   // so it never hides "Mic is off" and a later success can clear it.
   const [toolNotice, setToolNotice] = useState<string | null>(null);
-  const [textOnly, setTextOnly] = useState(false);
   const [messages, setMessages] = useState<QaMessage[]>([]);
   const [questions, setQuestions] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
-  // Mirrors `phase` for the conversation callbacks, which outlive renders.
-  const phaseRef = useRef<Phase>("idle");
   const contextRef = useRef({ context, questions });
   useEffect(() => {
     contextRef.current = { context, questions };
   });
-
-  const go = useCallback((p: Phase) => {
-    phaseRef.current = p;
-    setPhase(p);
-  }, []);
+  // The page's callbacks, read by the connector, which outlives renders.
+  const pageRef = useRef({ onClose, onAgentDisconnected });
+  useEffect(() => {
+    pageRef.current = { onClose, onAgentDisconnected };
+  });
 
   // Typed questions sent but not yet echoed back by the conversation.
   const typedEcho = useRef<string[]>([]);
@@ -112,30 +114,13 @@ export function AskPanel({
     [tools, link],
   );
 
+  // Set in an effect once both exist; the callbacks only fire later.
+  const connectorRef = useRef<AskConnector | null>(null);
+  const conversationRef = useRef<QaConversation | null>(null);
   const conversation = useQaConversation({
     tools: resolvedTools,
-    onConnect: () => {
-      // A connect that lands after Ask closed (or timed out) is ended at once.
-      if (phaseRef.current !== "connecting") return conversation.end();
-      go("connected");
-      const { context: c, questions: q } = contextRef.current;
-      conversation.sendContextualUpdate(
-        buildContextUpdate({ ...c, earlierQuestions: q }),
-      );
-    },
-    onDisconnect: (reason) => {
-      const was = phaseRef.current;
-      if (was === "connecting") fail();
-      else if (was === "connected") {
-        go("idle");
-        if (reason === "error") {
-          setNotice(ASK_MESSAGES.ended);
-          onAgentDisconnected();
-        } else if (reason === "agent") {
-          onClose();
-        }
-      }
-    },
+    onConnect: () => connectorRef.current?.connected(),
+    onDisconnect: (reason) => connectorRef.current?.disconnected(reason),
     onMessage: (m) => {
       // Typed questions are added in submit(); skip the SDK's echo, if any.
       if (m.role === "user" && typedEcho.current.includes(m.text)) {
@@ -144,63 +129,57 @@ export function AskPanel({
       }
       addMessage(m);
     },
-    onError: (message) => {
-      console.error("[qa]", message);
-      if (phaseRef.current === "connecting") fail();
-    },
+    onError: (message) => connectorRef.current?.error(message),
   });
 
-  const fail = useCallback(() => {
-    go("failed");
-    setNotice(ASK_MESSAGES.unavailable);
-  }, [go]);
+  useEffect(() => {
+    conversationRef.current = conversation;
+  });
+  // The connector is made once, outside render (it holds the session's state machine).
+  useEffect(() => {
+    connectorRef.current ??= new AskConnector({
+      conversation: {
+        start: (o) => conversationRef.current!.start(o),
+        end: () => conversationRef.current!.end(),
+        sendUserMessage: (t) => conversationRef.current!.sendUserMessage(t),
+      },
+      fetchToken,
+      fetchSignedUrl,
+      requestMicrophone: () => conversationRef.current!.requestMicrophone(),
+      onState: setSession,
+      onConnected: () => {
+        const { context: c, questions: q } = contextRef.current;
+        conversationRef.current!.sendContextualUpdate(
+          buildContextUpdate({ ...c, earlierQuestions: q }),
+        );
+      },
+      onDropped: () => pageRef.current.onAgentDisconnected(),
+      onAgentEnded: () => pageRef.current.onClose(),
+      log: console,
+    });
+  }, []);
 
   useEffect(() => {
     link.connect((text) => conversation.sendContextualUpdate(text));
   }, [link, conversation]);
 
-  // Opening Ask starts a session; closing it (from anywhere) ends it. In a
-  // replay run there's no session: the panel says Q&A needs a connection.
+  // Opening Ask starts deciding the session; closing it (from anywhere) ends
+  // it. In a replay run there's no session: the panel says Q&A needs a connection.
   useEffect(() => {
-    if (!open || replay) return;
-    let cancelled = false;
-    phaseRef.current = "connecting";
+    const connector = connectorRef.current;
+    if (!open || replay || connector === null) return;
     typedEcho.current = [];
-    // A connect that never settles (e.g. reopened while the last one was
-    // still ending) must not leave the panel connecting forever.
-    const timeout = setTimeout(() => {
-      if (!cancelled && phaseRef.current === "connecting") {
-        fail();
-        conversation.end();
-      }
-    }, CONNECT_TIMEOUT_MS);
-    void (async () => {
-      const token = await fetchToken();
-      if (cancelled) return;
-      if (token === null) return fail();
-      const mic = await conversation.requestMicrophone();
-      if (cancelled) return;
-      if (!mic) {
-        setTextOnly(true);
-        setNotice(ASK_MESSAGES.micOff);
-      }
-      conversation.start({ conversationToken: token, textOnly: !mic });
-    })();
+    connector.open();
     return () => {
-      cancelled = true;
-      clearTimeout(timeout);
-      go("idle"); // so the "user" disconnect below is not reported
-      conversation.end();
+      connector.close();
       setMessages([]);
       setDraft("");
-      setTextOnly(false);
-      // Only a dropped session's message outlives the panel.
-      setNotice((n) => (n === ASK_MESSAGES.ended ? n : null));
       setToolNotice(null);
     };
-  }, [open, replay, conversation, go, fail]);
+  }, [open, replay]);
 
   // Tell the agent about every step change (or jump) while connected.
+  const { phase } = session;
   const step = `${context.step}:${context.nextStep ?? ""}`;
   const sentStep = useRef<string | null>(null);
   useEffect(() => {
@@ -209,7 +188,7 @@ export function AskPanel({
       return;
     }
     if (sentStep.current === null) {
-      sentStep.current = step; // onConnect already sent it
+      sentStep.current = step; // onConnected already sent it
       return;
     }
     if (sentStep.current === step) return;
@@ -221,7 +200,7 @@ export function AskPanel({
   }, [phase, step, conversation]);
 
   const ask = useCallback(() => {
-    setNotice(null);
+    connectorRef.current?.clearNotice();
     onAsk();
   }, [onAsk]);
 
@@ -241,25 +220,22 @@ export function AskPanel({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, ask, onClose]);
 
+  const usable = open && !replay && phase !== "failed" && phase !== "idle";
+  const voice = phase === "connected" && !session.textOnly;
+
   function submit(e: FormEvent) {
     e.preventDefault();
     const text = draft.trim();
-    if (!text || phase !== "connected") return;
+    if (!text || !usable) return;
     typedEcho.current.push(text);
     addMessage({ role: "user", text });
-    conversation.sendUserMessage(text);
     setDraft("");
+    connectorRef.current?.send(text);
   }
 
-  const connected = phase === "connected";
-  const shownPhase: Phase | "connecting" = !open
-    ? "idle"
-    : replay
-      ? "failed"
-      : phase === "idle"
-        ? "connecting"
-        : phase;
-  const shownNotice = open && replay ? ASK_MESSAGES.needsConnection : notice;
+  const shownPhase: ConnectorPhase = !open ? "idle" : replay ? "failed" : phase;
+  const shownNotice =
+    open && replay ? ASK_MESSAGES.needsConnection : session.notice;
 
   return (
     <section
@@ -267,7 +243,8 @@ export function AskPanel({
       data-testid="ask-panel"
       data-open={open}
       data-phase={shownPhase}
-      data-text-only={textOnly}
+      data-text-only={session.textOnly}
+      data-transport={session.transport ?? ""}
       style={panelStyle}
     >
       {!open && (
@@ -287,6 +264,11 @@ export function AskPanel({
       )}
       {open && (
         <>
+          {shownPhase === "waiting" && (
+            <p data-testid="ask-hint">
+              Allow the mic to talk, or type your question.
+            </p>
+          )}
           {shownPhase === "connecting" && <p>Connecting…</p>}
           <ol data-testid="ask-transcript" style={transcriptStyle}>
             {messages.map((m, i) => (
@@ -299,25 +281,38 @@ export function AskPanel({
           <form onSubmit={submit} style={{ display: "flex", gap: 8 }}>
             <input
               aria-label="Type your question"
-              placeholder={connected ? "Type your question" : ""}
+              placeholder={usable ? "Type your question" : ""}
               value={draft}
-              disabled={!connected}
+              disabled={!usable}
               onFocus={() => {
-                if (!textOnly) conversation.setMicMuted(true);
+                connectorRef.current?.typing();
+                if (voice) conversation.setMicMuted(true);
               }}
               onBlur={() => {
-                if (!textOnly) conversation.setMicMuted(false);
+                if (voice) conversation.setMicMuted(false);
               }}
               onChange={(e) => {
                 setDraft(e.target.value);
-                conversation.sendUserActivity();
+                connectorRef.current?.typing();
+                if (phase === "connected") conversation.sendUserActivity();
               }}
               style={{ flex: 1 }}
             />
-            <button type="submit" disabled={!connected || !draft.trim()}>
+            <button type="submit" disabled={!usable || !draft.trim()}>
               Send
             </button>
           </form>
+          {usable &&
+            phase === "connected" &&
+            session.textOnly &&
+            !session.micDenied && (
+              <button
+                type="button"
+                onClick={() => void connectorRef.current?.useMic()}
+              >
+                Use the mic
+              </button>
+            )}
           <button type="button" onClick={onClose}>
             Close
           </button>
@@ -334,6 +329,21 @@ async function fetchToken(): Promise<string | null> {
     if (!res.ok) return null;
     const parsed = AgentTokenResponse.safeParse(await res.json());
     return parsed.success ? parsed.data.conversationToken : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A websocket signed URL (GET /api/agent/signed-url, area B), for when WebRTC is blocked; null
+ * when Q&A is unavailable. Same errors as the token route.
+ */
+async function fetchSignedUrl(): Promise<string | null> {
+  try {
+    const res = await fetch("/api/agent/signed-url", { cache: "no-store" });
+    if (!res.ok) return null;
+    const parsed = AgentSignedUrlResponse.safeParse(await res.json());
+    return parsed.success ? parsed.data.signedUrl : null;
   } catch {
     return null;
   }

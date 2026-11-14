@@ -335,9 +335,14 @@ test.describe("Ask messages (ARCHITECTURE.md section 7)", () => {
     await expect(notice(page)).toHaveCount(0);
   });
 
-  test(`the agent can't connect: "${ASK.unavailable}"`, async ({ page }) => {
+  test(`the agent can't connect (WebRTC, then no signed URL): "${ASK.unavailable}"`, async ({
+    page,
+  }) => {
     await page.route("**/api/agent/token", (route) =>
       route.fulfill({ json: { conversationToken: "fake-connect-fail" } }),
+    );
+    await page.route("**/api/agent/signed-url", (route) =>
+      route.fulfill({ status: 503, json: { error: ASK.unavailable } }),
     );
     await open(page);
     await toPlaying(page);
@@ -396,5 +401,130 @@ test.describe("Ask messages (ARCHITECTURE.md section 7)", () => {
     await page.getByRole("button", { name: "Close" }).click();
     await expect(state(page)).toHaveAttribute("data-state", "paused");
     expect(tokenRequests).toBe(0);
+  });
+});
+
+// Issue #84: Ask must work on a real Mac browser and on venue Wi-Fi.
+test.describe("Ask robustness (issue #84)", () => {
+  const transcriptAgent = (page: Page) =>
+    page.getByTestId("ask-transcript").locator('[data-role="agent"]').last();
+
+  test("the mic prompt is never answered: the input works at once, and typing starts a text-only session", async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      (window as { __qaFakeMicPending?: boolean }).__qaFakeMicPending = true;
+    });
+    await open(page);
+    await toPlaying(page);
+    await page.getByRole("button", { name: "Ask", exact: true }).click();
+    const panel = page.getByTestId("ask-panel");
+    await expect(panel).toHaveAttribute("data-phase", "waiting");
+    await expect(page.getByTestId("ask-hint")).toBeVisible();
+    const input = page.getByLabel("Type your question");
+    await expect(input).toBeEnabled();
+    await expect(input).toHaveAttribute("placeholder", "Type your question");
+    expect(await page.evaluate(() => window.__qaFake?.starts.length)).toBe(0);
+    // Typed and sent before any session exists: queued, then answered.
+    await input.fill("What is this?");
+    await page.getByRole("button", { name: "Send" }).click();
+    await expect(panel).toHaveAttribute("data-phase", "connected");
+    await expect(panel).toHaveAttribute("data-text-only", "true");
+    await expect(transcriptAgent(page)).toContainText("row times a column");
+    expect(await page.evaluate(() => window.__qaFake?.textOnly)).toBe(true);
+    // Not denied, so the mic is offered, without the "Mic is off" message.
+    await expect(
+      page.getByRole("button", { name: "Use the mic" }),
+    ).toBeVisible();
+    await expect(notice(page)).toHaveCount(0);
+  });
+
+  test("closing Ask while the mic prompt is open starts no session", async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      (window as { __qaFakeMicPending?: boolean }).__qaFakeMicPending = true;
+    });
+    await open(page);
+    await toPlaying(page);
+    await page.getByRole("button", { name: "Ask", exact: true }).click();
+    await expect(page.getByTestId("ask-panel")).toHaveAttribute(
+      "data-phase",
+      "waiting",
+    );
+    await page.getByRole("button", { name: "Close" }).click();
+    await expect(state(page)).toHaveAttribute("data-state", "paused");
+    await page.waitForTimeout(300);
+    expect(await page.evaluate(() => window.__qaFake?.starts.length)).toBe(0);
+  });
+
+  test(`a question that can't be sent: "${ASK.ended}"`, async ({ page }) => {
+    await open(page);
+    await toPlaying(page);
+    await askAndConnect(page);
+    await page.evaluate(() => {
+      if (window.__qaFake) window.__qaFake.failNextSend = true;
+    });
+    await page.getByLabel("Type your question").fill("Why?");
+    await page.getByRole("button", { name: "Send" }).click();
+    await expect(notice(page)).toHaveText(ASK.ended);
+    await expect(state(page)).toHaveAttribute("data-state", "paused");
+  });
+
+  test(`the session start rejects, and the websocket fails too: "${ASK.unavailable}"`, async ({
+    page,
+  }) => {
+    await page.route("**/api/agent/token", (route) =>
+      route.fulfill({ json: { conversationToken: "fake-start-reject" } }),
+    );
+    await page.route("**/api/agent/signed-url", (route) =>
+      route.fulfill({ json: { signedUrl: "wss://fake-connect-fail" } }),
+    );
+    await open(page);
+    await toPlaying(page);
+    await page.getByRole("button", { name: "Ask", exact: true }).click();
+    await expect(notice(page)).toHaveText(ASK.unavailable);
+    await expect(page.getByTestId("ask-panel")).toHaveAttribute(
+      "data-phase",
+      "failed",
+    );
+    expect(await page.evaluate(() => window.__qaFake?.starts)).toEqual([
+      "webrtc",
+      "websocket",
+    ]);
+  });
+
+  test("WebRTC blocked: falls back to the websocket, and a typed question is answered", async ({
+    page,
+  }) => {
+    await page.route("**/api/agent/token", (route) =>
+      route.fulfill({ json: { conversationToken: "fake-connect-fail" } }),
+    );
+    let signedUrlRequests = 0;
+    await page.route("**/api/agent/signed-url", (route) => {
+      signedUrlRequests++;
+      return route.fulfill({ json: { signedUrl: "wss://fake-signed" } });
+    });
+    await open(page);
+    await toPlaying(page);
+    await askAndConnect(page);
+    await expect(page.getByTestId("ask-panel")).toHaveAttribute(
+      "data-transport",
+      "websocket",
+    );
+    expect(await page.evaluate(() => window.__qaFake?.starts)).toEqual([
+      "webrtc",
+      "websocket",
+    ]);
+    await typeQuestion(page, "What is this?");
+    await expect(transcriptAgent(page)).toContainText("row times a column");
+    await expect(notice(page)).toHaveCount(0);
+    // The next Ask on this page goes straight to the websocket.
+    await page.getByRole("button", { name: "Close" }).click();
+    await askAndConnect(page);
+    expect(await page.evaluate(() => window.__qaFake?.starts.at(-1))).toBe(
+      "websocket",
+    );
+    expect(signedUrlRequests).toBe(2);
   });
 });
