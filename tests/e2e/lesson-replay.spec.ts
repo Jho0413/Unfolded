@@ -9,6 +9,7 @@ import { expect, type Page, test } from "@playwright/test";
 import { STEP_NOT_IN_RUN } from "@/shared/lesson";
 import { E2E_RUNS_DIR_NAME } from "./support/runsDir";
 import { savedRun, savedStepTitle } from "./support/savedRun";
+import { nextIdea } from "./support/tutor";
 
 const LESSON = "e2e-replay-run";
 
@@ -98,10 +99,7 @@ test("replay: a saved step plays through the step route; one not in the run fail
     audio.currentTime = Math.max(0, audio.duration - 0.1);
   });
   await expectState(page, "stepEnded", 0);
-  await page
-    .getByRole("toolbar", { name: "Player controls" })
-    .getByRole("button", { name: "Next", exact: true })
-    .click();
+  await nextIdea(page).click();
   await expectState(page, "failed", 1);
   await expect(page.getByTestId("player-error")).toHaveText(STEP_NOT_IN_RUN);
   // The failed prefetch was forgotten, so Next asked again.

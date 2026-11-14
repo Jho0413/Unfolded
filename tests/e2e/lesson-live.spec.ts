@@ -12,6 +12,7 @@ import { MESSAGES } from "@/player/machine";
 import { NO_SUCH_LESSON, STEP_NOT_IN_RUN } from "@/shared/lesson";
 import { RUNS_DIR } from "./support/runsDir";
 import { freshLesson } from "./support/savedRun";
+import { nextIdea, retry } from "./support/tutor";
 
 test.use({
   launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
@@ -21,12 +22,6 @@ async function expectState(page: Page, state: string, step: number) {
   const player = page.getByTestId("player");
   await expect(player).toHaveAttribute("data-state", state);
   await expect(player).toHaveAttribute("data-step", String(step));
-}
-
-function control(page: Page, name: string) {
-  return page
-    .getByRole("toolbar", { name: "Player controls" })
-    .getByRole("button", { name, exact: true });
 }
 
 /**
@@ -77,7 +72,7 @@ test("a fresh lesson's steps are generated through the step route and play", asy
     await savedTitle(run.lessonId, 0),
   );
   await endStep(page, 0);
-  await control(page, "Next").click();
+  await nextIdea(page).click();
   await expectPlays(page, 1);
   await expect(page.getByRole("heading", { level: 2 })).toHaveText(
     await savedTitle(run.lessonId, 1),
@@ -107,7 +102,7 @@ test("L2: step 1 is prefetched once step 0 is on screen, and Next on it makes no
   expect(requests).toEqual(["POST 0", "POST 1"]);
 
   await endStep(page, 0);
-  await control(page, "Next").click();
+  await nextIdea(page).click();
   await expectPlays(page, 1);
   // Step 1 came from the prefetch; only step 2's prefetch was added.
   await expect.poll(() => requests).toEqual(["POST 0", "POST 1", "POST 2"]);
@@ -188,7 +183,7 @@ for (const { name, message, fail } of STEP_FAILURES) {
     await expect(page.getByTestId("player-error")).toHaveText(message);
     // A failed step 0 prefetches nothing.
     expect(requests).toEqual(["POST 0"]);
-    await control(page, "Retry").click();
+    await retry(page).click();
     await expectPlays(page, 0);
     expect(requests.slice(0, 2)).toEqual(["POST 0", "POST 0"]);
   });
@@ -216,7 +211,7 @@ test(`L3 Player: the step's audio fails to load -> "${MESSAGES.audioFailed}", Re
   await expect(page.getByTestId("player-error")).toHaveText(
     MESSAGES.audioFailed,
   );
-  await control(page, "Retry").click();
+  await retry(page).click();
   await expectPlays(page, 0);
   // Retry is a new request; the route serves the step it saved the first time.
   expect(requests.filter((r) => r === "POST 0")).toHaveLength(2);
@@ -243,7 +238,7 @@ test("L3: a prefetch that failed is asked again when Next reaches the step", asy
   await expectPlays(page, 0);
   await expect.poll(() => requests).toEqual(["POST 0", "POST 1"]);
   await endStep(page, 0);
-  await control(page, "Next").click();
+  await nextIdea(page).click();
   await expectPlays(page, 1);
   expect(requests).toEqual(["POST 0", "POST 1", "POST 1"]);
 });
@@ -257,13 +252,15 @@ test("L3: Next skips a step that keeps failing, and Back returns to it", async (
   );
   await page.goto(`/lesson/${run.lessonId}`);
   await expectState(page, "failed", 0);
-  await expect(control(page, "Back")).toBeDisabled();
-  await control(page, "Next").click();
+  // failed + back on step 0: ignored.
+  await page.keyboard.press("ArrowLeft");
+  await expectState(page, "failed", 0);
+  await nextIdea(page).click();
   await expectPlays(page, 1);
   await expect(page.getByRole("heading", { level: 2 })).toHaveText(
     await savedTitle(run.lessonId, 1),
   );
-  await control(page, "Back").click();
+  await page.keyboard.press("ArrowLeft");
   await expectState(page, "failed", 0);
   await expect(page.getByTestId("player-error")).toHaveText(
     STEP_ROUTE_ERRORS.failed,
@@ -277,6 +274,6 @@ test("L3: Next is off on a failed last step", async ({ page }) => {
   );
   await page.goto(`/lesson/${run.lessonId}`);
   await expectState(page, "failed", 0);
-  await expect(control(page, "Next")).toBeDisabled();
-  await expect(control(page, "Retry")).toBeEnabled();
+  await expect(nextIdea(page)).toHaveCount(0);
+  await expect(retry(page)).toBeEnabled();
 });

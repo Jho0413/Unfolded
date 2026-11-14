@@ -8,9 +8,10 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { STEP_ROUTE_ERRORS } from "@/app/api/lessons/[lessonId]/steps/[n]/errors";
-import { MESSAGES } from "@/player/machine";
+import { CARD_STATUS, CARD_TEXT } from "@/player/cardView";
 import { NO_SUCH_LESSON } from "@/shared/lesson";
 import { savedRun, savedStepTitle } from "./support/savedRun";
+import { card, nextIdea } from "./support/tutor";
 
 test.use({
   launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
@@ -27,12 +28,6 @@ async function expectState(page: Page, state: string, step: number) {
   const player = page.getByTestId("player");
   await expect(player).toHaveAttribute("data-state", state);
   await expect(player).toHaveAttribute("data-step", String(step));
-}
-
-function control(page: Page, name: string) {
-  return page
-    .getByRole("toolbar", { name: "Player controls" })
-    .getByRole("button", { name, exact: true });
 }
 
 /** Plays the step on screen to its end: seek close to the end and let it finish. */
@@ -52,23 +47,26 @@ test("plays a saved lesson: step 0 autoplays, Next plays step 1", async ({
     "Matrix multiplication",
   );
   await expectState(page, "playing", 0);
-  await expect(page.getByText("Step 1 of 2")).toBeVisible();
+  await expect(page.getByText("Idea 1 of 2")).toBeVisible();
   await expect(page.getByRole("heading", { level: 2 })).toHaveText(
     savedStepTitle(0),
   );
   await endStep(page, 0);
-  await control(page, "Next").click();
+  await nextIdea(page).click();
   await expectState(page, "playing", 1);
   await expect(page.getByRole("heading", { level: 2 })).toHaveText(
     savedStepTitle(1),
   );
   await endStep(page, 1);
-  await control(page, "Next").click();
+  // The last step's end: the whole lesson, no Next on the card; → still finishes it.
+  await expect(card(page)).toContainText(CARD_TEXT.lessonEnded);
+  await expect(nextIdea(page)).toHaveCount(0);
+  await page.keyboard.press("ArrowRight");
   await expect(page.getByTestId("player")).toHaveAttribute(
     "data-state",
     "finished",
   );
-  await expect(page.getByTestId("player-status")).toHaveText(MESSAGES.finished);
+  await expect(page.getByTestId("card-status")).toHaveText(CARD_STATUS.end);
 });
 
 test("a saved step comes through the step route, and its audio through the runs route", async ({
@@ -105,13 +103,14 @@ test("Step: an unsaved step the route can't make (no paper.json) -> failed with 
   await page.goto(`/lesson/${run.lessonId}`);
   await expectState(page, "playing", 0);
   await endStep(page, 0);
-  await control(page, "Next").click();
+  await nextIdea(page).click();
   await expectState(page, "failed", 1);
   await expect(page.getByTestId("player-error")).toHaveText(
     STEP_ROUTE_ERRORS.failed,
   );
   await screenshot(page, "step-failed");
-  await control(page, "Back").click();
+  // Back: ← (or the outline).
+  await page.keyboard.press("ArrowLeft");
   await expectState(page, "playing", 0);
 });
 

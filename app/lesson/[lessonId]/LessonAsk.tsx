@@ -10,6 +10,7 @@
 //
 // Both share one AskSession (qa/askSession.ts), created by LessonView.
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { carryOnEvent } from "@/player/controls";
 import type { Player } from "@/player/usePlayer";
 import { Whiteboard } from "@/player/Whiteboard";
 import { AskPanel } from "@/qa/AskPanel";
@@ -42,11 +43,13 @@ export function LessonAsk({
   session,
   plan,
   replay,
+  captions,
 }: {
   player: Player;
   session: AskSession;
   plan: LessonPlan;
   replay: boolean;
+  captions: boolean;
 }) {
   useSessionSync(player, session);
   const { send, state, loaded, step, tMs } = player;
@@ -70,9 +73,13 @@ export function LessonAsk({
   const onAsk = useCallback(() => {
     if (send({ type: "ask" }).outcome === "changed") session.open();
   }, [send, session]);
+  // Closing Ask ("Got it, carry on", Escape, or the agent ending) carries on: a lesson
+  // stopped mid-step resumes; an ended step goes back to its end-of-step prompt.
   const onClose = useCallback(() => {
     session.close();
-    send({ type: "closeAsk" });
+    const closed = send({ type: "closeAsk" });
+    const next = carryOnEvent(closed.state);
+    if (next !== null) send(next);
   }, [send, session]);
   const onDropped = useCallback(() => {
     session.close();
@@ -102,6 +109,8 @@ export function LessonAsk({
       onAsk={onAsk}
       onClose={onClose}
       onAgentDisconnected={onDropped}
+      canAsk={player.can({ type: "ask" })}
+      captions={captions}
     />
   );
 }
@@ -116,6 +125,10 @@ export function LessonBoard({
 }) {
   useSyncExternalStore(session.subscribe, session.version, session.version);
   const asking = player.state.kind === "asking" && session.isAsking();
+  // A sketch's own objects: drawn in the answer blue, the lesson dimmed under them.
+  const sketchIds = asking
+    ? new Set(session.layer().objects.map((o) => o.id))
+    : undefined;
   // Redraw every frame while asking, so sketch actions play from arrival.
   const [, setFrame] = useState(0);
   useEffect(() => {
@@ -126,5 +139,10 @@ export function LessonBoard({
     });
     return () => cancelAnimationFrame(id);
   }, [asking]);
-  return <Whiteboard state={asking ? session.board() : player.board} />;
+  return (
+    <Whiteboard
+      state={asking ? session.board() : player.board}
+      sketchIds={sketchIds}
+    />
+  );
 }

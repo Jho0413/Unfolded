@@ -20,6 +20,15 @@ import {
 import { makePdf } from "../unit/lib/pipeline/pdfs";
 import { RUNS_DIR } from "./support/runsDir";
 import { silentMp3 } from "./support/savedRun";
+import {
+  answer,
+  askByVoice,
+  askQuestion,
+  carryOn,
+  goOn,
+  holdOn,
+  nextIdea,
+} from "./support/tutor";
 
 test.use({
   launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
@@ -34,10 +43,6 @@ test.afterAll(async () => {
 
 const player = (page: Page) => page.getByTestId("player");
 const board = (page: Page) => page.getByTestId("whiteboard");
-const control = (page: Page, name: string) =>
-  page
-    .getByRole("toolbar", { name: "Player controls" })
-    .getByRole("button", { name, exact: true });
 
 async function expectState(page: Page, state: string, step: number) {
   await expect(player(page)).toHaveAttribute("data-state", state);
@@ -90,12 +95,9 @@ async function settledBoard(page: Page): Promise<string> {
   return last;
 }
 
-async function ask(page: Page, text: string) {
-  await page.getByLabel("Type your question").fill(text);
-  await page.getByRole("button", { name: "Send" }).click();
-}
+const ask = askQuestion;
 
-test("upload → plan → step plays → highlight at its cue → Next → Ask → highlight and draw_scene → close, board restored → resume", async ({
+test("upload → plan → step plays → highlight at its cue → Next → Ask → highlight and draw_scene → carry on, board restored, playing", async ({
   page,
 }) => {
   // Long silent audio for every step (see the top of this file).
@@ -160,7 +162,7 @@ test("upload → plan → step plays → highlight at its cue → Next → Ask �
   const cell = board(page).locator(
     `[data-object-id="${id}"] [data-cell="${row},0"]`,
   );
-  await control(page, "Pause").click();
+  await holdOn(page).click();
   await expectState(page, "paused", 0);
   await seek(page, at - 50);
   await expect(cell).toHaveAttribute("data-highlight", "none");
@@ -173,18 +175,18 @@ test("upload → plan → step plays → highlight at its cue → Next → Ask �
   // Next: step 1 was prefetched while step 0 was on screen, so no new request for it.
   await step1Answer;
   await seek(page, AUDIO_MS - 100);
-  await control(page, "Play").click();
+  await goOn(page).click();
   await expectState(page, "stepEnded", 0);
-  await control(page, "Next").click();
+  await nextIdea(page).click();
   await expectState(page, "playing", 1);
   expect(stepPosts.filter((n) => n === "1")).toHaveLength(1);
 
   // Ask from a paused board at t = 0, so "before" is fixed.
-  await control(page, "Pause").click();
+  await holdOn(page).click();
   await expectState(page, "paused", 1);
   await seek(page, 0);
   const before = await settledBoard(page);
-  await page.getByRole("button", { name: "Ask", exact: true }).click();
+  await askByVoice(page).click();
   await expectState(page, "asking", 1);
   await expect(page.getByTestId("ask-panel")).toHaveAttribute(
     "data-phase",
@@ -205,9 +207,11 @@ test("upload → plan → step plays → highlight at its cue → Next → Ask �
   // draw_scene: the server's fake sketch, drawn on the current board when it arrives.
   const sketchAnswer = page.waitForResponse("**/api/sketch");
   await ask(page, "can you draw it?");
-  await expect(
-    page.getByTestId("ask-transcript").locator('[data-role="agent"]').last(),
-  ).toContainText("Let me sketch that");
+  await expect(answer(page)).toContainText("Let me sketch that");
+  await expect(page.getByTestId("answer-tag")).toHaveAttribute(
+    "data-tag",
+    "drawing",
+  );
   const { sketch } = SketchResponse.parse(await (await sketchAnswer).json());
   for (const o of sketch.objects)
     await expect(board(page).locator(`[data-object-id="${o.id}"]`)).toHaveCount(
@@ -218,19 +222,15 @@ test("upload → plan → step plays → highlight at its cue → Next → Ask �
     1,
   );
 
-  // Close Ask: back to paused, the drawing gone, the board as before Ask.
-  await page.getByRole("button", { name: "Close" }).click();
-  await expectState(page, "paused", 1);
+  // Got it, carry on: Ask closes, the drawing is gone, and the lesson goes on from where it
+  // paused: the clock moves on.
+  await carryOn(page).click();
+  await expectState(page, "playing", 1);
   for (const o of sketch.objects)
     await expect(board(page).locator(`[data-object-id="${o.id}"]`)).toHaveCount(
       0,
     );
-  await expect.poll(() => boardAttributes(page)).toBe(before);
   await expect(page.getByTestId("ask-tool-notice")).toHaveCount(0);
-
-  // Resume: playing again, and the clock moves on from where it paused.
-  await control(page, "Play").click();
-  await expectState(page, "playing", 1);
   await expect
     .poll(() =>
       page
@@ -238,4 +238,9 @@ test("upload → plan → step plays → highlight at its cue → Next → Ask �
         .evaluate((a: HTMLAudioElement) => a.currentTime),
     )
     .toBeGreaterThan(0);
+  // Held at t = 0 again, the board is the one from before Ask.
+  await holdOn(page).click();
+  await expectState(page, "paused", 1);
+  await seek(page, 0);
+  await expect.poll(() => boardAttributes(page)).toBe(before);
 });
