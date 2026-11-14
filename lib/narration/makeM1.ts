@@ -1,6 +1,6 @@
 // `npm run make:m1` (ROADMAP C1): the demo-m1 step fixture -> runs/demo-m1/, the saved run
 // the lesson page plays (P6). Writes step-0.v<k>.json (SavedStep) and its audio, then
-// plan.json (a one-step plan: L1 and seed:m2 make real plans, the step route never does),
+// plan.json (demo-m1.plan.json, one step: L1 and seed:m2 make real plans, the step route never does),
 // through the run store, so the runs folder always comes from config. scripts/make-m1.ts
 // is the command line around this.
 import "server-only";
@@ -14,6 +14,8 @@ import { saveStepVersion, writeRunJson } from "@/lib/runs/store";
 
 export const M1_LESSON_ID = "demo-m1";
 export const M1_FIXTURE = "demo-m1.step.json";
+/** The one-step plan saved with it (L1 and seed:m2 make real plans). */
+export const M1_PLAN_FIXTURE = "demo-m1.plan.json";
 
 export interface MadeM1 {
   /** The version saved as step-0.v<version>.json and .mp3. */
@@ -37,19 +39,14 @@ export async function makeM1(env: TtsEnv): Promise<MadeM1> {
       `${M1_FIXTURE} is not a valid step: ${checked.errors.join("; ")}`,
     );
   const step = checked.value;
+  // Checked before TTS, so a bad plan never costs credit.
+  const plan = LessonPlan.parse(await readFixture(M1_PLAN_FIXTURE));
 
   const narrated = await narrate(step.narration, env);
 
   const saved = SavedStep.parse({ step, cueTimes: narrated.cueTimes });
   const version = await saveStepVersion(M1_LESSON_ID, 0, saved, narrated.audio);
   // The plan goes last: a plan with no step would load as "step not in run".
-  const plan = LessonPlan.parse({
-    title: step.title,
-    steps: [
-      { title: step.title, goal: "Multiply two matrices, one entry at a time" },
-    ],
-    coverPrompt: "a whiteboard with two small matrices being multiplied",
-  });
   await writeRunJson(M1_LESSON_ID, "plan.json", plan);
 
   return {
