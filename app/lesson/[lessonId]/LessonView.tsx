@@ -2,14 +2,16 @@
 // The lesson page's browser side (ROADMAP P6): the plan's title and cover, and the player
 // fed by the saved run (./savedSteps.ts).
 //
-// Ask panel (ROADMAP Q3): mount it through the Player's `renderAsk`, which gets the player
-// (its state and `send`). `replay` is what the panel needs to say "Q&A needs a connection",
-// and `plan` and the player's `loaded` step give it its context.
+// The Ask panel (./LessonAsk.tsx) is mounted through the Player's `renderAsk` and
+// `renderBoard`, sharing one AskSession; `replay` makes it say "Q&A needs a connection".
 import { type CSSProperties, useState } from "react";
 import { Player } from "@/player/Player";
 import { MUTED } from "@/player/primitives/style";
 import { CANVAS } from "@/shared/scene";
 import type { LessonPlan } from "@/shared/lesson";
+import { ConversationProvider } from "@/qa/conversation";
+import { createAskSession } from "@/qa/askSession";
+import { LessonAsk, LessonBoard } from "./LessonAsk";
 import { savedStepFetcher } from "./savedSteps";
 
 export interface LessonViewProps {
@@ -32,6 +34,7 @@ export function LessonView({
 }: LessonViewProps) {
   // One fetcher per page load: the props never change while it's open.
   const [fetchStep] = useState(() => savedStepFetcher(lessonId, versions));
+  const [askSession] = useState(() => createAskSession());
   return (
     <div data-testid="lesson" data-replay={replay ? "1" : "0"} style={LAYOUT}>
       <header style={HEADER}>
@@ -43,11 +46,24 @@ export function LessonView({
           <h1 style={{ margin: 0, fontSize: 28 }}>{plan.title}</h1>
         </div>
       </header>
-      <Player
-        stepCount={plan.steps.length}
-        fetchStep={fetchStep}
-        debug={debug}
-      />
+      <ConversationProvider>
+        <Player
+          stepCount={plan.steps.length}
+          fetchStep={fetchStep}
+          debug={debug}
+          renderBoard={(player) => (
+            <LessonBoard player={player} session={askSession} />
+          )}
+          renderAsk={(player) => (
+            <LessonAsk
+              player={player}
+              session={askSession}
+              plan={plan}
+              replay={replay}
+            />
+          )}
+        />
+      </ConversationProvider>
     </div>
   );
 }
