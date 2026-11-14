@@ -85,7 +85,7 @@ async function requestToken(
     const detail = await res.text().catch(() => "");
     throw new AgentTokenError(
       "provider",
-      `ElevenLabs token request returned ${res.status}: ${redact(detail).slice(0, 500)}`,
+      `ElevenLabs token request returned ${res.status}: ${redact(detail).slice(0, config.agentToken.maxLoggedErrorChars)}`,
     );
   }
   try {

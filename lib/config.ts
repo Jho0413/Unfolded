@@ -34,6 +34,8 @@ export const config = {
     url: "https://api.elevenlabs.io/v1/convai/conversation/token",
     /** Ask waits on this, so a hung request gives up and Ask says Q&A is unavailable. */
     timeoutMs: 5000,
+    /** How much of an ElevenLabs error body goes to the server log. */
+    maxLoggedErrorChars: 500,
     /** Served when FAKE_APIS=1, in ElevenLabs' response shape. */
     fixture: "elevenlabs-conversation-token.json",
   },

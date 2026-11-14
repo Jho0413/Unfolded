@@ -88,6 +88,7 @@ describe("GET /api/agent/token", () => {
     const fetch = stubFetch(async () =>
       Response.json({ token: "tok-real", conversation_id: "conv_1" }),
     );
+    const timeout = vi.spyOn(AbortSignal, "timeout");
 
     const res = await GET();
 
@@ -98,6 +99,7 @@ describe("GET /api/agent/token", () => {
     expect(url.searchParams.get("agent_id")).toBe(AGENT_ID);
     expect(init.headers).toEqual({ "xi-api-key": KEY });
     expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(timeout).toHaveBeenCalledWith(config.agentToken.timeoutMs);
   });
 
   it("missing ELEVENLABS_AGENT_ID: 503 with the unavailable message, ElevenLabs not called", async () => {
@@ -200,7 +202,11 @@ describe("GET /api/agent/token", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("an unexpected error: 500", () => {
-    expect(tokenErrorStatus(new Error("disk"))).toBe(500);
+  it("an unexpected error: 500 with the unavailable message, the error logged", async () => {
+    useEnv({ FAKE_APIS: "yes" }); // getEnv() throws an EnvError, not an AgentTokenError
+    const log = captureErrorLog();
+
+    await expectUnavailable(await GET(), 500);
+    expect(log()).toContain("FAKE_APIS");
   });
 });
