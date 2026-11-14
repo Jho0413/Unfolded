@@ -20,7 +20,7 @@ Any change to a decision, a contract or a state machine in this file goes in the
 | Generation | **Fully live**, with step N+1 generated while step N plays. Every run is saved to `runs/` and can be replayed offline. | Live by default, with a safety net if the network fails during judging. |
 | Storage | **No database.** The `runs/<lessonId>/` folder is both the store and the replay set. | Fewer moving parts. |
 | Papers | ***Attention Is All You Need*** is the **demo** paper. A second, different paper (non-ML or math-heavy, picked in spike S3) checks that the pipeline generalises. | Attention is very visual for the demo: matrix multiplication → dot-product attention → multi-head. But the product works for any paper: no paper-specific logic or concept lists in code or prompts. |
-| Screen | **Desktop width, light theme** for the demo. | It's demoed on a laptop. Mobile and dark mode are out of scope. |
+| Screen | **Desktop width; a dark "studio" theme by default, and a light one** (a toggle on the lesson page, kept in `localStorage`, applied before first paint; with nothing saved, the system's preference: dark unless it prefers light). Fonts: Geist (UI), Geist Mono (small labels), STIX Two Text (the board), self-hosted with `next/font`. | It's demoed on a laptop. The board reads best on dark, and light suits a bright room. Mobile is out of scope. |
 
 ## 2. System overview
 
@@ -65,8 +65,12 @@ Both modes draw through the same renderer, from the same scene contract.
 app/
   page.tsx, UploadForm.tsx          upload page: PDF in, the plan as a list of step titles, then Start the lesson
   upload.ts                         the upload form field and the section 7 upload and plan messages (page and route)
+  layout.tsx                        fonts (next/font) and the theme script that sets data-theme before first paint
   lesson/[lessonId]/page.tsx        player page
-  lesson/[lessonId]/LessonAsk.tsx   the Ask panel and the Ask board, mounted through the Player's renderAsk / renderBoard
+  lesson/[lessonId]/LessonView.tsx  the page: the outline, then the stage (PlayerStage) with the top bar's toggles; one usePlayer
+  lesson/[lessonId]/Outline.tsx, outlineRows.ts   the lesson outline, and its rows (pure, section 5.6)
+  lesson/[lessonId]/Toggles.tsx     the top bar's Captions and light / dark toggles
+  lesson/[lessonId]/LessonAsk.tsx   the Ask panel and the Ask board, mounted through the stage's renderAsk / renderBoard
   api/lessons/route.ts              POST: PDF -> lesson plan, saved as runs/<id>/plan.json and paper.json
   api/lessons/[lessonId]/steps/[n]/route.ts   POST: generate step n (script + audio + cue times), or return it if it's ready; after a failure, a new POST tries again (section 6.2)
   api/sketch/route.ts               POST: Q&A drawing request -> sketch
@@ -104,11 +108,16 @@ lib/                                server-only (import "server-only")
 player/                             browser
   sceneAt.ts                        pure: board state at time t
   machine.ts                        pure: player state machine (section 6)
-  Whiteboard.tsx, primitives/       matrix, text, latex, arrow, image
-  usePlayer.ts                      audio element, clock, controls
+  Whiteboard.tsx, primitives/       matrix, text, latex, arrow, image; a Q&A sketch in its own layer (answer blue, the lesson dimmed)
+  usePlayer.ts                      audio element, clock, Space
   stepLoader.ts                     a step's request, then its audio as a blob; only the latest request reports back
-  controls.ts                       pure: which controls are enabled, key and play() results -> events
-  Player.tsx                        the whiteboard, controls, status and the ?debug=1 overlay
+  prefetch.ts                       step n + 1 requested ahead (L2), and each step's request status for the outline
+  controls.ts                       pure: which events change the state, key and play() results -> events, carry on after Ask
+  cardView.ts                       pure: the tutor card's status, text and buttons for each state (section 5.6)
+  captions.ts                       pure: the narration sentence being said at time t (section 5.6)
+  theme.ts, theme.css               the two palettes (one place), the board's tokens, the theme script and toggle
+  TutorCard.tsx                     the tutor card and the Ask box (presentation)
+  Player.tsx                        PlayerStage: the top bar, the board with the tutor card on it, the keys, the ?debug=1 overlay; Player (its own usePlayer, the dev page)
 qa/                                 browser
   conversation.ts                   adapter over the ElevenLabs SDK (one conversation per start, qa/sdkSessions.ts); a scripted fake when NEXT_PUBLIC_FAKE_APIS=1
   fakeConversation.ts               the scripted fake: canned agent turns, calls tool handlers (window.__qaFake in fake builds, for Playwright)
@@ -117,7 +126,7 @@ qa/                                 browser
   askBoard.ts                       pure: the board during Ask (frozen lesson board + highlights and sketches timed from arrival, fresh resets)
   askSession.ts                     one lesson's Ask state outside React: the Ask layer, when Ask opened, the session id
   drawScene.ts                      the draw_scene request: POST /api/sketch, validate on arrival, draw or "Couldn't draw that."
-  AskPanel.tsx                      voice + typed input, through conversation.ts; shows the Ask messages of section 7
+  AskPanel.tsx                      the Ask box (typed or the mic) and, while asking, the tutor card, through conversation.ts; shows the Ask messages of section 7
   tools.ts                          client tool handlers, typed by shared/tools.ts
 scripts/                            dev scripts, run with tsx: make:m1 (make-m1.ts), seed:m2 (seed-m2.ts, its lessons in seed-m2.lessons.json), spike:s3, spike:s4 (s4-spike.ts)
 agent/                              ElevenLabs CLI config: the agent (prompt, voice, LLM) and its client tools, plus the CLI's tracking file
@@ -271,7 +280,7 @@ sequenceDiagram
   - the plan and the step's goal
   - the previous step's narration if it has been generated, otherwise that step's goal from the plan (needed after a jump)
   - the learner signals (section 5.4)
-- **Cover illustration (fal).** The plan includes a `coverPrompt`. Once the plan is made, and before `plan.json` is saved, `lib/media/cover.ts` asks fal for **one** image (`config.fal.model`, S4), downloads it at once (fal's URLs expire) and saves it in the run folder as `cover.jpg` (`config.cover.file`). It records that name as `cover` in `plan.json` and in the plan response. The upload page's plan view shows it, and the lesson page shows it as a header. Both hide the image if it fails to load.
+- **Cover illustration (fal).** The plan includes a `coverPrompt`. Once the plan is made, and before `plan.json` is saved, `lib/media/cover.ts` asks fal for **one** image (`config.fal.model`, S4), downloads it at once (fal's URLs expire) and saves it in the run folder as `cover.jpg` (`config.cover.file`). It records that name as `cover` in `plan.json` and in the plan response. The upload page's plan view shows it, and the lesson page shows it beside the lesson's title in the outline (section 5.6). Both hide the image if it fails to load.
   - It sits outside the scene contract and `sceneAt`: it's page chrome, not a board object.
   - The plan route waits for it up to `config.cover.timeoutMs` (6 s; S4 saw 4.4–4.6 s with the download). That deadline is the cover's own: a race against a timer around the fal call and the download, since `fal.subscribe`'s `timeout` doesn't cover the whole call. When it passes, the request is aborted and fal is asked to cancel it once it has a request id (fal can't cancel one already running, and an abort before fal answers the submit has no id, so a late image may still be charged). If fal is slow, fails, sends something that isn't a JPEG by its first bytes, or has no `FAL_KEY`, the plan is returned and saved without `cover`, the pages show no image, and the reason is logged. The timeout is kept to a few seconds, since step 0 is requested after the plan returns.
   - Budget: about 25 US dollars of fal credits per teammate. So it's one image per lesson plan, a saved cover is never regenerated, replay never calls fal, and tests use the fal fake.
@@ -330,7 +339,7 @@ sceneAt(objects: BoardObject[], timed: { action; startMs; durationMs }[], tMs: n
   - When a `hide` on a moved part ends, its copy leaves `copies`. Anchors naming that part then resolve to the source cells, and a later `move` of it makes a fresh copy.
   - A copy is independent of its matrix once made: hiding or moving the whole matrix leaves its copies where they are.
   - `player/sceneAt.ts` also exports `timeline(actions, cueTimes)`, which builds `timed` in lesson mode, and `resolveAnchor(board, anchor)`, which gives the renderer arrow ends. The renderer reuses its target helpers (`partKey`, `isPart`, `coversCell`, `highlightColor`) rather than copying them.
-- Back, Replay and scrubbing are just seeks on the audio element. There's no animation state to undo.
+- Back and Replay (and any seek) are just seeks on the audio element. There's no animation state to undo.
 - `Whiteboard.tsx` renders `BoardState` as SVG on each animation frame. Positions (moves included) come from `sceneAt`; the renderer only fades shows, hides, highlights and writes by each action's progress, and exposes state as `data-*` attributes for tests.
 - **Latex and arrows on the board.** `latex` is KaTeX's HTML in a `foreignObject` centred on x,y, rendered with `shared/latex.ts`'s `KATEX_OPTIONS` (trust off, `maxSize` and `maxExpand` capped; `validate.ts` uses the same options, and rejects tex that uses a command trust refuses) and `throwOnError: false`, so tex that slips through shows as KaTeX's red source text instead of breaking the board (if KaTeX fails outright, the source shows as plain text). An arrow resolves its ends with `resolveAnchor` on every frame. An end on a point is exact; an end on a target stops just outside the target's box (cells, text box, image; for latex, a box estimated from KaTeX's output, since its real size is only known after layout), so the head doesn't cover what it points at. The label sits beside the middle of the line, far enough out that its box clears it. `data-from-*`/`data-to-*` are the resolved anchors.
 - Motion is only used for UI chrome, such as panels and buttons, not for board objects, so the board always matches the clock.
@@ -359,6 +368,72 @@ sceneAt(objects: BoardObject[], timed: { action; startMs; durationMs }[], tMs: n
   - The routes serve each step's *played* version, or its latest version if it never played, from the folder. They never call Claude, ElevenLabs or fal. Until A1 records played versions in `signals.json`, the step route serves the latest. Any lesson saved in `runs/` replays this way, not only `REPLAY_RUN`'s (the redirect goes to that one).
   - A step that isn't in the folder fails, with "This step isn't in the saved run." (the step route's 404; a saved file that isn't a `SavedStep` counts as missing). A bad `n` or a lesson with no `plan.json` gets the usual "No such lesson or step." (section 7).
 - Q&A needs the network, so in replay mode the Ask panel says "Q&A needs a connection".
+
+### 5.6 The lesson page: a tutor you can interrupt
+
+The lesson is a tutor that explains, not a video. There's no transport: no play button, scrubber or timecode.
+
+- **Layout (desktop width).** On the left, the **outline** (about 252 px): the brand, the lesson's title and cover, one row per step, and the keyboard hints at the bottom. On the right, a slim **top bar** ("Idea n of m", the step's title, the Captions and light / dark toggles) and the **board** as the stage, with the **tutor dock** floating at its bottom: the tutor card, and under it the always-visible Ask box. While a step loads, the board shows "Preparing the next idea" and its title.
+- **The tutor card** says what the tutor is doing and offers only what the learner can do now. `player/cardView.ts` is the card as a pure function of the machine's state (and, while asking, of the Ask panel's state); `player/TutorCard.tsx` draws it. Every button sends an existing machine event (section 6.1): the card adds no state.
+- **Keys:** Space holds on and goes on (`pause` / `resume`, as before), → next idea (`next`), ← back (`back`), R says it again (`replay`), A asks by voice (`ask`). None of them fire with a modifier, on key repeat, or while typing in a text field; Space also not on a button or link (`player/controls.ts`).
+- **Captions** show the narration's current sentence, the words said in ink and the rest faint, with the word being said underlined. The browser only has the cue times, so `player/captions.ts` interpolates the spoken character offset linearly between (offset, time) anchors: the start at 0 s, each cue, and the end of the audio (until its duration is known, the offset stops at the last cue). Sentences come from `Intl.Segmenter`; the split snaps to whole words. The Captions toggle hides the caption and a voice answer's text (a text-only session's answers still show: they aren't spoken).
+- **Theme.** The two palettes are defined once, in `player/theme.css`. The board's colours in `player/primitives/style.ts` are CSS custom properties (`INK = "var(--wb-ink)"`, ...), so the board follows the theme with no React state. The lesson's highlights use the accent (yellow, amber in light); anything from a question (a sketch, the answer's tag) uses the answer blue: a sketch's own objects are drawn in a layer that re-points the board's tokens at it, and while there are any, the lesson's layer dims to 30 %. A spoken answer, or highlights on the lesson board, doesn't dim it.
+
+**The tutor card** (`player/cardView.ts`; one test per row):
+
+| State | Status | Under it | Buttons |
+|---|---|---|---|
+| loading(k) | Preparing | "Preparing “<title k>”…" | none |
+| paused, with the "Press play to start" notice (autoplay blocked) | Ready when you are | "<m> ideas from **<lesson title>**. I'll draw as I explain. Interrupt me any time." | **Start with “<title>” →** (`resume`) |
+| playing | Explaining | the caption (none with Captions off) | Hold on (`pause`, Space) |
+| paused | Holding on | the caption (none with Captions off) | Go on (`resume`, Space) |
+| stepEnded, not the last step | Waiting for you | "That's the idea. Ready for the next one?" | **Next: <next title> →** (`next`), Say that again (`replay`) |
+| stepEnded on the last step, or finished | End of the lesson | "That's the whole lesson. Anything you want to go over?" | Say that again (`replay`) |
+| failed, not the last step | Stuck on this idea | the failure message (section 7) | **Retry** (`retry`), Next: <next title> → (`next`, skips it) |
+| failed on the last step | Stuck on this idea | the failure message | **Retry** (`retry`) |
+| asking | the Ask card below | | |
+
+**While asking** the Ask panel shows the card instead, with the section 7 Ask messages in it. Only the latest question and the agent's latest message after it are shown, never a transcript.
+
+| Ask state | Status | Under it | Buttons |
+|---|---|---|---|
+| replay, failed (no session), or dropped | Stopped to listen | the section 7 message ("Q&A needs a connection.", "Questions are unavailable right now.") | Carry on |
+| waiting (the mic prompt is open), nothing asked | Stopped to listen | "Allow the mic to talk, or type your question." | Carry on |
+| connecting, nothing asked | Stopped to listen | "Connecting…" | Carry on |
+| connected, nothing asked | Listening | "I've stopped. Go ahead: ask out loud, or type below." (text-only: "…type your question below."), or the agent's greeting | Carry on |
+| a question with no answer yet (queued or sent) | Thinking | "You asked: <q>" (typed) or "You said: <q>" (voice), "Thinking…" | Carry on |
+| answered | Answering, tagged **Drawing on the board** (the agent called `draw_scene` for this question) or **Spoken answer** | the question, and the answer's text (hidden with Captions off in a voice session) | **Got it, carry on** |
+
+**Closing Ask carries on** (Got it, carry on, Escape, or the agent ending the session): `closeAsk`, then `resume` if that left the lesson paused mid-step (`player/controls.ts` `carryOnEvent`). An ended step goes back to its end-of-step prompt; a `go_to_step` jump still loads paused (section 6.1).
+
+**The Ask box** is always there, under the card: "Ask anything, or just press the mic and talk", an `A` hint and the mic. Typing a question and pressing Enter opens Ask (`ask`) if it's closed and sends the question at once: it's queued until the session connects, which makes it a text-only session (section 8), so it never waits on the mic. The mic button (or `A`) opens Ask by voice; in a text-only session that may use the mic, it's **Use the mic**. While Ask can't open (a failed step), the closed box is off.
+
+**The outline** (`app/lesson/[lessonId]/outlineRows.ts`; one test per row). A row's request status comes from `player/prefetch.ts` (`statuses()` and `subscribe`): not started, generating (a request in flight, the prefetch included), ready, or failed; only a step's latest request sets it.
+
+| Row | Shows | Click |
+|---|---|---|
+| before the step on screen | ✓, "Done" | `goToStep` |
+| the step on screen | highlighted (`aria-current`); "Preparing" while it loads | none |
+| generating | a spinner, "Preparing" | `goToStep` |
+| its request failed | "Couldn't prepare" | `goToStep` (asks again) |
+| after the step on screen, never requested | "Not ready" | `goToStep` (generates it) |
+| after it, ready | nothing extra | `goToStep` |
+| any row while asking | as above | none (a jump while asking is the agent's `go_to_step`) |
+
+**Captions** (`player/captions.ts`; one test per row, plus fast-check properties: the sentence index never decreases as t grows, and the text is always a sentence of the stripped narration):
+
+| Input | Caption |
+|---|---|
+| Empty narration, or only markers and spaces | none |
+| No cues | interpolated from 0 s to the audio's end |
+| No cues, and the duration isn't known yet | the first sentence, nothing said |
+| One cue | interpolated before and after it |
+| A cue at the start of a sentence | that sentence from the cue's time |
+| t before the first cue, or before 0 | the first sentence |
+| t past the end | the last sentence, all said |
+| t between two words | the earlier word said, none current |
+| A cue the times don't list, or one timed past the end | skipped; capped at the end |
+| Unicode (accents, emoji, CJK) | sentences stay whole, words never split |
 
 ## 6. State machines
 
@@ -422,7 +497,7 @@ Every state × event pair has a defined result, and each cell gets a test:
   - `loadStep` requests the step, then fetches its audio as a blob. `stepReady(i)` is sent once both have arrived, and the step is kept only if the machine takes it. A step request that fails sends `stepFailed(i)` with the server's message, or "Couldn't make this step. Retry?" when there is none (network down). An audio download that fails sends `stepFailed(i)` with "Couldn't play the audio. Retry?". Only the latest request can report back: an older one that finishes later, in success or failure, is dropped and logged.
   - `audio.play()` rejected with `NotAllowedError` sends `playBlocked`. Its other rejections are left to the element's `error` event, which sends `audioError` (so a decode error isn't sent twice). Playing an element that already failed (its error was ignored while paused) sends `audioError`.
   - The audio plays exactly while the state is `playing`. A pause from outside the page (a media key) while playing sends `pause`. A play from outside sends `resume`, and if the machine ignores it, the audio is paused again.
-  - A control is enabled exactly when its event would change the state. Space sends `pause` while playing and `resume` otherwise, but not with a modifier key, on key repeat, or on an interactive element (a text field, button, link or select, where Space already does something).
+  - The tutor card (section 5.6) offers a button exactly when its event would change the state (`canSend`); there are no disabled transport controls. Space sends `pause` while playing and `resume` otherwise, but not with a modifier key, on key repeat, or on an interactive element (a text field, button, link or select, where Space already does something). → sends `next`, ← `back` and R `replay`, but not with a modifier, on key repeat, or in a text field.
 
 ### 6.2 Step generation (per step, on the server)
 
@@ -468,7 +543,7 @@ The developer gets the full error in the server log, tagged with the route, less
 | Step | Any `failed` cause in section 6.2 (502), or a failure outside the table such as a missing `paper.json` or a failed save (500); the reason is logged with the route, lesson and step, and `failed (<event>)` | "Couldn't make this step." | Retry (player `failed` state): the next request generates again; or Next to skip the step, or Back |
 | Step | Replay mode, and the step isn't in the run (404, on every request; nothing is generated) | "This step isn't in the saved run." | Next (skips it), Back, or another step |
 | Plan or step | fal error or timeout, or no `FAL_KEY` | Nothing: the plan or step shows without the illustration | The image is hidden and the error is logged |
-| Player | Browser blocks autoplay | "Press play to start." | Play button |
+| Player | Browser blocks autoplay | The tutor card's intro: "<m> ideas from <lesson title>. I'll draw as I explain. Interrupt me any time." (the machine's "Press play to start" notice, section 5.6) | **Start with “<title>” →** |
 | Player | Audio fails to load or decode | "Couldn't play the audio. Retry?" | Retry |
 | Route | `lessonId` doesn't match `^[a-z0-9-]{1,40}$`, or `n` isn't a step in the plan (not a plain decimal, or past the plan's last step); a lesson with no `plan.json` is a 404 with the same words | 400 "No such lesson or step." | Back to upload |
 | Lesson page | `/lesson/<lessonId>` with a bad `lessonId`, or a lesson with no saved or an invalid `plan.json` (logged) | A 404 page: "No such lesson or step." | "Back to upload" link |
@@ -487,7 +562,7 @@ The developer gets the full error in the server log, tagged with the route, less
 
 ## 8. Q&A mode
 
-- **Starting a session:** the learner presses **Ask**, or presses the `A` key (Space stays play/pause).
+- **Starting a session:** the learner types a question in the always-visible Ask box and presses Enter (it's sent at once, section 5.6), presses the box's mic button, or presses the `A` key (Space stays hold on / go on).
   1. The player moves to `asking` and pauses the narration. Ask also works while a step is loading (section 6.1).
   2. `qa/connector.ts` decides the session (issue #84). It fetches a token and asks for the mic **in parallel**, and the input works at once: a typed question never waits on the mic.
      - Mic granted first: a voice session. Mic denied: text-only, with "Mic is off…". The learner focuses or types first (the browser's mic prompt still open): text-only at once. A text-only session the learner chose can switch to voice later with **Use the mic** (a click, when the browser may ask).
@@ -501,7 +576,7 @@ The developer gets the full error in the server log, tagged with the route, less
      - Each start is its own SDK conversation (`qa/sdkSessions.ts`), not the React `ConversationProvider`'s: that provider silently ignores a start while an earlier one is pending, and ending doesn't release it, so a hung WebRTC start would block the fallback. `Conversation.startSession` resolves once connected and rejects when the connection fails. A new start supersedes any earlier session without waiting; one that lands after being ended or superseded is ended at once, and its callbacks are dropped.
      - With `NEXT_PUBLIC_FAKE_APIS=1` the adapter is a scripted fake: it replays canned agent turns and calls the tool handlers directly, so Playwright can test Q&A without a network.
   5. **WebRTC blocked (venue Wi-Fi).** If an attempt fails before connecting (no credentials, the start rejects, an error or a disconnect arrives, or it takes longer than `ATTEMPT_TIMEOUT_MS`, 8 s, credentials included), the same session is retried once on the other transport: over the websocket with `GET /api/agent/signed-url` (above) and `startSession({ signedUrl, connectionType: "websocket" })`, at once (step 4: nothing waits on the abandoned start). A transport that worked is tried first for later sessions on the page (and the fallback is then the other one). If both fail: "Questions are unavailable right now."
-- **The panel and the machine.** `AskPanel` takes `open` (the player is `asking`), `replay`, the context, the tool handlers (Q4) and three callbacks the page turns into machine events: `onAsk` (`ask`), `onClose` (`closeAsk`) and `onAgentDisconnected` (`agentDisconnected`, when the session drops with an error). The panel shows the Ask messages of section 7 itself, so the page doesn't show the machine's "Q&A ended unexpectedly." notice again. A session the agent ends normally closes Ask like `closeAsk`, with no message.
+- **The panel and the machine.** `AskPanel` takes `open` (the player is `asking`), `replay`, the context, the tool handlers (Q4), `canAsk` (whether the machine takes `ask` now), `captions`, and three callbacks the page turns into machine events: `onAsk` (`ask`), `onClose` (`closeAsk`, then on the lesson page carry on: section 5.6) and `onAgentDisconnected` (`agentDisconnected`, when the session drops with an error). The panel shows the Ask messages of section 7 itself, in its tutor card (a dropped session's message stays above the Ask box after Ask closes), so the page doesn't show the machine's "Q&A ended unexpectedly." notice again. A session the agent ends normally closes Ask like `closeAsk`, with no message. It shows only the latest question and answer, and tags the answer "Drawing on the board" when the agent called `draw_scene` for that question.
 - **Typed questions** go through `sendUserMessage(text)` to the same agent.
   - While the learner types, the mic is muted so venue noise doesn't start a turn, and `sendUserActivity()` keeps the agent from talking over them.
   - In a text-only session (mic denied, or the learner typed before answering the mic prompt) answers appear as text. Spike S2 confirms that text-only answers aren't spoken.
@@ -583,7 +658,7 @@ The developer gets the full error in the server log, tagged with the route, less
 | Unit | Vitest | Pure logic: `cues.ts`, `sceneAt.ts`, `machine.ts` (one test per cell of §6.1), `validate.ts` (one per row of §4), the step-generation rules (one per cell of §6.2), env modes (one per row of §9) | Never |
 | Property | fast-check (in Vitest) | Cue strip/reinsert round trip, cue times never decrease, alignment walk, `sceneAt` deterministic under seeking | Never |
 | Route | Vitest + `lib/fakes/` | Each API route with faked Claude/ElevenLabs/fal: success, every rejection in section 7, retry once, replay mode | Never |
-| End to end | Playwright, `FAKE_APIS=1` + `NEXT_PUBLIC_FAKE_APIS=1` | Upload → plan → step plays → highlight at its cue → Next → Ask (typed) → `draw_scene` on the current board → close Ask, board restored. Tests assert on `data-*` attributes, and check timing by seeking to the cue time, never by waiting | Never |
+| End to end | Playwright, `FAKE_APIS=1` + `NEXT_PUBLIC_FAKE_APIS=1` | Upload → plan → step plays → highlight at its cue → Next → Ask (typed) → `draw_scene` on the current board → carry on, board restored; the tutor card's states, the keys, the outline, captions and the theme (section 5.6). Tests assert on `data-*` attributes, and check timing by seeking to the cue time, never by waiting | Never |
 | Real run | Agent-driven browser, real APIs | The feature working for real in a browser on the laptop. The PR lists what was checked, with screenshots or a short recording. | Yes, by hand, never in CI |
 
 - **Fakes** return recorded fixtures from `lib/fakes/fixtures/`. These are real responses captured once, with secrets removed, so tests check against real response shapes without paying for them. A task that adds a provider call also commits its fixture.
