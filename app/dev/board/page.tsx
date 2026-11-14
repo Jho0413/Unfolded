@@ -5,15 +5,17 @@
 //   /dev/board?scene=m1&t=3400              demo-m1 at 3400 ms, via sceneAt
 //   /dev/board?scene=m1-late-highlight&t=…  demo-m1 with a highlight after the slide
 //
-// Production servers answer 404 unless started with FAKE_APIS=1 (how e2e and
-// CI run the production build), so it is never reachable in a real
-// `npm start`. The gate reads the env per request, not at build time.
+// Production servers answer 404 unless in fake mode (FAKE_APIS=1 without
+// REPLAY_RUN, lib/env.ts), which is how e2e and CI run the production build,
+// so it is never reachable in a real `npm start`. The gate reads the env per
+// request, not at build time.
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { fakesEnabled } from "@/lib/fakes";
 import { Whiteboard } from "@/player/Whiteboard";
+import { HIGHLIGHT, INK } from "@/player/primitives/style";
 import { M1_CUE_TIMES, SCENES, isScene, sceneState } from "./scenes";
 
 export const metadata: Metadata = {
@@ -51,7 +53,7 @@ export default async function DevBoardPage({
       style={{
         fontFamily: "system-ui, sans-serif",
         background: "#f8fafc",
-        color: "#1f2937",
+        color: INK,
         minHeight: "100vh",
         padding: 16,
         boxSizing: "border-box",
@@ -62,8 +64,8 @@ export default async function DevBoardPage({
         style={{
           margin: "0 0 12px",
           padding: "6px 12px",
-          background: "#fef3c7",
-          border: "1px solid #d97706",
+          background: HIGHLIGHT.warn.fill,
+          border: `1px solid ${HIGHLIGHT.warn.stroke}`,
           borderRadius: 6,
           display: "inline-block",
           fontWeight: 600,

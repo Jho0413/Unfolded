@@ -18,6 +18,7 @@ function realMode() {
   vi.stubEnv("NODE_ENV", "production");
   vi.stubEnv("FAKE_APIS", undefined);
   vi.stubEnv("NEXT_PUBLIC_FAKE_APIS", undefined);
+  vi.stubEnv("BUILT_WITH_BROWSER_FAKES", undefined);
   vi.stubEnv("REPLAY_RUN", undefined);
   vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
   vi.stubEnv("ELEVENLABS_API_KEY", "test-key");
