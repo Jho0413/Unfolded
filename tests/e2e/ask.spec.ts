@@ -318,8 +318,13 @@ test.describe("Ask messages (ARCHITECTURE.md section 7)", () => {
     await expect(notice(page)).toHaveCount(0);
   });
 
-  test(`token route fails: "${ASK.unavailable}"`, async ({ page }) => {
+  test(`token route fails, and the signed-URL route too: "${ASK.unavailable}"`, async ({
+    page,
+  }) => {
     await page.route("**/api/agent/token", (route) =>
+      route.fulfill({ status: 503, json: { error: ASK.unavailable } }),
+    );
+    await page.route("**/api/agent/signed-url", (route) =>
       route.fulfill({ status: 503, json: { error: ASK.unavailable } }),
     );
     await open(page);
@@ -492,6 +497,21 @@ test.describe("Ask robustness (issue #84)", () => {
       "webrtc",
       "websocket",
     ]);
+  });
+
+  test("the token route fails: the websocket with the server's (fake) signed URL connects", async ({
+    page,
+  }) => {
+    await page.route("**/api/agent/token", (route) =>
+      route.fulfill({ status: 502, json: { error: ASK.unavailable } }),
+    );
+    await open(page);
+    await toPlaying(page);
+    await askAndConnect(page);
+    await expect(page.getByTestId("ask-panel")).toHaveAttribute(
+      "data-transport",
+      "websocket",
+    );
   });
 
   test("WebRTC blocked: falls back to the websocket, and a typed question is answered", async ({

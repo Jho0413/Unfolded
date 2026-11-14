@@ -14,8 +14,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { z } from "zod";
-import { AgentTokenResponse } from "@/shared/lesson";
+import { AgentSignedUrlResponse, AgentTokenResponse } from "@/shared/lesson";
 import {
   AskConnector,
   CONNECTOR_MESSAGES,
@@ -51,9 +50,6 @@ export type AskPanelProps = {
   /** The session dropped: send the machine `agentDisconnected`. */
   onAgentDisconnected: () => void;
 };
-
-// TODO(#84): use shared/lesson.ts's AgentSignedUrlResponse once Jason's signed-url PR lands.
-const AgentSignedUrlResponse = z.object({ signedUrl: z.string().min(1) });
 
 export type { AskApi };
 
@@ -339,7 +335,7 @@ async function fetchToken(): Promise<string | null> {
 }
 
 /**
- * A websocket signed URL (GET /api/agent/signed-url, area B), for when WebRTC is blocked; null
+ * A websocket signed URL (GET /api/agent/signed-url), for when WebRTC is blocked; null
  * when Q&A is unavailable. Same errors as the token route.
  */
 async function fetchSignedUrl(): Promise<string | null> {
