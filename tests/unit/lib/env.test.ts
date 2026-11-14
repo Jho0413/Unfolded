@@ -19,6 +19,7 @@ const ALL_KEYS = [
   "FAL_KEY",
   "FAKE_APIS",
   "NEXT_PUBLIC_FAKE_APIS",
+  "BUILT_WITH_BROWSER_FAKES",
   "REPLAY_RUN",
 ];
 
@@ -59,6 +60,10 @@ describe("Real (npm start)", () => {
     expect(env.FAL_KEY).toBeUndefined();
   });
 
+  it("an empty REPLAY_RUN counts as unset", () => {
+    expect(parseEnv({ ...REAL_KEYS, REPLAY_RUN: "" }).mode).toBe("real");
+  });
+
   it("refuses a build made with NEXT_PUBLIC_FAKE_APIS=1", () => {
     expect(() => parseEnv(REAL_KEYS, { builtWithBrowserFakes: true })).toThrow(
       "NEXT_PUBLIC_FAKE_APIS=1",
@@ -68,9 +73,9 @@ describe("Real (npm start)", () => {
 
 describe("FAKE_APIS=1 (tests, CI)", () => {
   it("requires no keys", () => {
-    expect(
-      parseEnv({ FAKE_APIS: "1" }, { builtWithBrowserFakes: true }).mode,
-    ).toBe("fake");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(parseEnv({ FAKE_APIS: "1" }).mode).toBe("fake");
+    warn.mockRestore();
   });
 
   it("on a build without browser fakes, starts but warns", () => {
@@ -143,11 +148,55 @@ describe("next build", () => {
     await expect(register()).resolves.toBeUndefined();
   });
 
-  it("at server start, register() validates and stops on a missing key", async () => {
+  it("at server start, register() logs the missing key and exits with 1", async () => {
     clearKeys();
     vi.stubEnv("NEXT_RUNTIME", "nodejs");
     vi.stubEnv("NEXT_PHASE", "phase-production-server");
-    await expect(register()).rejects.toThrow("ANTHROPIC_API_KEY");
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const exit = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("process.exit");
+    });
+    await expect(register()).rejects.toThrow("process.exit");
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "Missing required env vars: ANTHROPIC_API_KEY, ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID",
+      ),
+    );
+    exit.mockRestore();
+    error.mockRestore();
+  });
+
+  it("at server start, register() exits with 1 on a build made with NEXT_PUBLIC_FAKE_APIS=1", async () => {
+    clearKeys();
+    for (const [k, v] of Object.entries(REAL_KEYS)) vi.stubEnv(k, v);
+    vi.stubEnv("BUILT_WITH_BROWSER_FAKES", "1");
+    vi.stubEnv("NEXT_RUNTIME", "nodejs");
+    vi.stubEnv("NEXT_PHASE", "phase-production-server");
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const exit = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("process.exit");
+    });
+    await expect(register()).rejects.toThrow("process.exit");
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("Rebuild"));
+    exit.mockRestore();
+    error.mockRestore();
+  });
+
+  it("at server start, register() starts on valid env without exiting", async () => {
+    clearKeys();
+    vi.stubEnv("FAKE_APIS", "1");
+    vi.stubEnv("NEXT_PUBLIC_FAKE_APIS", "1");
+    vi.stubEnv("NEXT_RUNTIME", "nodejs");
+    vi.stubEnv("NEXT_PHASE", "phase-production-server");
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const exit = vi.spyOn(process, "exit");
+    await register();
+    expect(exit).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith("[env] mode: fake");
+    exit.mockRestore();
+    log.mockRestore();
   });
 });
 
