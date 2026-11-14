@@ -441,6 +441,40 @@ function changesBoard(
   return snapshot(after) !== snapshot(before);
 }
 
+/** Which part of a cell an action sets, if it sets one. */
+type CellField = "highlight" | "value";
+
+function cellField(action: Action): CellField | undefined {
+  if (action.do === "highlight" || action.do === "unhighlight")
+    return "highlight";
+  if (action.do === "write") return "value";
+  return undefined;
+}
+
+/** Cells [r, c] of matrix `id` whose `field` differs between two boards. */
+function changedCells(
+  before: Board,
+  after: Board,
+  id: string,
+  field: CellField,
+): [number, number][] {
+  const a = before.byId.get(id);
+  const b = after.byId.get(id);
+  if (a?.object.kind !== "matrix" || b?.object.kind !== "matrix") return [];
+  const aRows = a.object.rows;
+  const out: [number, number][] = [];
+  b.object.rows.forEach((row, r) =>
+    row.forEach((value, c) => {
+      const differs =
+        field === "value"
+          ? value !== aRows[r][c]
+          : b.cellHighlight?.[r][c] !== a.cellHighlight?.[r][c];
+      if (differs) out.push([r, c]);
+    }),
+  );
+  return out;
+}
+
 /**
  * The board at `tMs`: `objects` as the step starts, with every action of
  * `timed` that has started by then applied. Actions apply in start order;
@@ -450,7 +484,9 @@ function changesBoard(
  *   start; `hide` when it ends. `move` slides linearly from where its target
  *   was when the move started to where its anchor was then.
  * - `active` lists the actions in progress (start <= t < start + duration)
- *   that change the board, with how far along they are, 0..1.
+ *   that change the board, with how far along they are, 0..1. A highlight,
+ *   unhighlight or write on a matrix also lists the cells it changed that no
+ *   later started action has changed since, so the renderer fades only those.
  * - Actions on unknown or invalid targets are ignored (validate.ts rejects
  *   them before they reach the player).
  */
@@ -480,25 +516,75 @@ export function sceneAt(
     );
   });
 
+  // The board each started action is judged against (`beforeAt`), built once.
+  const befores = new Map<number, Board>();
+  const beforeOf = (i: number): Board => {
+    let before = befores.get(i);
+    if (!before) {
+      before = run(base, started.slice(0, i), plans, beforeAt(started[i]));
+      befores.set(i, before);
+    }
+    return before;
+  };
+
+  // The cells each started cell action changed, judged like `changesBoard`.
+  // Computed only when needed.
+  const cellChanges = new Map<number, Set<string>>();
+  const changedBy = (i: number): Set<string> => {
+    let cells = cellChanges.get(i);
+    if (!cells) {
+      const e = started[i];
+      const field = cellField(e.action);
+      const before = beforeOf(i);
+      const after = cloneBoard(before);
+      apply(after, e, 1, plans[i]);
+      cells = new Set(
+        field
+          ? changedCells(before, after, e.action.target.id, field).map(
+              ([r, c]) => `${r},${c}`,
+            )
+          : [],
+      );
+      cellChanges.set(i, cells);
+    }
+    return cells;
+  };
+  /** Cells entry `i` changed that no later started action has changed since. */
+  const cellsStillSet = (i: number): [number, number][] => {
+    const { action } = started[i];
+    const field = cellField(action);
+    const left = new Set(changedBy(i));
+    for (let j = i + 1; j < started.length && left.size; j++) {
+      const later = started[j].action;
+      if (later.target.id !== action.target.id || cellField(later) !== field)
+        continue;
+      for (const cell of changedBy(j)) left.delete(cell);
+    }
+    return [...left].map((k) => k.split(",").map(Number) as [number, number]);
+  };
+
   const board = run(base, started, plans, tMs);
   return {
     objects: board.states,
     copies: board.copies,
-    active: started
-      .filter(
-        (e, i) =>
-          e.durationMs > 0 &&
-          tMs < e.startMs + e.durationMs &&
-          !undoneByShow(started, i, tMs) &&
-          changesBoard(
-            run(base, started.slice(0, i), plans, beforeAt(e)),
-            e,
-            plans[i],
-          ),
+    active: started.flatMap((e, i) => {
+      if (
+        e.durationMs <= 0 ||
+        tMs >= e.startMs + e.durationMs ||
+        undoneByShow(started, i, tMs) ||
+        !changesBoard(beforeOf(i), e, plans[i])
       )
-      .map((e) => ({
-        action: structuredClone(e.action),
-        progress: progressAt(e, tMs),
-      })),
+        return [];
+      const onMatrix =
+        cellField(e.action) !== undefined &&
+        base.byId.get(e.action.target.id)?.object.kind === "matrix";
+      return [
+        {
+          action: structuredClone(e.action),
+          progress: progressAt(e, tMs),
+          ...(onMatrix ? { cells: cellsStillSet(i) } : {}),
+        },
+      ];
+    }),
   };
 }
