@@ -23,5 +23,7 @@ export default defineConfig({
     url: `http://localhost:${PORT}`,
     reuseExistingServer: !isCI,
     timeout: 180_000,
+    // e2e never calls paid APIs (ARCHITECTURE §10), locally as in CI.
+    env: { FAKE_APIS: "1", NEXT_PUBLIC_FAKE_APIS: "1" },
   },
 });
