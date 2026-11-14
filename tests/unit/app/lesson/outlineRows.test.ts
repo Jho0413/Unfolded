@@ -49,6 +49,18 @@ describe("outlineRows", () => {
     });
   });
 
+  it("the step on screen loading with its reply already in (audio downloading): still Preparing", () => {
+    const row = outlineRows(1, { kind: "loading", step: 1, autoplay: true }, [
+      "ready",
+      "ready",
+    ])[1];
+    expect(row).toMatchObject({
+      place: "current",
+      fetch: "ready",
+      label: OUTLINE_LABELS.preparing,
+    });
+  });
+
   it("an upcoming step never requested: Not ready, still clickable (it's made on arrival)", () => {
     const row = outlineRows(0, playing(0), ["ready", "ready", "notStarted"])[2];
     expect(row).toMatchObject({

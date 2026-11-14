@@ -25,7 +25,7 @@ export function CaptionsToggle({
       title="Show what the tutor says as text"
       onClick={() => onChange(!on)}
     >
-      {on ? "Captions" : "Captions off"}
+      Captions
     </button>
   );
 }

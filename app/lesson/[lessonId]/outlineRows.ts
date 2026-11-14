@@ -33,7 +33,12 @@ export function outlineRows(
     return {
       place,
       fetch,
-      label: labelOf(place, fetch),
+      // The step on screen is preparing while it loads, even when its reply is already in
+      // (its audio is still downloading).
+      label:
+        place === "current" && state.kind === "loading"
+          ? OUTLINE_LABELS.preparing
+          : labelOf(place, fetch),
       clickable: !asking && i !== current,
     };
   });
