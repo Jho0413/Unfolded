@@ -7,6 +7,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, type Route, test } from "@playwright/test";
+import { STEP_ROUTE_ERRORS } from "@/app/api/lessons/[lessonId]/steps/[n]/errors";
 import { MESSAGES } from "@/player/machine";
 import { NO_SUCH_LESSON, STEP_NOT_IN_RUN } from "@/shared/lesson";
 import { RUNS_DIR } from "./support/runsDir";
@@ -134,20 +135,20 @@ const STEP_FAILURES: {
 }[] = [
   {
     name: "Step: generation fails (502)",
-    message: "Couldn't make this step.",
+    message: STEP_ROUTE_ERRORS.failed,
     fail: (route) =>
       route.fulfill({
         status: 502,
-        json: { error: "Couldn't make this step." },
+        json: { error: STEP_ROUTE_ERRORS.failed },
       }),
   },
   {
     name: "Step: a failure outside the table (500)",
-    message: "Couldn't make this step.",
+    message: STEP_ROUTE_ERRORS.failed,
     fail: (route) =>
       route.fulfill({
         status: 500,
-        json: { error: "Couldn't make this step." },
+        json: { error: STEP_ROUTE_ERRORS.failed },
       }),
   },
   {
@@ -234,7 +235,7 @@ test("L3: a prefetch that failed is asked again when Next reaches the step", asy
     failed = true;
     await route.fulfill({
       status: 502,
-      json: { error: "Couldn't make this step." },
+      json: { error: STEP_ROUTE_ERRORS.failed },
     });
   });
   const requests = stepRequests(page, run.lessonId);
@@ -252,7 +253,7 @@ test("L3: Next skips a step that keeps failing, and Back returns to it", async (
 }) => {
   await using run = await freshLesson("e2e-live-skip");
   await page.route(`**/api/lessons/${run.lessonId}/steps/0`, (route) =>
-    route.fulfill({ status: 502, json: { error: "Couldn't make this step." } }),
+    route.fulfill({ status: 502, json: { error: STEP_ROUTE_ERRORS.failed } }),
   );
   await page.goto(`/lesson/${run.lessonId}`);
   await expectState(page, "failed", 0);
@@ -265,14 +266,14 @@ test("L3: Next skips a step that keeps failing, and Back returns to it", async (
   await control(page, "Back").click();
   await expectState(page, "failed", 0);
   await expect(page.getByTestId("player-error")).toHaveText(
-    "Couldn't make this step.",
+    STEP_ROUTE_ERRORS.failed,
   );
 });
 
 test("L3: Next is off on a failed last step", async ({ page }) => {
   await using run = await freshLesson("e2e-live-skip-last", 1);
   await page.route(`**/api/lessons/${run.lessonId}/steps/0`, (route) =>
-    route.fulfill({ status: 502, json: { error: "Couldn't make this step." } }),
+    route.fulfill({ status: 502, json: { error: STEP_ROUTE_ERRORS.failed } }),
   );
   await page.goto(`/lesson/${run.lessonId}`);
   await expectState(page, "failed", 0);

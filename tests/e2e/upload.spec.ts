@@ -90,3 +90,26 @@ test("submitting with no file says Please choose a PDF.", async ({ page }) => {
     UPLOAD_ERRORS.notPdf,
   );
 });
+
+// The upload messages the route answers with (ARCHITECTURE.md section 7, ROADMAP L3). The
+// route's own checks are unit-tested; here, the page shows each message it is sent.
+for (const [status, message] of [
+  [413, UPLOAD_ERRORS.tooLargeOrLocked],
+  [422, UPLOAD_ERRORS.tooLargeOrLocked],
+  [502, UPLOAD_ERRORS.planFailed],
+] as const) {
+  test(`the route answers ${status} -> ${message}`, async ({ page }) => {
+    await page.route("**/api/lessons", (route) =>
+      route.fulfill({ status, json: { error: message } }),
+    );
+    await page.goto("/");
+    await page.getByLabel("A research paper (PDF)").setInputFiles({
+      name: "paper.pdf",
+      mimeType: "application/pdf",
+      buffer: TINY_PDF,
+    });
+    await page.getByRole("button", { name: "Make the lesson" }).click();
+    await expect(page.getByTestId("upload-error")).toHaveText(message);
+    await expect(page.getByTestId("plan")).toHaveCount(0);
+  });
+}

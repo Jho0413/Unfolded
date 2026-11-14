@@ -5,8 +5,8 @@
 //
 // A bad lessonId or a lesson with no saved plan is a 404 with "No such lesson or step."
 // (./not-found.tsx). A step the route can't give fails in the player with the route's message
-// ("Couldn't make this step.", or in replay "This step isn't in the saved run."), and Retry
-// or Back recover.
+// ("Couldn't make this step.", or in replay "This step isn't in the saved run."), and Retry,
+// Next or Back recover.
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";

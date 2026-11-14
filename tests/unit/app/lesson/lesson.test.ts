@@ -6,6 +6,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { STEP_ROUTE_ERRORS } from "@/app/api/lessons/[lessonId]/steps/[n]/errors";
 import { loadLesson } from "@/app/lesson/[lessonId]/loadLesson";
 import { stepRouteFetcher } from "@/app/lesson/[lessonId]/stepRoute";
 import { M1_CUE_TIMES, m1 } from "@/app/dev/board/scenes";
@@ -108,8 +109,8 @@ describe("stepRouteFetcher", () => {
   });
 
   it.each([
-    [502, "Couldn't make this step."],
-    [500, "Couldn't make this step."],
+    [502, STEP_ROUTE_ERRORS.failed],
+    [500, STEP_ROUTE_ERRORS.failed],
     [404, STEP_NOT_IN_RUN],
     [404, NO_SUCH_LESSON],
     [400, NO_SUCH_LESSON],

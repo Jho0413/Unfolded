@@ -1,12 +1,13 @@
 // The lesson page (ROADMAP P6): a saved lesson in runs/<lessonId>/ plays in the player, its
 // steps coming through POST /api/lessons/<id>/steps/<n> (saved: no generation) and their
-// audio through GET /api/runs. Generation, prefetch and failures: lesson-live.spec.ts. Saved runs are written by
-// ./support/savedRun.ts (no provider is called). The controls themselves are covered on
+// audio through GET /api/runs. Generation, prefetch and failures: lesson-live.spec.ts.
+// Saved runs are written by ./support/savedRun.ts (no provider is called). The controls themselves are covered on
 // /dev/player (player.spec.ts); here, what the page adds: loading a run, the ARCHITECTURE.md
 // section 7 messages for a missing lesson or step, and demo-m1.
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { STEP_ROUTE_ERRORS } from "@/app/api/lessons/[lessonId]/steps/[n]/errors";
 import { MESSAGES } from "@/player/machine";
 import { NO_SUCH_LESSON } from "@/shared/lesson";
 import { savedRun, savedStepTitle } from "./support/savedRun";
@@ -107,7 +108,7 @@ test("Step: an unsaved step the route can't make (no paper.json) -> failed with 
   await control(page, "Next").click();
   await expectState(page, "failed", 1);
   await expect(page.getByTestId("player-error")).toHaveText(
-    "Couldn't make this step.",
+    STEP_ROUTE_ERRORS.failed,
   );
   await screenshot(page, "step-failed");
   await control(page, "Back").click();

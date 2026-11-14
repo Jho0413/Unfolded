@@ -1,6 +1,7 @@
 // Prefetch (ROADMAP L2, player/prefetch.ts): a prefetched step is handed to the player's next
 // request for it with no new request, once; a failed prefetch is forgotten.
 import { describe, expect, it, vi } from "vitest";
+import { STEP_ROUTE_ERRORS } from "@/app/api/lessons/[lessonId]/steps/[n]/errors";
 import { M1_CUE_TIMES, m1 } from "@/app/dev/board/scenes";
 import { createPrefetcher } from "@/player/prefetch";
 import type { FetchStep } from "@/player/stepLoader";
@@ -99,7 +100,7 @@ describe("createPrefetcher", () => {
     const route = fakeRoute();
     const steps = createPrefetcher(route.fetchStep, 2, log);
     steps.prefetch(1);
-    await route.settle(1, { error: "Couldn't make this step." });
+    await route.settle(1, { error: STEP_ROUTE_ERRORS.failed });
     const next = steps.fetchStep(1);
     await route.settle(1, stepAt(1));
     expect(await next).toEqual(stepAt(1));
@@ -120,7 +121,7 @@ describe("createPrefetcher", () => {
     const steps = createPrefetcher(route.fetchStep, 2, log);
     steps.prefetch(1);
     const p = steps.fetchStep(1);
-    await route.settle(1, { error: "Couldn't make this step." });
-    expect(await p).toEqual({ error: "Couldn't make this step." });
+    await route.settle(1, { error: STEP_ROUTE_ERRORS.failed });
+    expect(await p).toEqual({ error: STEP_ROUTE_ERRORS.failed });
   });
 });
