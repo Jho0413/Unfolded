@@ -13,7 +13,7 @@ Any change to a decision, a contract or a state machine in this file goes in the
 | Lesson LLM | **Claude Sonnet 5.5** (`claude-sonnet-5-5`) for the plan and every step. | Fast enough for live step generation. Set once in `lib/config.ts`. |
 | Voice | **ElevenLabs** TTS with timestamps for narration. An **ElevenLabs agent** for Q&A, using the same voice. | Word-level timing for the lesson, and an interruptible agent for questions. |
 | Q&A agent LLM | **Picked by spike S2**: two fast options from ElevenLabs' list, compared on the same questions. | It must answer in about a second and call tools reliably. |
-| Agent config | **In the repo** (`agent/`), pushed to ElevenLabs by a script. | Prompts and tool definitions are reviewed in PRs and can't drift from the browser handlers. |
+| Agent config | **In the repo** (`agent/`), pushed to ElevenLabs with the official ElevenLabs CLI. | Prompts and tool definitions are reviewed in PRs and can't drift from the browser handlers. |
 | Asking a question | **Voice or a typed message**, sent to the same agent. | A loud venue can break voice, so typing is the fallback. |
 | Media | **fal**, server-side only, for illustrations next to the whiteboard. | Precise diagrams are drawn by code. fal adds imagery. |
 | Avatar | **None** (Anam dropped). | Removes the access risk. The bounties are Track 03 main, ElevenLabs and fal. |
@@ -66,11 +66,16 @@ app/
   api/lessons/route.ts              POST: PDF -> lesson plan
   api/lessons/[lessonId]/steps/[n]/route.ts   POST: generate step n (script + audio + cue times)
   api/sketch/route.ts               POST: Q&A drawing request -> sketch
+  api/lessons/[lessonId]/signals/route.ts     POST: record a learner signal or "step n started" (section 5.4)
+  api/runs/[lessonId]/[file]/route.ts         GET: serve step JSON, audio and media from runs/ (no path traversal)
   api/agent/token/route.ts          GET: ElevenLabs conversation token
+  dev/board/page.tsx                dev only: renders a fixed BoardState (renderer tests)
+instrumentation.ts                  register(): validates env once at server start (not at build)
 shared/                             imported by server and browser (the contract)
   scene.ts                          zod schemas: board objects, actions, step, sketch
   lesson.ts                         zod schemas: lesson plan, API responses
   validate.ts                       checks that zod can't express (ids, cues, bounds)
+  tools.ts                          the client tool names and parameter schemas (one list for the agent config and qa/tools.ts)
 lib/                                server-only (import "server-only")
   config.ts                         model ids, effort, limits, paths: one place
   env.ts                            reads and validates env vars once
@@ -86,13 +91,13 @@ player/                             browser
   Whiteboard.tsx, primitives/       matrix, text, latex, arrow, image
   usePlayer.ts                      audio element, clock, controls
 qa/                                 browser
-  AskPanel.tsx                      voice + typed, uses @elevenlabs/react
-  tools.ts                          client tool handlers
-agent/
-  agent.json                        ElevenLabs agent config: prompt, voice, tool definitions
-  sync.ts                           creates or updates the agent and its tools through the API
+  conversation.ts                   adapter over @elevenlabs/react useConversation; a scripted fake when NEXT_PUBLIC_FAKE_APIS=1
+  AskPanel.tsx                      voice + typed input, through conversation.ts
+  tools.ts                          client tool handlers, typed by shared/tools.ts
+agent/                              ElevenLabs CLI config: the agent (prompt, voice, LLM) and its client tools, plus the CLI's tracking file
 runs/                               gitignored: one folder per lesson (store + replay)
-tests/e2e/                          Playwright, with FAKE_APIS=1
+tests/e2e/                          Playwright, with FAKE_APIS=1 and NEXT_PUBLIC_FAKE_APIS=1
+evidence/                           gitignored: screenshots and recordings for PRs
 ```
 
 The ownership areas line up with folders:
@@ -100,7 +105,7 @@ The ownership areas line up with folders:
 - **pipeline** owns `lib/pipeline`, `lib/narration`, `lib/media`, `lib/runs` and the lesson and step routes.
 - **voice** owns `qa/`, `agent/` and the sketch and token routes.
 
-Owners go in the table in `AGENTS.md` when we split the work.
+Folder owners go in the table in `AGENTS.md` when we split the work, and task owners go on the GitHub issues. Files every task touches (`package.json`, `lib/config.ts`, `lib/env.ts`, `lib/fakes/`, `tests/e2e/`, `.github/`, `app/layout.tsx`) can be edited by anyone, with a post on the board.
 
 ## 4. The scene contract (`shared/scene.ts`)
 
@@ -115,15 +120,16 @@ type BoardObject =                            // discriminated on `kind`
   | { kind: "text";   id; x; y; text: string; size?: "s" | "m" | "l" }
   | { kind: "latex";  id; x; y; tex: string }
   | { kind: "arrow";  id; from: Anchor; to: Anchor; label?: string }
-  | { kind: "image";  id; x; y; w; h; prompt: string; mediaUrl?: string };  // fal illustration
+  | { kind: "image";  id; x; y; w; h; prompt: string };     // fal illustration; the server adds mediaUrl
 
+type Anchor = { id: ObjectId } | { x: number; y: number };   // an object's centre, or a point
 type Target = { id: ObjectId; row?: number; col?: number };  // a row, a column or a cell of a matrix
 
 type Action =
   | { do: "show" | "hide"; target: Target }
   | { do: "highlight" | "unhighlight"; target: Target; color?: "accent" | "warn" }
   | { do: "move"; target: Target; to: { x; y } }
-  | { do: "write"; target: Target; value: string };          // e.g. drop a result into a cell
+  | { do: "write"; target: Target; value: string };          // drop a value into one matrix cell
 // Every action also carries durationMs (0..3000, default 400).
 
 type Step = {                                 // what Claude writes for one lesson step
@@ -139,21 +145,28 @@ type Sketch = {                               // what /api/sketch returns for a 
 };
 ```
 
-**`shared/validate.ts`** checks the rules that zod can't express. Both the server, after Claude responds, and the browser, before a tool draws, use it:
+- `mediaUrl` isn't part of the schema Claude fills in. The server adds it after fal returns and the image is saved to `runs/`. The page never loads a URL that a model wrote.
+- When several actions start at the same time, `sceneAt` applies them in their array order.
+
+**`shared/validate.ts`** checks the rules zod can't express. It runs on the server after Claude responds and in the browser before a tool draws. Each row gets a test.
 
 | Input | Result |
 |---|---|
 | Every rule holds | valid |
+| The output fails the zod schema (the SDK throws a parse error) | rejected: the schema error |
 | A cue in `actions` doesn't appear in `narration` | rejected: `unknown cue "x"` |
 | A marker appears twice in `narration` | rejected: `duplicate cue "x"` |
+| A malformed marker (`[[Row 1]]`, a stray `[[` or `]]`) | rejected: `malformed marker "[[Row 1]]"` (otherwise it would be read aloud) |
 | A marker in `narration` that no action uses | allowed (it's ignored) |
 | A `target.id` with no object | rejected: `unknown object "x"` |
 | `row` or `col` outside the matrix, or set on a non-matrix | rejected: `target out of range` |
-| An object outside the 1600 × 900 canvas | rejected: `off canvas` |
+| `write` without both `row` and `col` | rejected: `write needs a cell` |
+| `tex` that KaTeX can't parse | rejected: `invalid LaTeX in "x"` (the renderer also uses `throwOnError: false` as a safety net) |
+| An object's x,y outside the 1600 × 900 canvas (for `text` and `latex`, only the anchor point is checked) | rejected: `off canvas` |
 | Two objects with the same id | rejected: `duplicate id "x"` |
 | Narration longer than `config.maxNarrationChars` after the markers are stripped | rejected: `narration too long` |
 
-When generation is rejected, the step generator retries **once**, with the error messages added to the prompt. If the retry also fails, the step fails (section 7).
+When generation is rejected (a zod parse error or a `validate.ts` rejection), the generator retries **once**, with the error messages added to the prompt. If the retry also fails, the step fails (section 6.2).
 
 ## 5. Lesson mode
 
@@ -178,20 +191,37 @@ sequenceDiagram
   and
     A->>F: illustrations for image objects
   end
-  A->>A: cue offsets -> cue times, save step-0.json + step-0.mp3
+  A->>A: cue offsets -> cue times, save step-0.v1.json + step-0.v1.mp3
   A-->>B: { step, audioUrl, cueTimes }
-  Note over B: step 0 starts playing, browser requests step 1 ahead
+  Note over B: browser fetches the audio as a blob, step 0 plays, browser requests step 1 ahead
 ```
 
-- **The paper goes to Claude directly.** It is uploaded once with the Files API (`client.files.upload`), then referenced by `file_id` as a `document` block in every plan and step request. Claude's limits are 32 MB and 600 pages. The document block carries `cache_control`, so each step request reuses the cached paper prefix, which makes it faster and cheaper.
-- **Structured output.** `client.messages.parse({ output_config: { format: zodOutputFormat(Step) } })` returns a parsed `Step`. Requests stream (`.finalMessage()`), and effort is set in `lib/config.ts`.
-- **Prompts** live in `lib/pipeline/prompts/` and are versioned in git. A step prompt receives the plan, the step's goal, the previous step's narration (for continuity) and the learner signals (section 5.4).
+- **The paper goes to Claude directly.**
+  - It's uploaded once with the Files API (`client.files.upload`).
+  - Every plan and step request then references it by `file_id`, as a `document` block.
+  - The upload size cap (`config.maxPdfMb`) is our own choice, not Claude's limit. We don't parse the PDF ourselves: when Claude rejects it (too many pages, encrypted, unreadable), we return the upload error in section 7.
+- **Caching.** The document block carries `cache_control`, so later step requests reuse the cached paper. For the cache to work:
+  - The step system prompt must be byte-identical for every step.
+  - The plan, goal and signals go *after* the document block.
+  - The plan and sketch requests use a different output format, so they build their own cache.
+  - The cache expires after 5 minutes, so a long Q&A pause will miss it.
+- **Structured output.** Requests stream: `client.messages.stream({ output_config: { format: zodOutputFormat(Step) } })` (the helper is in `@anthropic-ai/sdk/helpers/zod`), then `(await stream.finalMessage()).parsed_output`.
+  - Constraints the API can't enforce (number ranges, item counts) are checked by the SDK with zod after the response arrives, and a failure *throws*. The generator catches it as a rejection.
+  - Effort per request type (plan, step, sketch) is set in `lib/config.ts`.
+- **Prompts** live in `lib/pipeline/prompts/`. A step prompt receives:
+  - the plan and the step's goal
+  - the previous step's narration if it has been generated, otherwise that step's goal from the plan (needed after a jump)
+  - the learner signals (section 5.4)
+- **Files reach the browser through `GET /api/runs/<lessonId>/<file>`.** `runs/` is outside `public/`, and `next start` won't serve files added after the build.
+  - The player fetches each step's audio as a blob and plays it from a `blob:` URL. That keeps seeking reliable without HTTP Range support in the route.
+  - The route only serves names matching `^[a-z0-9.-]+$` from inside the run folder.
 
 ### 5.2 Cue markers become times (`lib/narration/cues.ts`, pure)
 
-1. The markers match `\[\[([a-z][a-z0-9_]{0,31})\]\]`. Stripping them gives the text sent to TTS, plus a map from each cue to the character offset where its marker was.
-2. ElevenLabs `POST /v1/text-to-speech/{voice_id}/with-timestamps` returns `audio_base64` and `alignment.character_start_times_seconds`, one entry per character of the text we sent.
-3. Each cue's time is the start time of the first non-space character at or after its offset. A cue at the very end gets the last character's end time.
+1. The markers match `\[\[([a-z][a-z0-9_]{0,31})\]\]`. Stripping them, trimming the text and collapsing whitespace gives the text sent to TTS, plus a map from each cue to the character offset where its marker was.
+2. ElevenLabs `POST /v1/text-to-speech/{voice_id}/with-timestamps` returns `audio_base64` and `alignment`, with `characters`, `character_start_times_seconds` and `character_end_times_seconds`.
+3. The offsets → times map is built by **walking `alignment.characters` against the text we sent**, rather than assuming the arrays line up index for index. ElevenLabs may count characters differently from JavaScript (code points vs UTF-16).
+4. Each cue's time is the start of the first non-space character at or after its offset. A cue at the very end gets the last character's end time.
 
 | Input | Result |
 |---|---|
@@ -199,11 +229,14 @@ sequenceDiagram
 | A marker mid-word (`ro[[c]]w`) | its time is the start of `w` |
 | Two markers back to back | both get the same time |
 | A marker at the end | the last character's end time |
-| The alignment length differs from the stripped text length | error `alignment mismatch` (logged with both lengths) |
-| Unicode (é, emoji, CJK) | offsets count UTF-16 code units, the same as the alignment arrays (to confirm in spike S1) |
-| Malformed `[[Row 1]]` or `[[` | not treated as a marker; it's spoken as text and validation flags it |
+| Unicode (é, emoji, CJK) in the narration | the walk matches characters one by one, so the cues still land correctly |
+| The alignment skips or adds characters (normalisation) | the walk resyncs on the next matching character, and the cue takes the nearest following time |
+| `alignment` is null, or the walk can't match at all | error `no alignment`: the step fails (section 6.2), logged with the text and response |
 
-Property-based tests (fast-check) check that stripping then reinserting the markers gives back the original text, and that cue times never decrease in text order.
+Property-based tests (fast-check) check three things:
+- stripping then reinserting the markers gives back the original text
+- cue times never decrease in text order
+- walking an alignment generated from the text itself gives exact times
 
 ### 5.3 The player is a function of time (`player/sceneAt.ts`, pure)
 
@@ -215,19 +248,32 @@ sceneAt(objects: BoardObject[], timed: { action; startMs; durationMs }[], tMs: n
 - **Lesson mode:** `timed` comes from `cueTimes`, and `tMs` is `audio.currentTime * 1000`.
 - **Q&A mode:** `timed` comes from the sketch's `atMs`, and `tMs` is the time since the sketch arrived.
 - Back, Replay and scrubbing are just seeks on the audio element. There's no animation state to undo.
-- `Whiteboard.tsx` renders `BoardState` as SVG on each animation frame. It interpolates from the action's progress. Motion is only used for UI chrome, such as panels and buttons, not for board objects, so the board always matches the clock.
+- `Whiteboard.tsx` renders `BoardState` as SVG on each animation frame. It interpolates from each action's progress, and exposes state as `data-*` attributes for tests.
+- Motion is only used for UI chrome, such as panels and buttons, not for board objects, so the board always matches the clock.
 
 ### 5.4 Adaptation
 
-- `runs/<id>/signals.json` records the learner's questions and every `simplify_upcoming` request.
-- Every step request includes the signals, so the steps that haven't been generated yet adapt automatically.
-- When a new signal arrives, the step generated ahead of time (N+1) is thrown away and regenerated. That way the very next step reflects the question.
+- **Recording signals.** The browser posts to `POST /api/lessons/<id>/signals`. The body is validated with zod and holds one of:
+  - a question: the agent's user transcript (from `onMessage`) or typed text
+  - a simplify request from `simplify_upcoming`
+  - `{ started: n }` when step n starts playing
+
+  The server appends it to `runs/<id>/signals.json` and bumps the lesson's **signals version**.
+- Every step generation records the signals version it used.
+- When a question or simplify signal arrives, any step that **hasn't started playing** is out of date if it was generated (or is still generating) with an older version:
+  - The server marks it stale and regenerates it as soon as the current generation finishes (section 6.2).
+  - The browser drops its own prefetched copy of N+1 and requests it again.
+- A step that has started playing is kept as it is.
 
 ### 5.5 Replay safety net
 
-- Every generated artifact is written to `runs/<lessonId>/`: the plan, each step's JSON, each step's audio, the cue times, the media files and the signals.
-- Starting the app with `REPLAY_RUN=<lessonId>` serves lessons and steps from that folder without calling Claude, ElevenLabs or fal.
-- Q&A needs the network, so in replay mode the Ask panel says *"Q&A needs a connection"* instead of failing silently.
+- Everything generated is written to `runs/<lessonId>/`: `plan.json`, `step-<n>.v<k>.json`, the audio, cue times and media for each step, and `signals.json`.
+- Steps are **versioned** (`v1`, `v2`, ...) because a signal can regenerate one. `signals.json` records which version of each step started playing.
+- Starting the app with `REPLAY_RUN=<lessonId>`:
+  - The upload page redirects to `/lesson/<lessonId>`.
+  - The routes serve each step's *played* version, or its latest version if it never played, from the folder. They never call Claude, ElevenLabs or fal.
+  - A step that isn't in the folder fails, with "This step isn't in the saved run."
+- Q&A needs the network, so in replay mode the Ask panel says "Q&A needs a connection".
 
 ## 6. State machines
 
@@ -236,46 +282,55 @@ sceneAt(objects: BoardObject[], timed: { action; startMs; durationMs }[], tMs: n
 ```mermaid
 stateDiagram-v2
   [*] --> loading
-  loading --> playing: stepReady
+  loading --> loading: goToStep
+  loading --> playing: stepReady (autoplay)
+  loading --> paused: stepReady (no autoplay)
   loading --> failed: stepFailed
+  playing --> playing: replay
   playing --> stepEnded: audioEnded
-  playing --> paused: pause
-  paused --> playing: resume
+  playing --> paused: pause / playBlocked
+  playing --> failed: audioError
+  paused --> playing: resume / replay / back on step 0
   playing --> asking: ask
   paused --> asking: ask
   stepEnded --> asking: ask
   finished --> asking: ask
-  asking --> paused: closeAsk (came from playing or paused)
-  asking --> stepEnded: closeAsk (came from stepEnded)
-  asking --> finished: closeAsk (came from finished)
+  asking --> paused: closeAsk / agentDisconnected (came from playing or paused)
+  asking --> stepEnded: closeAsk / agentDisconnected (came from stepEnded)
+  asking --> finished: closeAsk / agentDisconnected (came from finished)
+  asking --> asking: goToStep (tool, remembered)
+  asking --> loading: closeAsk after goToStep (no autoplay)
   stepEnded --> loading: next
   stepEnded --> finished: next on last step
-  stepEnded --> playing: replay
+  stepEnded --> playing: replay / back on step 0
   finished --> playing: replay
   playing --> loading: back / goToStep
   paused --> loading: back / goToStep
   stepEnded --> loading: back / goToStep
   finished --> loading: back / goToStep
-  asking --> loading: goToStep (tool)
   failed --> loading: retry / back / goToStep
 ```
+
+`loading` carries the step it's loading and whether to **autoplay**: yes for Next, Back and goToStep; no after a Q&A jump. `stepReady(i)` and `stepFailed(i)` carry their step index. An event for a step other than the one being loaded is a late reply to an earlier request: it's ignored and logged.
 
 Every state × event pair has a defined result, and each cell gets a test:
 - **ignored** means the state doesn't change and nothing is shown.
 - **rejected** means the state doesn't change and the learner is told why.
 - **can't happen** gives the reason. The machine still treats these as ignored, and logs a warning.
 
-| State \ event | stepReady | stepFailed | audioEnded | pause | resume | replay | ask | closeAsk | next | back | goToStep(n) | retry |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| loading | → playing | → failed ("Couldn't make this step. Retry?") | ignored | ignored | ignored | ignored | rejected: Ask disabled while loading | can't happen (not asking) | ignored | ignored | → loading(n) | ignored |
-| playing | can't happen (step already loaded) | can't happen | → stepEnded | → paused | ignored | seek to 0, stays playing | → asking (narration paused) | can't happen | ignored (Next only after the step ends) | → loading(prev), or seek to 0 on step 0 | → loading(n) | ignored |
-| paused | can't happen | can't happen | can't happen (audio stopped) | ignored | → playing | seek to 0 → playing | → asking | can't happen | ignored | → loading(prev), or seek to 0 on step 0 | → loading(n) | ignored |
-| stepEnded | can't happen | can't happen | can't happen | ignored | ignored | seek to 0 → playing | → asking | can't happen | → loading(next), or → finished on the last step | → loading(prev), or seek to 0 → playing on step 0 | → loading(n) | ignored |
-| asking | can't happen | can't happen | can't happen (narration paused) | ignored | ignored | ignored | ignored | → the state Ask was opened from (playing becomes paused) | ignored | ignored | → loading(n) (agent tool) | ignored |
-| failed | can't happen | can't happen | can't happen | ignored | ignored | ignored | rejected: nothing to ask about | can't happen | ignored | → loading(prev) | → loading(n) | → loading(same) |
-| finished | can't happen | can't happen | can't happen | ignored | ignored | seek to 0 → playing | → asking | can't happen | ignored | → loading(last) | → loading(n) | ignored |
+| State \ event | stepReady(i) / stepFailed(i) | audioEnded | playBlocked | audioError | pause | resume | replay | ask | closeAsk | agentDisconnected | next | back | goToStep(n) | retry |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| loading(k) | i = k: → playing (autoplay) or paused, or → failed ("Couldn't make this step. Retry?"). i ≠ k: ignored (late reply) | can't happen (no audio) | can't happen | can't happen | ignored | ignored | ignored | rejected: Ask disabled while loading | can't happen (not asking) | can't happen | ignored | ignored | → loading(n) | ignored |
+| playing | ignored (late reply) | → stepEnded | → paused, with "Press play to start" | → failed ("Couldn't play the audio. Retry?") | → paused | ignored | seek to 0, stays playing | → asking (narration paused) | can't happen | can't happen | ignored (Next only after the step ends) | → loading(prev), or seek to 0 on step 0 | → loading(n) | ignored |
+| paused | ignored (late reply) | can't happen (audio stopped) | can't happen | ignored | ignored | → playing | seek to 0 → playing | → asking | can't happen | can't happen | ignored | → loading(prev), or seek to 0 → playing on step 0 | → loading(n) | ignored |
+| stepEnded | ignored (late reply) | can't happen | can't happen | ignored | ignored | ignored | seek to 0 → playing | → asking | can't happen | can't happen | → loading(next), or → finished on the last step | → loading(prev), or seek to 0 → playing on step 0 | → loading(n) | ignored |
+| asking | ignored (late reply) | can't happen (narration paused) | can't happen | ignored | ignored | ignored | ignored | ignored | → the state Ask was opened from (playing becomes paused), or → loading(n, no autoplay) if the agent called goToStep(n) | same as closeAsk, plus "Q&A ended unexpectedly." | ignored | ignored | stays asking, remembers n (agent tool) | ignored |
+| failed | ignored (late reply) | can't happen | can't happen | can't happen | ignored | ignored | ignored | rejected: nothing to ask about | can't happen | can't happen | ignored | → loading(prev), or ignored on step 0 | → loading(n) | → loading(same) |
+| finished | ignored (late reply) | can't happen | can't happen | ignored | ignored | ignored | seek to 0 → playing | → asking | can't happen | can't happen | ignored | → loading(last) | → loading(n) | ignored |
 
-`goToStep(n)` with `n` outside the plan is **rejected**: the agent tool returns `"no step n"` and the state doesn't change.
+- `goToStep(n)` with `n` outside the plan is **rejected** in every state: the agent tool returns `"no step n"` and the state doesn't change.
+- When the agent jumps steps during Q&A, it finishes speaking. The new step loads paused once Ask closes, so the narration never talks over the agent.
+- `playBlocked` is the browser refusing `audio.play()` without a user gesture, for example after a page reload.
 
 ### 6.2 Step generation (per step, on the server)
 
@@ -283,14 +338,26 @@ Every state × event pair has a defined result, and each cell gets a test:
 stateDiagram-v2
   [*] --> notRequested
   notRequested --> generating: request
+  generating --> generating: rejected (first time, retry with errors)
   generating --> ready: script valid + audio + cues saved
-  generating --> generating: validation rejected (first time, retry with errors)
-  generating --> failed: rejected twice / Claude refusal / TTS error / alignment mismatch
-  ready --> generating: new learner signal (only if not yet played)
+  generating --> failed: rejected twice / refusal / provider error / no alignment
+  generating --> staleGenerating: newer signal
+  staleGenerating --> generating: current attempt finishes (result discarded)
+  ready --> generating: newer signal (not started)
+  ready --> started: started n
   failed --> generating: retry
 ```
 
-A request for a step that's already `generating` waits for that same generation, so there are never two generations of one step. A request for a step that's `ready` returns it from `runs/`.
+| State \ event | request | rejected (zod or validate) | valid + audio + cues | refusal / Claude error after SDK retries / `max_tokens` cut-off | TTS or quota error, no alignment | newer signal | started n | retry |
+|---|---|---|---|---|---|---|---|---|
+| notRequested | → generating | can't happen | can't happen | can't happen | can't happen | ignored (generates with the new version later) | can't happen (not served) | ignored |
+| generating | waits for this generation (no second one) | first time: retry with errors; second time: → failed | → ready | → failed | → failed | → staleGenerating | can't happen | ignored |
+| staleGenerating | waits | discarded → generating | discarded → generating | → generating (new version) | → generating (new version) | stays (the latest version is used) | can't happen | ignored |
+| ready | returns it from `runs/` | can't happen | can't happen | can't happen | can't happen | → generating (new version) | → started | ignored |
+| started | returns the played version | can't happen | can't happen | can't happen | can't happen | ignored (already heard) | ignored | ignored |
+| failed | returns "Couldn't make this step." | can't happen | can't happen | can't happen | can't happen | ignored | can't happen | → generating |
+
+A fal error doesn't fail the step: the image object is hidden (section 7). In replay mode this machine doesn't run, and a step missing from the folder is a `failed` step.
 
 ## 7. Errors and rejections
 
@@ -299,39 +366,56 @@ The developer gets the full error in the server log, tagged with the route, less
 | Where | Problem | Learner sees | Recovery |
 |---|---|---|---|
 | Upload | No file, or not a PDF | "Please choose a PDF." | Pick again |
-| Upload | Over 32 MB or 600 pages, or encrypted | "This PDF is too large or locked." | Another PDF |
-| Plan | Claude refusal or invalid plan twice | "Couldn't read this paper." | Retry, or another PDF |
-| Step | Rejected twice, refusal, TTS error or alignment mismatch | "Couldn't make this step." | Retry (player `failed` state) |
+| Upload | Over `config.maxPdfMb`, or Claude rejects the document (too many pages, encrypted, unreadable) | "This PDF is too large or locked." | Another PDF |
+| Plan | Invalid plan twice, refusal, or Claude error | "Couldn't read this paper." | Retry, or another PDF |
+| Step | Any `failed` cause in section 6.2 | "Couldn't make this step." | Retry (player `failed` state) |
+| Step | Replay mode, and the step isn't in the run | "This step isn't in the saved run." | Back, or another step |
 | Step | fal error | Nothing: the step plays without the illustration | The image object is hidden and the error is logged |
+| Player | Browser blocks autoplay | "Press play to start." | Play button |
+| Player | Audio fails to load or decode | "Couldn't play the audio. Retry?" | Retry |
+| Route | `lessonId` doesn't match `^[a-z0-9-]{1,40}$`, or `n` isn't a step in the plan | 400 "No such lesson or step." | Back to upload |
 | Ask | Token route fails, or the agent can't connect | "Questions are unavailable right now." | The lesson carries on; close the panel |
-| Ask | Microphone permission denied | "Mic is off. Type your question instead." | Typed input |
-| Tool | `draw_scene` sketch invalid | The agent is told "couldn't draw that" and answers in words | None needed |
-| Tool | `highlight` on an unknown id | The agent is told `unknown object "x"` | None needed |
-| Any route | Missing env var at startup | The server refuses to start and names the missing var | Fix `.env.local` |
+| Ask | Session drops mid-question | "Q&A ended unexpectedly." | Ask again |
+| Ask | Microphone permission denied | "Mic is off. Type your question; the answer will appear as text." | Typed input (text-only session) |
+| Tool | `draw_scene` sketch invalid | Agent told "couldn't draw that", answers in words | None needed |
+| Tool | `highlight` on an unknown id | Agent told `unknown object "x"` | None needed |
+| Server start | Missing required env var for the mode (section 9) | The server refuses to start and names the missing var | Fix `.env.local` |
 
 ## 8. Q&A mode
 
-- **Starting a session:** the learner presses **Ask**, or presses Space.
+- **Starting a session:** the learner presses **Ask**, or presses the `A` key (Space stays play/pause).
   1. The player moves to `asking` and pauses the narration.
-  2. The browser calls `GET /api/agent/token`. The server uses `ELEVENLABS_API_KEY` to get a WebRTC conversation token.
-  3. `useConversation().startSession({ conversationToken })` starts the session.
-  4. Typed questions go through `sendUserMessage(text)`, to the same agent.
-- **Context:** when the session connects, and on every step change, the browser calls `sendContextualUpdate()`. It sends the plan titles, the current step's narration and the ids of the objects on the board, so the agent knows what "this" refers to and which ids `highlight` can use.
-- **Client tools** (defined in `agent/agent.json`, handled in `qa/tools.ts`):
+  2. The browser calls `GET /api/agent/token`, and the server gets a WebRTC conversation token with `ELEVENLABS_API_KEY`.
+  3. `startSession({ conversationToken })` starts the session through `qa/conversation.ts`.
+     - That adapter is the only file that imports `@elevenlabs/react`, which also needs a `ConversationProvider` around the lesson page.
+     - With `NEXT_PUBLIC_FAKE_APIS=1` the adapter is a scripted fake: it replays canned agent turns and calls the tool handlers directly, so Playwright can test Q&A without a network.
+- **Typed questions** go through `sendUserMessage(text)` to the same agent.
+  - While the learner types, the mic is muted so venue noise doesn't start a turn, and `sendUserActivity()` keeps the agent from talking over them.
+  - If mic permission is denied, the session starts text-only and answers appear as text. Spike S2 confirms that text-only answers aren't spoken.
+- **Context:** when the session connects, and on every step change, the browser calls `sendContextualUpdate()`. It sends:
+  - the plan titles
+  - the current step's narration up to the point where it was paused
+  - the ids of the objects on the board
+  - the questions asked earlier in this lesson
 
-| Tool | Parameters | Effect | Returns to the agent |
-|---|---|---|---|
-| `highlight` | `target_id`, `row?`, `col?` | Highlights part of the current board | `"ok"`, or the validation error |
-| `draw_scene` | `description` (plain words) | Browser → `POST /api/sketch` → Claude writes a `Sketch` → validated → drawn on a fresh board | `"drawn"`, or `"couldn't draw that"` |
-| `go_to_step` | `index` | `goToStep(n)` on the player | `"ok"`, or `"no step n"` |
-| `simplify_upcoming` | `reason` | Adds a signal (section 5.4) | `"ok"` |
+  So the agent knows what "this" means and which ids `highlight` can use.
+- **Client tools.** Names and parameters are in `shared/tools.ts`. The agent config and `qa/tools.ts` both use that list, and a test checks they match.
 
-  `draw_scene` takes a plain-words description, not scene JSON. The voice model only describes what to draw; Claude writes the validated sketch. That keeps the scene schema in one place and out of the agent's prompt.
-- **Agent config in the repo:**
-  - `agent/agent.json` holds the system prompt, the voice id (the same `ELEVENLABS_VOICE_ID` as narration), the LLM chosen in spike S2 and the tool definitions.
-  - `npm run agent:sync` (`agent/sync.ts`) creates or updates the agent and its tools through the ElevenLabs API, and prints the agent id for `.env.local`.
-  - ElevenLabs recommends creating tools as their own resources and listing them in the agent's `tool_ids`. Spike S5 confirms the exact endpoints.
-  - Tool names in `agent.json` and `qa/tools.ts` must match exactly. A unit test checks that.
+| Tool | Parameters | Waits for result? | Effect | Returns to the agent |
+|---|---|---|---|---|
+| `highlight` | `target_id`, `row?`, `col?` | yes | Highlights part of the current board | `"ok"`, or the validation error |
+| `go_to_step` | `step` (1-based, as spoken) | yes | `goToStep(step - 1)`, which loads once Ask closes | `"ok"`, or `"no step n"` |
+| `draw_scene` | `description` (plain words) | **no** | Browser → `POST /api/sketch` (low effort) → `Sketch` → validated → drawn on a fresh board when it arrives | nothing, so the agent keeps talking while the sketch is made |
+| `simplify_upcoming` | `reason` | no | Posts a signal (section 5.4) | nothing |
+
+- `draw_scene` doesn't wait, because a Claude request can't finish inside a natural pause. The agent's prompt tells it to describe the sketch out loud while it appears. A failed sketch is logged and shows "Couldn't draw that". Spike S2 measures the sketch's latency.
+- `draw_scene` takes plain words, not scene JSON. The voice model only describes what to draw, and Claude writes the validated sketch, so the scene schema stays in one place and out of the agent's prompt.
+- **Agent config in the repo.** We use the official **ElevenLabs CLI** (`@elevenlabs/cli`) rather than writing our own sync script.
+  - The agent and its client tools are config files in `agent/`, pushed with the CLI's agent and tool `push` commands.
+  - The CLI tracks the agent's id. Its tracking file is committed, so the team shares **one** agent.
+  - Only the person who owns the voice area runs `push`.
+  - Spike S5 confirms the exact commands and that client tools with `expects_response` work this way.
+- **One voice.** `ELEVENLABS_VOICE_ID` is the source. The agent config uses the same id, and a unit test checks they're equal.
 
 ## 9. Configuration and secrets
 
@@ -340,43 +424,53 @@ The developer gets the full error in the server log, tagged with the route, less
 | Variable | Used by |
 |---|---|
 | `ANTHROPIC_API_KEY` | lesson, step and sketch routes |
-| `ELEVENLABS_API_KEY` | TTS, the token route, `agent:sync` |
+| `ELEVENLABS_API_KEY` | TTS, the token route, the ElevenLabs CLI |
 | `ELEVENLABS_VOICE_ID` | narration and the agent (one voice) |
-| `ELEVENLABS_AGENT_ID` | the token route (printed by `agent:sync`) |
+| `ELEVENLABS_AGENT_ID` | the token route (from the CLI's tracking file) |
 | `FAL_KEY` | `lib/media/fal.ts` |
 | `FAKE_APIS` | `1` swaps all three providers for `lib/fakes/` (tests and CI) |
+| `NEXT_PUBLIC_FAKE_APIS` | `1` swaps the browser's agent conversation for the scripted fake. It's inlined at build time, so CI builds with it set. |
 | `REPLAY_RUN` | serve a saved run from `runs/` |
 
-- `lib/env.ts` validates these once, at startup, with zod. Code behind it trusts them.
+**Required keys depend on how the app runs.** Each row gets a test:
+
+| Mode | Required | Not required |
+|---|---|---|
+| Real (`npm start`) | `ANTHROPIC_API_KEY`, `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, `FAL_KEY` | `ELEVENLABS_AGENT_ID` (only the token route needs it; without it, Ask shows "Questions are unavailable right now.") |
+| `FAKE_APIS=1` (tests, CI) | none | all keys |
+| `REPLAY_RUN=<id>` | the run folder exists | all keys (Q&A is off) |
+| `next build` | none: env isn't checked at build | all keys |
+
+- `lib/env.ts` validates the env once, at server start, from `instrumentation.ts` `register()`, with zod. Code behind it trusts the values. A missing required key stops the server, and the error names the key.
 - Keys are only read in `lib/` and the API routes, which import `"server-only"`. The browser never sees a key.
-- Model ids, effort levels, `maxNarrationChars`, the prefetch distance and the `runs/` path all live in `lib/config.ts`.
+- All of these live in `lib/config.ts`: model ids, effort per request type, `maxNarrationChars`, `maxPdfMb` and the `runs/` path.
 
 ## 10. Testing: how we prove it works
 
 | Layer | Tool | What it covers | Paid APIs? |
 |---|---|---|---|
-| Unit | Vitest | Pure logic: `cues.ts`, `sceneAt.ts`, `machine.ts` (one test per table row), `validate.ts` (one per rejection row), env parsing | Never |
-| Property | fast-check (in Vitest) | Cue strip/reinsert round trip, cue times never decrease, `sceneAt` stays deterministic under seeking | Never |
-| Route | Vitest + `lib/fakes/` | Each API route with faked Claude/ElevenLabs/fal: success, every rejection in section 7, the retry once, replay mode | Never |
-| End to end | Playwright, `FAKE_APIS=1` | Upload → plan → step plays → highlight appears at its cue time → Next → Ask (typed) → `draw_scene` → resume | Never |
+| Unit | Vitest | Pure logic: `cues.ts`, `sceneAt.ts`, `machine.ts` (one test per cell of §6.1), `validate.ts` (one per row of §4), the step-generation rules (one per cell of §6.2), env modes (one per row of §9) | Never |
+| Property | fast-check (in Vitest) | Cue strip/reinsert round trip, cue times never decrease, alignment walk, `sceneAt` deterministic under seeking | Never |
+| Route | Vitest + `lib/fakes/` | Each API route with faked Claude/ElevenLabs/fal: success, every rejection in section 7, retry once, replay mode | Never |
+| End to end | Playwright, `FAKE_APIS=1` + `NEXT_PUBLIC_FAKE_APIS=1` | Upload → plan → step plays → highlight at its cue → Next → Ask (typed) → `draw_scene` → close Ask. Tests assert on `data-*` attributes, and check timing by seeking to the cue time, never by waiting | Never |
 | Real run | Agent-driven browser, real APIs | The feature working for real in a browser on the laptop. The PR lists what was checked, with screenshots or a short recording. | Yes, by hand, never in CI |
 
-- **Fakes** return recorded fixtures from `lib/fakes/fixtures/`. These are real responses captured once, with secrets removed. That way tests check against real response shapes without paying for them.
+- **Fakes** return recorded fixtures from `lib/fakes/fixtures/`. These are real responses captured once, with secrets removed, so tests check against real response shapes without paying for them. A task that adds a provider call also commits its fixture.
 - **CI** is GitHub Actions on every PR: `npm ci`, `lint`, `typecheck`, `test`, `build` and `e2e` (with fakes). It must be green to merge.
 - What every PR has to show is the definition of done in [`ROADMAP.md`](ROADMAP.md#definition-of-done).
 
 ## 11. Open questions and spikes
 
-These are settled in the first hours, and each one's answer is written back into this file:
+Each spike is time-boxed to 60 minutes, and its answer is written back into this file:
 
-- **S1:** the exact shape of ElevenLabs' timestamps for our narration (code units, normalisation), and latency per step.
-- **S2:** the Q&A agent's LLM: two candidates compared on latency and tool-calling.
-- **S3:** whether Sonnet 5.5 writes valid, good `Step` scripts from the Attention paper, and the effort level needed.
-- **S4:** which fal image model to use, and its latency.
-- **S5:** the ElevenLabs endpoints for creating and updating agents and tools from `agent/agent.json`.
+- **S1:** the exact shape of ElevenLabs' timestamps for our narration (how characters are counted, normalisation, whether `alignment` can be null), and latency per step.
+- **S2:** the Q&A agent's LLM, comparing two candidates on latency and tool-calling. Also: whether text-only sessions speak, and how long a `draw_scene` sketch takes.
+- **S3:** whether Sonnet 5.5 writes valid, good `Step` scripts from the Attention paper, and the effort level needed for steps, plans and sketches.
+- **S4 (stretch):** which fal image model to use, and its latency. Download the images into `runs/`, in case fal's URLs expire.
+- **S5:** the ElevenLabs CLI commands that push the agent and its client tools from `agent/`, and how its tracking file records the agent id.
 
 ## Sources
 
-- ElevenLabs: [React SDK](https://elevenlabs.io/docs/eleven-agents/libraries/react), [TTS with timestamps](https://elevenlabs.io/docs/api-reference/text-to-speech/convert-with-timestamps), [create agent](https://elevenlabs.io/docs/api-reference/agents/create)
+- ElevenLabs: [React SDK](https://elevenlabs.io/docs/eleven-agents/libraries/react), [client tools](https://elevenlabs.io/docs/eleven-agents/customization/tools/client-tools), [TTS with timestamps](https://elevenlabs.io/docs/api-reference/text-to-speech/convert-with-timestamps), [CLI](https://elevenlabs.io/docs/eleven-agents/operate/cli.md)
+- Anthropic: [PDF support](https://platform.claude.com/docs/en/build-with-claude/pdf-support.md), [structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs.md), [TS SDK helpers](https://raw.githubusercontent.com/anthropics/anthropic-sdk-typescript/main/helpers.md)
 - fal: [JavaScript client](https://fal.ai/docs/model-apis/clients/javascript), [server-side usage](https://fal.ai/docs/model-apis/model-endpoints/server-side)
-- Anthropic: PDF document blocks, Files API, structured outputs with `zodOutputFormat` (TypeScript SDK `@anthropic-ai/sdk`)

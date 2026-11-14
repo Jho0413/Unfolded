@@ -2,66 +2,72 @@
 
 What we build, in what order, and how each piece is proven to work. [`ARCHITECTURE.md`](ARCHITECTURE.md) is how everything runs. This file is the build order.
 
-**If time runs short, a polished M1–M4 beats a shaky M1–M6.**
+**A polished M1–M4 beats a shaky M1–M6.** M4.5 (demo-ready) comes before any stretch work. M5 and E1 are stretch goals.
 
 ## How we coordinate
 
-1. Each task below has its own GitHub issue, labelled with its milestone (for example `M1`). The issue says who owns it, so this file has no owner column.
+1. Each task below has its own GitHub issue, labelled with its milestone. **Task owners live on the issues. Folder owners live in the `AGENTS.md` §4 table.** This file names neither.
 2. To take a task: assign the issue to yourself, post on the board (`[Name's Agent] taking #N (P2 sceneAt)`), and branch `<issue#>-<slug>` from fresh `main`.
-3. Don't start a task until the tasks it depends on are merged. If you're blocked, say so on the board, with the issue number.
-4. Merge your own PR once the [definition of done](#definition-of-done) holds. If the change touches `shared/`, the agent config, env vars or an API route's shape, post on the board when it lands.
-5. Each spike's answer goes into `ARCHITECTURE.md` §11 and onto the board, so nobody guesses.
+3. Start a task once its dependencies are merged. You can also start once just their interface in `shared/` is merged and build against those types. If you're blocked, say so on the board, with the issue number.
+4. **Shared files anyone may edit** (post on the board when you do): `package.json`, `lib/config.ts`, `lib/env.ts`, `lib/fakes/`, `tests/e2e/`, `.github/`, `app/layout.tsx`. Everything else follows the owner's folder.
+5. Each spike's answer goes into `ARCHITECTURE.md` §11 and onto the board. **Each spike is time-boxed to 60 minutes.** If it isn't settled by then, post what you know and take the simplest option.
+6. **The cut rule:** if the M4 demo check isn't done when 25% of hacking time is left, stop all new features and go to M4.5.
 
 ## Definition of done
 
 A task is done only when all of these hold, and the PR says so:
 
-1. **Checks pass.** CI is green: `lint`, `typecheck`, `test`, `build` and `e2e` with `FAKE_APIS=1`.
+1. **Checks pass.** CI is green: `lint`, `typecheck`, `test`, `build` and `e2e` with fakes.
 2. **Tests cover the behaviour.**
-   - Every row of the relevant table in `ARCHITECTURE.md` has a test: state transitions, rejections and input cases. Name each test after its row.
+   - Every row of the relevant table in `ARCHITECTURE.md` has a test, named after its row: transitions, rejections and input cases.
    - Pure logic gets unit tests, and parsers get property tests too.
-   - Tests never call Claude, ElevenLabs or fal. They use `lib/fakes/`.
-3. **Shown working for real, in a browser.** Run `npm run build && npm start` with real API keys. An agent (or a person) drives the feature in a browser at desktop width and checks the result on screen, not only in the logs. In the PR, write:
-   - what was clicked or said, and what was expected
-   - what actually happened, with screenshots or a short recording for anything timing-related (highlights landing on words)
-   - anything that couldn't be checked, and why
+   - Tests never call Claude, ElevenLabs or fal. Instead they use `lib/fakes/` (server) or the fake conversation (browser).
+   - A task that adds a provider call also commits that call's recorded fixture, with secrets removed.
+3. **Shown working for real, in a browser, when the task's "Proven by" cell has a "Real run".** Run `npm run build && npm start` with real keys, then drive the feature in a browser at desktop width. In the PR, write:
+   - what you did and what you expected
+   - what actually happened
+   - anything you couldn't check
+
+   Save screenshots or recordings under `evidence/<issue#>/` (gitignored), list their paths in the PR, and have the human attach them, since agents can't upload images to GitHub. Tasks with no Real run write **"no UI: covered by tests"**.
 4. **Reviewed with fresh eyes.** A fresh-context review agent (a subagent or `/code-review`) reads the diff, along with this task's row and the relevant `ARCHITECTURE.md` sections. Its should-fix findings are fixed, or noted in the PR as deliberately skipped, with the reason.
 5. **Docs match the code.** If the change alters a contract, a state machine, an env var or a decision, `ARCHITECTURE.md` changes in the same PR.
 
-At the end of each milestone, someone runs the whole flow end to end in a browser (the milestone's demo check below) and posts the result on the board.
+At the end of each milestone, someone runs that milestone's demo check in a real browser and posts the result on the board.
 
-## M0: Foundation and spikes
+## M0: Setup, foundation and spikes
 
-Goal: an empty app where CI checks everything, and the five unknowns are answered. The spikes run in parallel with F1–F3.
+Goal: keys work, CI checks everything, the contract exists, and the unknowns are answered. Once F1 is merged, one person takes F3 while the other runs spikes.
 
 | ID | Task | Depends on | Proven by |
 |---|---|---|---|
-| F1 | Scaffold Next.js 16 + TypeScript. Set up ESLint and Prettier, Vitest, fast-check and Playwright. Add `npm` scripts for `lint`, `typecheck`, `test`, `build` and `e2e`. Add GitHub Actions CI on PRs, and `runs/` and `.env.local` to `.gitignore`. | none | CI green on the PR. The app loads at `localhost:3000` in a browser. |
-| F2 | `lib/env.ts` (zod-validated env), `.env.example`, `lib/config.ts`, and `FAKE_APIS` wiring with empty fakes. | F1 | Unit tests: every var present → ok; each missing var → startup error naming it. |
-| F3 | `shared/scene.ts` and `shared/lesson.ts` zod schemas (v0), and `shared/validate.ts`. | F1 | One unit test per row of the validation table (ARCH §4). |
-| S1 | Spike: ElevenLabs TTS with timestamps on a sample narration. Record the alignment shape, Unicode behaviour and latency. Save a fixture. | none | Findings in ARCH §11, plus a fixture in `lib/fakes/fixtures/`. |
-| S2 | Spike: ElevenLabs agent with one client tool. Compare two LLMs on latency and tool-calling. | none | The chosen LLM and timings in ARCH §11, plus a board post. |
-| S3 | Spike: Sonnet 5.5 writes `Step` scripts for three concepts from the Attention paper. Measure validity rate, quality and latency per effort level. | F3 | Findings and the chosen effort in ARCH §11, plus fixtures saved. |
-| S4 | Spike: fal image model for illustrations. Measure quality and latency. | none | The chosen model id in ARCH §11. |
-| S5 | Spike: the ElevenLabs API for creating and updating an agent and its tools from a JSON file. | none | The endpoints in ARCH §11. |
+| F0 | Accounts and keys: Anthropic, ElevenLabs and fal accounts with credits. Pick `ELEVENLABS_VOICE_ID`. Share keys privately, never on the board. | none | Each teammate's `.env.local` has the keys, and S1 can call each provider. |
+| F1 | Scaffold Next.js 16 + TypeScript.<br>• ESLint and Prettier, Vitest, fast-check and Playwright, each with one smoke test.<br>• `npm` scripts: `lint`, `typecheck`, `test`, `build`, `e2e`.<br>• GitHub Actions CI on PRs.<br>• `.gitignore`: `runs/`, `evidence/`, `.env.local`.<br>• Branch protection requiring CI, if the plan allows it. | none | CI green on the PR. Real run: the app loads at `localhost:3000`. |
+| F2 | Env and config: `lib/env.ts` (zod, per-mode rules in ARCH §9, checked at server start in `instrumentation.ts`), `.env.example`, `lib/config.ts`, `FAKE_APIS` wiring. | F1 | Unit tests, one per row of the ARCH §9 mode table. `next build` passes with no keys set. |
+| F3 | The contract: `shared/scene.ts`, `shared/lesson.ts`, `shared/tools.ts` (the tool-name list) and `shared/validate.ts`. Also the hand-written step `lib/fakes/fixtures/demo-m1.step.json`. | F1 | One unit test per row of the ARCH §4 validation table, and `demo-m1.step.json` passes validation. |
+| S1 | Spike: ElevenLabs TTS with timestamps on the M1 narration. Record the alignment shape, Unicode behaviour and latency. | F0 | Findings in ARCH §11, plus the fixture `lib/fakes/fixtures/tts-demo-m1.json`. |
+| S2 | Spike: ElevenLabs agent with one client tool.<br>• Compare two LLMs on latency and tool-calling.<br>• Check whether a text-only session speaks.<br>• Time a sketch request. | F0 | The chosen LLM and timings in ARCH §11, plus a board post. |
+| S3 | Spike: Sonnet 5.5 writes `Step` scripts for three concepts from the Attention paper. Measure validity rate and latency per effort level. | F0, F3 | Findings and the chosen effort in ARCH §11, plus `Step` fixtures saved. |
+| S5 | Spike: the ElevenLabs CLI. Push an agent and one client tool from `agent/`, and check how the CLI's tracking file records the agent id. | F0 | The commands in ARCH §11. |
+| D0 | Demo laptop, started early: Node version, repo, `.env.local`, browser mic permission, audio out to speakers. Kept up to date as features land. | F1 | A checklist in the issue, ticked on the actual demo laptop. |
 
-**M0 demo check:** a PR with a trivial change goes green in CI, and every spike has written its answer into ARCH §11.
+**M0 demo check:** a trivial PR goes green in CI, and every spike has written its answer into ARCH §11.
 
 ## M1: One perfect, hand-written step
 
-Goal: prove the sync. A hand-written matrix multiplication step plays, and every highlight lands on its word.
+Goal: prove the sync. The hand-written matrix multiplication step plays, and every highlight lands on its word.
 
 | ID | Task | Depends on | Proven by |
 |---|---|---|---|
-| P1 | `lib/narration/cues.ts`: strip markers, cue offsets → times. | F3, S1 | Unit tests for each row of the ARCH §5.2 table. Property tests: round trip, and cue times never decrease. |
-| P2 | `player/sceneAt.ts`: board state at time t. | F3 | Unit tests: before the first cue, exactly at a cue, mid-animation, after the end, and seeking backwards gives the same state. Property test: the same inputs give the same output. |
-| P3 | Whiteboard renderer: `matrix`, `text`, `latex` (KaTeX) and `arrow` primitives, plus highlight, show/hide, move and write. | P2 | A Playwright test renders a fixed `BoardState`. Real browser: screenshot of each primitive. |
-| P4 | `player/machine.ts`: the player state machine. | F3 | One unit test per cell of the ARCH §6.1 table, transitions and rejections alike. |
-| P5 | `usePlayer` and controls: audio element, clock, and Next/Back/Replay/Pause wired to the machine. | P2, P3, P4 | Playwright with a fake step: Pause, Resume, Back and Replay give the right states. |
-| C1 | `lib/narration/tts.ts`, plus a script that turns the hand-written matrix step into `runs/demo-m1/` (audio and cue times). | P1, S1 | Route test with the fake. Real run: the audio file plays and `cueTimes.json` looks right. |
-| C2 | `runs/` store and replay mode (`REPLAY_RUN`). | F2 | Route tests: read, write, and a missing run gives a clear error. |
+| P1 | `lib/narration/cues.ts`: strip markers, cue offsets → times. | F3 (S1 only for the Unicode row) | Unit tests, one per row of the ARCH §5.2 table. Property tests: round trip, and cue times never decrease. |
+| P2 | `player/sceneAt.ts`: board state at time t. | F3 | Unit tests: before the first cue, exactly at a cue, mid-animation, after the end, and seeking backwards gives the same state as playing forwards. Property test: the same inputs give the same output. |
+| P3 | Whiteboard renderer, first primitives: `matrix` and `text`, with highlight, show/hide, move and write. Includes a dev-only page that renders a fixed `BoardState` (`/dev/board`). | P2 | Playwright on `/dev/board` asserts on `data-*` attributes (for example `data-highlight` on matrix cells), not pixels. Real run: screenshot of each primitive. |
+| P4 | `player/machine.ts`: the player state machine. | F3 | One test per cell of the ARCH §6.1 table, table-driven. This includes late `stepReady(i)`, `playBlocked`, `audioError`, `agentDisconnected`, `goToStep` during Ask, and out-of-range `goToStep`. |
+| P5 | `usePlayer` and controls.<br>• Audio fetched as a blob, the clock, and Next/Back/Replay/Pause (Space) wired to the machine.<br>• Handles autoplay-blocked and audio errors.<br>• `data-state` on the player.<br>• A `?debug=1` overlay shows `currentTime` and the last fired cue. | P2, P3, P4 | Playwright with a fake step: each control gives the right `data-state`, and a blocked autoplay shows "Press play to start". Highlights are checked by seeking to cue time + 50 ms, not by waiting. |
+| C1 | `lib/narration/tts.ts`, plus `npm run make:m1`, which turns `demo-m1.step.json` into `runs/demo-m1/` (audio and cue times). | P1, S1, F2, C2 | Unit tests with the TTS fake. Real run: the script prints a cue → word → time table, and each time is checked against the audio to within ±100 ms. |
+| C2 | `lib/runs/store.ts` (read and write `runs/<lessonId>/` with versioned step files), and `GET /api/runs/[lessonId]/[file]`, which serves step JSON, audio and media from it. | F2 | Route tests: serves a saved file; a missing file → 404 with a clear message; a bad `lessonId` or file name (including `../`) → 400. |
+| P6 | Lesson page `app/lesson/[lessonId]/page.tsx`: loads the steps of a saved lesson through C2 and plays them in the player. | P5, C2 | Real run: `/lesson/demo-m1` plays. |
 
-**M1 demo check:** in a real browser, the hand-written step plays. Each highlight lands on its word (a recording is attached to the board post), and Back and Replay redraw the board correctly.
+**M1 demo check:** in a real browser with `?debug=1`, the hand-written step plays. Every highlight fires within ±100 ms of its word: the overlay shows it, and a recording is posted on the board. Back and Replay redraw the board correctly.
 
 ## M2: Generated steps
 
@@ -69,10 +75,11 @@ Goal: Claude writes a step for a concept, and the same player renders it.
 
 | ID | Task | Depends on | Proven by |
 |---|---|---|---|
-| G1 | `lib/pipeline/step.ts`: Sonnet 5.5 with structured output → validate → retry once with the errors → fail. | S3, F3 | Route tests with fixtures: valid first time; invalid then valid; invalid twice → failed; refusal → failed. |
-| G2 | `POST /api/lessons/[id]/steps/[n]`: generate the step, TTS and cues, save to `runs/`. One generation per step at a time. | G1, C1, C2 | Route tests for each transition in ARCH §6.2. Real run: a generated step plays in the browser. |
+| G1 | `lib/pipeline/step.ts`: Sonnet 5.5 with structured output → validate → retry once with the errors → fail. | S3, F2, F3 | Unit tests with fakes: valid first time; invalid then valid; invalid twice → failed; refusal → failed. |
+| G2 | `POST /api/lessons/[id]/steps/[n]`: generate the step, TTS and cues, save to `runs/`. One generation per step at a time. Includes `npm run seed:m2`, which uploads the Attention paper and writes a hand-made `runs/dev-m2/plan.json`. | G1, C1, C2 | Unit tests for each cell of the ARCH §6.2 table, except the "newer signal" column (that's A1). Route tests for a bad `lessonId` or `n`. Real run: three seeded concepts each generate and play. |
+| P7 | More primitives: `latex` (KaTeX) and `arrow`. | P3 | Playwright on `/dev/board` with each primitive. Real run: screenshot. |
 
-**M2 demo check:** three concepts, each generated live, all play correctly in a real browser.
+**M2 demo check:** three concepts from the seeded lesson, each generated live, all play correctly in a real browser.
 
 ## M3: Paper → lesson
 
@@ -80,11 +87,12 @@ Goal: upload the Attention paper and get a playable lesson.
 
 | ID | Task | Depends on | Proven by |
 |---|---|---|---|
-| L1 | Upload page and `POST /api/lessons`: PDF checks, Files API upload, plan with structured output, saved to `runs/`. | G1 | Route tests: each upload rejection in ARCH §7, and a valid plan. Real run: the Attention paper gives a sensible plan. |
-| L2 | Prefetch: generate step N+1 while step N plays, so Next doesn't wait. | G2, P5 | Playwright with fakes: pressing Next on a prefetched step needs no new generation. Real run: time between steps under 1 s once warm. |
-| L3 | Error states in the UI: player `failed` with Retry, and upload error messages. | L1, P4 | Playwright with failing fakes: each message from ARCH §7 appears, and Retry works. |
+| L1 | Upload page and `POST /api/lessons`: PDF checks, Files API upload, a plan with structured output, saved to `runs/`. The plan is shown as a list of step titles. | G1, F2, C2 | Route tests with PDFs generated in a temp dir (tiny valid, not a PDF, encrypted, over 600 pages, over 32 MB): each upload and plan row in ARCH §7, plus retry-once. Real run: the Attention paper gives a plan that passes the schema, has 5–12 steps, and covers dot product, scaling, softmax, multi-head and positional encoding. |
+| L2 | Prefetch: generate step N+1 while step N plays. | G2, P6 | Playwright with fakes: pressing Next on a prefetched step makes no new generation request. Real run: once warm, Next shows the next step in under 1 s. |
+| L3 | Error states in the UI: player `failed` with Retry, and the upload error messages. | L1, P5 | Playwright with failing fakes: each message in ARCH §7 appears, and Retry works. |
+| C3 | Replay mode: `REPLAY_RUN` serves each step's played version from `runs/` with no provider calls. The upload page redirects to the lesson, and a missing step shows its message. | L1, G2 | Route tests: replay never calls the fakes; a missing step → "This step isn't in the saved run." Real run: the saved demo lesson plays with Wi-Fi off. |
 
-**M3 demo check:** in a real browser, uploading the Attention paper gives a plan. Steps 1–3 play back to back. Then a replay of the same run works with the network turned off.
+**M3 demo check:** in a real browser, uploading the Attention paper gives a plan, and steps 1–3 play back to back. Then the same run replays with Wi-Fi off.
 
 ## M4: Interrupt and ask
 
@@ -92,30 +100,29 @@ Goal: the learner asks, by voice or by typing, and the tutor answers aloud and d
 
 | ID | Task | Depends on | Proven by |
 |---|---|---|---|
-| Q1 | `agent/agent.json` and `npm run agent:sync`, using the voice and LLM chosen in the spikes. | S2, S5 | Running the sync creates or updates the agent. A unit test checks that the tool names match `qa/tools.ts`. |
+| Q1 | The agent config in `agent/`, pushed with the ElevenLabs CLI, using the voice and LLM chosen in the spikes. Tool names come from `shared/tools.ts`. The CLI's tracking file is committed. | S2, S5, F3 | A unit test checks the config's voice id equals `ELEVENLABS_VOICE_ID`. Real run: push twice; the second push updates the same agent and makes no duplicate. |
 | Q2 | `GET /api/agent/token`. | F2 | Route tests: success with the fake; an ElevenLabs error gives a clear error. |
-| Q3 | `AskPanel`: voice and typed input. Pause narration, start the session, close, resume. Handle mic-denied and connection failures. | Q1, Q2, P5 | Playwright with a fake agent: typed question → asking → close → paused. Real run: a spoken question and a typed question both get answers. |
-| Q4 | Client tools: `highlight` and `go_to_step`. | Q3, P4 | Unit tests: each tool's success and rejection results. Real run: "show me the first row" highlights it. |
-| Q5 | `draw_scene` → `POST /api/sketch` → render. | Q4, G1 | Route tests: valid sketch; invalid sketch → "couldn't draw that". Real run: "why does the row go with the column?" draws a sketch. |
-| Q6 | Context updates: plan, current step and board ids, sent when the session connects and on every step change. | Q3 | Unit test of the context message builder. Real run: "what's this step about?" is answered correctly. |
+| Q3 | `qa/conversation.ts` adapter (real, or a scripted fake when `NEXT_PUBLIC_FAKE_APIS=1`), `ConversationProvider`, and `AskPanel`.<br>• Voice and typed input (mic muted while typing), plus the `A` shortcut.<br>• A text-only session when mic permission is denied.<br>• Context updates on connect and on every step change: plan, narration so far, board ids, earlier questions.<br>• Replay mode says "Q&A needs a connection". | Q1, Q2, P6 | Playwright with the fake conversation: typed question → `asking` → close → back to the previous state. A dropped session shows "Q&A ended unexpectedly." Each Ask message in ARCH §7 appears. A unit test covers the context message builder. Real run: a spoken question and a typed question both get answers about the current step. |
+| Q4 | Client tools in `qa/tools.ts`: `highlight` and `go_to_step` (1-based, loads paused after Ask closes), with `simplify_upcoming` stubbed. | Q3, P4 | Unit tests: each tool's success and rejection results. A test checks that the agent config's tool names equal `shared/tools.ts`. Real run: "show me the first row" highlights it; "go to step 3" lands on step 3, paused, after Ask closes. |
+| Q5 | `draw_scene`. It doesn't wait for a result: → `POST /api/sketch` (low effort) → render on a fresh board when the sketch arrives. | Q4, G1 | Route tests: valid sketch; invalid sketch → "Couldn't draw that" shown. Real run: "why does the row go with the column?" draws a sketch while the agent keeps talking. |
+| T1 | Full-flow Playwright spec, with fakes: upload → plan → step plays → highlight at its cue → Next → Ask (typed) → `draw_scene` → resume. | Q5, L3 | The spec passes in CI. |
 
-**M4 demo check:** in a real browser, interrupt mid-step with "why divide by √d?" (spoken, then typed). The answer is spoken and sketched, and Resume carries on from the same point.
+**M4 demo check:** in a real browser, interrupt mid-step with "why divide by √d?", spoken and then typed. The answer is spoken and sketched, and closing Ask carries on from the same point.
 
-## M5: Adapt
-
-| ID | Task | Depends on | Proven by |
-|---|---|---|---|
-| A1 | Signals: questions and `simplify_upcoming` go into `signals.json` and into every step prompt. The prefetched step is discarded on a new signal. | Q5, L2 | Route tests: a new signal discards the prefetched step. Real run: after a question, the next step visibly reflects it. |
-
-**M5 demo check:** a question about √d changes the next step. Both versions are shown in the board post.
-
-## M6: Polish and demo
+## M4.5: Demo-ready (before any stretch work)
 
 | ID | Task | Depends on | Proven by |
 |---|---|---|---|
-| E1 | fal illustrations: `image` objects are generated alongside TTS and hidden on error. | S4, G2 | Route test: a fal error still gives a playable step. Real run: a clear fal moment in the demo lesson. |
-| D1 | Design pass: layout, typography, colours, a "concept map" view of the plan. | M4 | Screenshots before and after in the PR. |
-| D2 | Demo script and rehearsal, on a phone hotspot as well as venue-like Wi-Fi. | all | Two full timed run-throughs. Problems found go into issues. |
-| D3 | Rehearse the replay fallback: a full demo from `REPLAY_RUN` with Wi-Fi off. | C2, D2 | One full run-through offline. |
+| D1 | Design pass: layout, typography and colours for the upload page, player and Ask panel. | M4 check | Screenshots before and after in the PR. |
+| D2 | Demo script (from the brief, including the closing "extends to lectures and concepts" slide) and two timed rehearsals on the demo laptop, one on a phone hotspot. | M4 check, D0 | Two full run-throughs under 3 minutes. Problems found become issues. |
+| D3 | Rehearse the replay fallback: the full demo from `REPLAY_RUN` with Wi-Fi off. | C3, D2 | One full offline run-through. Re-run it after any stretch work merges. |
 
-**M6 demo check:** the full 3-minute demo script from the brief, run twice in a row without intervention.
+## Stretch: M5 (adapt) and E1 (fal)
+
+| ID | Task | Depends on | Proven by |
+|---|---|---|---|
+| A1 | Adaptation:<br>• `POST /api/lessons/[id]/signals` records questions (from the agent's user transcripts and typed text) and `simplify_upcoming` (the real handler replaces the Q4 stub), and bumps the signals version.<br>• The player reports each step as it starts playing.<br>• Stale steps are regenerated, and the browser drops its prefetched copy. | Q5, L2 | Unit tests: the "newer signal" and "started n" columns of ARCH §6.2. Real run: after asking about √d, the next step's narration addresses √d. Step v1 and v2 are posted on the board. |
+| S4 | Spike: fal image model for illustrations. Measure quality and latency. | F0 | The chosen model id in ARCH §11. |
+| E1 | fal illustrations: render the `image` primitive. Images are generated alongside TTS and hidden on error. | S4, G2 | Route test: a fal error still gives a playable step. Real run: a clear fal moment in the demo lesson. |
+
+**Stretch demo check:** a question about √d changes the next step, and the demo lesson shows a fal illustration. D3 is re-run afterwards.
