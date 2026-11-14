@@ -6,6 +6,9 @@
 //
 // The in-flight generations live in this server process, which is enough for the one local
 // server the app runs on (ARCHITECTURE.md section 1).
+//
+// In replay mode (REPLAY_RUN, section 5.5) the machine doesn't run: a step is served from the
+// saved run or isn't there, and no provider is ever called.
 import "server-only";
 import { ZodError } from "zod";
 import {
@@ -14,6 +17,7 @@ import {
   SavedStep,
   type StepResponse,
 } from "@/shared/lesson";
+import { getEnv } from "@/lib/env";
 import { narrate } from "@/lib/narration/tts";
 import { SavedPaper } from "@/lib/pipeline/plan";
 import { generateStep } from "@/lib/pipeline/step";
@@ -44,6 +48,8 @@ export type StepOutcome =
   | { kind: "noSuchLesson" }
   /** n is past the plan's last step. */
   | { kind: "noSuchStep" }
+  /** Replay mode: the step has no saved file in the run. */
+  | { kind: "notInRun" }
   /** Logged. 502: Claude or TTS failed (a section 6.2 cause); 500: anything else. */
   | { kind: "failed"; status: 502 | 500 };
 
@@ -98,6 +104,9 @@ async function resolveStep(
     if (n >= plan.steps.length) return { kind: "noSuchStep" };
 
     const saved = await latestSavedStep(lessonId, n);
+    // Replay serves the latest saved version: the played one (signals.json) comes with A1.
+    if (getEnv().mode === "replay")
+      return saved ? { kind: "ok", response: saved } : { kind: "notInRun" };
     const state = idleStepState(saved !== undefined, failedSteps.has(key));
     if (effectOf(state, REQUEST) === "serve" && saved)
       return { kind: "ok", response: saved };
