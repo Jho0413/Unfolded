@@ -1,10 +1,12 @@
-// Pure helpers behind usePlayer and the player controls (ROADMAP P5): which
-// step is on screen, which controls do something, how the browser's answers
-// to audio.play() and key presses become machine events, and the last cue
-// for the debug overlay. No React, no audio element.
+// Pure helpers behind usePlayer and the tutor card (ROADMAP P5, ARCHITECTURE.md
+// section 5.6): which step is on screen, which events change the state (the card
+// offers exactly those), how the browser's answers to audio.play() and key
+// presses become machine events, what closing Ask carries on with, and the last
+// cue for the debug overlay. No React, no audio element.
 import type { CueTimes } from "@/shared/lesson";
 import type { CuedAction } from "@/shared/scene";
 import {
+  type AskOrigin,
   type PlayerContext,
   type PlayerEvent,
   type PlayerState,
@@ -29,7 +31,7 @@ export function canSend(
   return transition(state, event, ctx).outcome === "changed";
 }
 
-/** The Play/Pause control (and Space): pause while playing, otherwise play. */
+/** Space, and the card's Hold on / Go on: pause while playing, otherwise resume. */
 export function playPauseEvent(state: PlayerState): PlayerEvent {
   return state.kind === "playing" ? { type: "pause" } : { type: "resume" };
 }
@@ -108,10 +110,7 @@ export function shortcutEvent(key: {
   modified: boolean;
   target: { tagName: string; isContentEditable: boolean } | null;
 }): PlayerEvent | null {
-  if (key.repeat || key.modified) return null;
-  if (key.target?.isContentEditable) return null;
-  if (key.target && TEXT_TAGS.has(key.target.tagName.toUpperCase()))
-    return null;
+  if (key.repeat || key.modified || isTextEntry(key.target)) return null;
   switch (key.key) {
     case "ArrowRight":
       return { type: "next" };
@@ -125,13 +124,47 @@ export function shortcutEvent(key: {
   }
 }
 
+/**
+ * Whether a key press lands in a text field (an input, textarea, select or contentEditable),
+ * where letters and arrows are the learner's typing, not shortcuts. The Ask panel's `A` uses
+ * it too.
+ */
+export function isTextEntry(
+  target: { tagName: string; isContentEditable: boolean } | null,
+): boolean {
+  if (target === null) return false;
+  return (
+    target.isContentEditable || TEXT_TAGS.has(target.tagName.toUpperCase())
+  );
+}
+
 const TEXT_TAGS = new Set(["INPUT", "TEXTAREA", "SELECT"]);
 
 /**
- * "Got it, carry on": after closeAsk, the event that carries on. A lesson stopped mid-step
- * (closeAsk returns to paused) resumes; any other state (an ended step, a step still loading,
- * a failed one) stays as closeAsk left it.
+ * How Ask was closed: the card's "Got it, carry on", or a dismissal (Escape, or the agent
+ * ending the session).
  */
-export function carryOnEvent(afterClose: PlayerState): PlayerEvent | null {
-  return afterClose.kind === "paused" ? { type: "resume" } : null;
+export type AskClose = "carryOn" | "dismiss";
+
+/**
+ * The event after closeAsk (ARCHITECTURE.md section 5.6), from how Ask was closed, what it
+ * was opened from, and where closeAsk left the player. Only a lesson closeAsk left paused
+ * mid-step can go on:
+ * - "Got it, carry on" always resumes it.
+ * - A dismissal goes back to how it was before Ask: explaining resumes, held on stays held;
+ *   a step that was loading to autoplay plays.
+ * Anything else (an ended step's prompt, a go_to_step jump loading paused, a failure) stays
+ * as closeAsk left it.
+ */
+export function afterAskEvent(
+  how: AskClose,
+  origin: AskOrigin,
+  afterClose: PlayerState,
+): PlayerEvent | null {
+  if (afterClose.kind !== "paused") return null;
+  const resume: PlayerEvent = { type: "resume" };
+  if (how === "carryOn") return resume;
+  if (origin.kind === "playing") return resume;
+  if (origin.kind === "loading" && origin.autoplay) return resume;
+  return null;
 }

@@ -225,7 +225,7 @@ export type AskCardInput = {
   captions: boolean;
 };
 
-/** The one Ask action: close Ask (closeAsk, then carry on: player/controls.ts carryOnEvent). */
+/** The one Ask action: "Got it, carry on" (closeAsk, then player/controls.ts afterAskEvent). */
 export type AskAction = "carryOn";
 
 /** The card while asking. */

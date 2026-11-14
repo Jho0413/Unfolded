@@ -24,6 +24,7 @@ import { buildContextUpdate, type QaContext } from "./context";
 import { useQaConversation } from "./conversation";
 import type { AskApi, QaConversation, QaMessage, QaTools } from "./types";
 import { askCard } from "@/player/cardView";
+import { type AskClose, isTextEntry } from "@/player/controls";
 import { AskBox, CardNotice, TutorCard } from "@/player/TutorCard";
 
 export const ASK_MESSAGES = {
@@ -45,8 +46,12 @@ export type AskPanelProps = {
   tools?: QaTools | ((ask: AskApi) => QaTools);
   /** The learner pressed Ask or `A`: send the machine `ask`. */
   onAsk: () => void;
-  /** The learner closed the panel: send the machine `closeAsk`. */
-  onClose: () => void;
+  /**
+   * The learner closed the panel: send the machine `closeAsk`. `how` is "carryOn" for the
+   * card's "Got it, carry on", "dismiss" for Escape or the agent ending the session
+   * (player/controls.ts afterAskEvent decides what follows).
+   */
+  onClose: (how: AskClose) => void;
   /** The session dropped: send the machine `agentDisconnected`. */
   onAgentDisconnected: () => void;
   /**
@@ -56,6 +61,11 @@ export type AskPanelProps = {
   canAsk?: boolean;
   /** The Captions toggle: off hides a voice answer's text (player/cardView.ts). */
   captions?: boolean;
+};
+
+const NO_DRAWING: { asked: number; drewFor: number | null } = {
+  asked: 0,
+  drewFor: null,
 };
 
 /** A transcript line, and whether it was typed (the card says "You asked" or "You said"). */
@@ -106,34 +116,33 @@ export function AskPanel({
 
   // Typed questions sent but not yet echoed back by the conversation.
   const typedEcho = useRef<string[]>([]);
-  // Questions asked in this Ask, for tagging the answer that drew (below).
-  const asked = useRef(0);
+  // Questions asked in this Ask, and which one's answer drew a sketch: the card tags that
+  // answer "Drawing on the board".
+  const [drawn, setDrawn] = useState(NO_DRAWING);
   const addMessage = useCallback((m: ShownMessage) => {
     setMessages((ms) => [...ms, m]);
     if (m.role === "user") {
-      asked.current++;
+      setDrawn((d) => ({ ...d, asked: d.asked + 1 }));
       setQuestions((qs) => [...qs, m.text]);
     }
   }, []);
-  // Which question's answer called draw_scene: the card tags it "Drawing on the board".
-  const [drewFor, setDrewFor] = useState<number | null>(null);
+  const sketchDrawn = useCallback(
+    () => setDrawn((d) => ({ ...d, drewFor: d.asked })),
+    [],
+  );
 
   const [link] = useState(() => new AgentLink());
-  const resolvedTools = useMemo(() => {
-    const made =
+  const resolvedTools = useMemo(
+    () =>
       typeof tools === "function"
-        ? tools({ showNotice: setToolNotice, tellAgent: (t) => link.tell(t) })
-        : tools;
-    const draw = made?.draw_scene;
-    if (draw === undefined) return made;
-    return {
-      ...made,
-      draw_scene: (params: Parameters<typeof draw>[0]) => {
-        setDrewFor(asked.current);
-        return draw(params);
-      },
-    };
-  }, [tools, link]);
+        ? tools({
+            showNotice: setToolNotice,
+            tellAgent: (t) => link.tell(t),
+            sketchDrawn,
+          })
+        : tools,
+    [tools, link, sketchDrawn],
+  );
   // A question typed in the box before Ask was open: sent once Ask opens (text-first).
   const pending = useRef<string | null>(null);
 
@@ -181,7 +190,7 @@ export function AskPanel({
         );
       },
       onDropped: () => pageRef.current.onAgentDisconnected(),
-      onAgentEnded: () => pageRef.current.onClose(),
+      onAgentEnded: () => pageRef.current.onClose("dismiss"),
       log: console,
     });
   }, []);
@@ -216,8 +225,7 @@ export function AskPanel({
       setMessages([]);
       setDraft("");
       setToolNotice(null);
-      setDrewFor(null);
-      asked.current = 0;
+      setDrawn(NO_DRAWING);
     };
   }, [open, replay, addMessage]);
 
@@ -250,13 +258,14 @@ export function AskPanel({
   // `A` opens Ask (Space stays play/pause); Escape closes it.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (!open && (e.key === "a" || e.key === "A") && !isTyping(e.target)) {
+      if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.repeat) return;
+      const target = e.target instanceof HTMLElement ? e.target : null;
+      if (!open && (e.key === "a" || e.key === "A") && !isTextEntry(target)) {
         e.preventDefault();
         ask();
       } else if (open && e.key === "Escape") {
         e.preventDefault();
-        onClose();
+        onClose("dismiss");
       }
     }
     window.addEventListener("keydown", onKey);
@@ -289,14 +298,14 @@ export function AskPanel({
     open && replay ? ASK_MESSAGES.needsConnection : session.notice;
 
   // Only the latest question and the agent's latest message after it are shown.
-  const { question, answer, asked: questionCount } = latestTurn(messages);
+  const { question, answer } = latestTurn(messages);
   const card = askCard({
     phase: shownPhase,
     replay,
     textOnly: session.textOnly,
     question,
     answer,
-    drew: drewFor !== null && drewFor === questionCount,
+    drew: drawn.drewFor === drawn.asked,
     captions,
   });
 
@@ -342,7 +351,11 @@ export function AskPanel({
       style={{ display: "contents" }}
     >
       {open ? (
-        <TutorCard view={card} onAction={onClose} notices={notices} />
+        <TutorCard
+          view={card}
+          onAction={() => onClose("carryOn")}
+          notices={notices}
+        />
       ) : (
         // A dropped session's message outlives the panel (section 7).
         notices
@@ -371,20 +384,17 @@ export function AskPanel({
   );
 }
 
-/** The latest question, the agent's latest message after it, and how many were asked. */
+/** The latest question, and the agent's latest message after it. */
 function latestTurn(messages: readonly ShownMessage[]): {
   question: { text: string; via: "typed" | "voice" } | null;
   answer: string | null;
-  asked: number;
 } {
   let question: ShownMessage | null = null;
   let answer: ShownMessage | null = null;
-  let asked = 0;
   for (const m of messages) {
     if (m.role === "user") {
       question = m;
       answer = null;
-      asked++;
     } else answer = m;
   }
   return {
@@ -393,7 +403,6 @@ function latestTurn(messages: readonly ShownMessage[]): {
         ? null
         : { text: question.text, via: question.typed ? "typed" : "voice" },
     answer: answer === null ? null : stripVoiceTags(answer.text),
-    asked,
   };
 }
 
@@ -422,14 +431,4 @@ async function fetchSignedUrl(): Promise<string | null> {
   } catch {
     return null;
   }
-}
-
-function isTyping(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  return (
-    target.isContentEditable ||
-    target.tagName === "INPUT" ||
-    target.tagName === "TEXTAREA" ||
-    target.tagName === "SELECT"
-  );
 }

@@ -184,11 +184,12 @@ test("captions: the sentence being said, with the said part apart; the toggle hi
   expect(first?.length).toBeGreaterThan(0);
   await seek(page, 6);
   await expect(caption).not.toHaveText(first ?? "");
-  await page.getByRole("button", { name: "Captions" }).click();
+  const toggle = page.getByRole("button", { name: "Captions" });
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await toggle.click();
   await expect(caption).toHaveCount(0);
-  await expect(
-    page.getByRole("button", { name: "Captions off" }),
-  ).toHaveAttribute("aria-pressed", "false");
+  await expect(toggle).toHaveText("Captions");
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
 });
 
 test("a typed question before any mic answer opens Ask and is answered as text", async ({
@@ -257,6 +258,23 @@ test("a draw_scene answer: Drawing on the board, and the lesson dims under the s
   ).toHaveCount(1);
 });
 
+test("a draw_scene sketch that fails: Couldn't draw that, tagged Spoken answer, nothing dimmed", async ({
+  page,
+}) => {
+  await page.route("**/api/sketch", (route) =>
+    route.fulfill({ status: 502, json: { error: "Couldn't draw that." } }),
+  );
+  await using run = await savedRun("e2e-tutor-draw-failed");
+  await page.goto(`/lesson/${run.lessonId}`);
+  await expectState(page, "playing", 0);
+  await askQuestion(page, "can you draw it?");
+  await expect(page.getByTestId("ask-tool-notice")).toHaveText(
+    "Couldn't draw that.",
+  );
+  await expect(page.getByTestId("answer-tag")).toHaveText(CARD_TEXT.tagSpoken);
+  await expect(board(page)).toHaveAttribute("data-sketching", "false");
+});
+
 test("Got it, carry on: a lesson stopped mid-step resumes", async ({
   page,
 }) => {
@@ -268,6 +286,103 @@ test("Got it, carry on: a lesson stopped mid-step resumes", async ({
   await carryOn(page).click();
   await expectState(page, "playing", 0);
   await expect(board(page)).toHaveAttribute("data-sketching", "false");
+});
+
+test("Hold on → ask → Got it, carry on: resumes", async ({ page }) => {
+  await using run = await savedRun("e2e-tutor-held-carry-on");
+  await page.goto(`/lesson/${run.lessonId}`);
+  await expectState(page, "playing", 0);
+  await holdOn(page).click();
+  await expectState(page, "paused", 0);
+  await askQuestion(page, "What is this?");
+  await expect(answer(page)).toBeVisible();
+  await carryOn(page).click();
+  await expectState(page, "playing", 0);
+});
+
+test("Hold on → ask → Escape: stays held", async ({ page }) => {
+  await using run = await savedRun("e2e-tutor-held-escape");
+  await page.goto(`/lesson/${run.lessonId}`);
+  await expectState(page, "playing", 0);
+  await holdOn(page).click();
+  await expectState(page, "paused", 0);
+  await askQuestion(page, "What is this?");
+  await expect(answer(page)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expectState(page, "paused", 0);
+  await expect(goOn(page)).toBeVisible();
+});
+
+test("explaining → ask → Escape: resumes", async ({ page }) => {
+  await using run = await savedRun("e2e-tutor-explaining-escape");
+  await page.goto(`/lesson/${run.lessonId}`);
+  await expectState(page, "playing", 0);
+  await page.keyboard.press("a");
+  await expectState(page, "asking", 0);
+  await expect(page.getByTestId("ask-panel")).toHaveAttribute(
+    "data-phase",
+    "connected",
+  );
+  await page.keyboard.press("Escape");
+  await expectState(page, "playing", 0);
+});
+
+test("A with a modifier, or held down, doesn't open Ask", async ({ page }) => {
+  await using run = await savedRun("e2e-tutor-a-modified");
+  await page.goto(`/lesson/${run.lessonId}`);
+  await expectState(page, "playing", 0);
+  await page.keyboard.press("Shift+A");
+  await page.keyboard.press("Control+a");
+  await expectState(page, "playing", 0);
+});
+
+test("the mic prompt is open (Ask by A): a typed question is sent and answered", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    (window as { __qaFakeMicPending?: boolean }).__qaFakeMicPending = true;
+  });
+  await using run = await savedRun("e2e-tutor-mic-pending");
+  await page.goto(`/lesson/${run.lessonId}`);
+  await expectState(page, "playing", 0);
+  await page.keyboard.press("a");
+  const panel = page.getByTestId("ask-panel");
+  await expect(panel).toHaveAttribute("data-phase", "waiting");
+  await expect(page.getByTestId("ask-hint")).toBeVisible();
+  await askQuestion(page, "What is this?");
+  await expect(panel).toHaveAttribute("data-phase", "connected");
+  await expect(panel).toHaveAttribute("data-text-only", "true");
+  await expect(answer(page)).toContainText("row times a column");
+});
+
+test("the mic prompt is open (Ask by Enter): the box keeps focus, and the next question is answered too", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    (window as { __qaFakeMicPending?: boolean }).__qaFakeMicPending = true;
+  });
+  await using run = await savedRun("e2e-tutor-mic-pending-twice");
+  await page.goto(`/lesson/${run.lessonId}`);
+  await expectState(page, "playing", 0);
+  await askInput(page).click();
+  await page.keyboard.type("What is this?");
+  await page.keyboard.press("Enter");
+  await expectState(page, "asking", 0);
+  await expect(askInput(page)).toBeFocused();
+  // Typed straight on, with no click: nothing is lost while the session starts.
+  await page.keyboard.type("Why a row?");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("ask-question")).toHaveText(
+    "You asked: Why a row?",
+  );
+  await expect(answer(page)).toContainText("row times a column");
+  expect(
+    await page.evaluate(() =>
+      window.__qaFake?.transcript
+        .filter((m) => m.role === "user")
+        .map((m) => m.text),
+    ),
+  ).toEqual(["What is this?", "Why a row?"]);
 });
 
 test("Got it, carry on after the step ended: back to its end-of-step prompt", async ({

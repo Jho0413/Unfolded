@@ -9,8 +9,14 @@
 //   sketches on top, redrawn every frame; otherwise the player's board.
 //
 // Both share one AskSession (qa/askSession.ts), created by LessonView.
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import { carryOnEvent } from "@/player/controls";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { type AskClose, afterAskEvent } from "@/player/controls";
 import type { Player } from "@/player/usePlayer";
 import { Whiteboard } from "@/player/Whiteboard";
 import { AskPanel } from "@/qa/AskPanel";
@@ -60,7 +66,11 @@ export function LessonAsk({
         ...ask,
         board: session.board,
         highlight: session.addAction,
-        drawSketch: session.addSketch,
+        // A sketch that reaches the board tags its answer "Drawing on the board".
+        drawSketch: (sketch, fresh) => {
+          session.addSketch(sketch, fresh);
+          ask.sketchDrawn();
+        },
         send,
         isAsking: session.isAsking,
         askId: session.askId,
@@ -73,14 +83,24 @@ export function LessonAsk({
   const onAsk = useCallback(() => {
     if (send({ type: "ask" }).outcome === "changed") session.open();
   }, [send, session]);
-  // Closing Ask ("Got it, carry on", Escape, or the agent ending) carries on: a lesson
-  // stopped mid-step resumes; an ended step goes back to its end-of-step prompt.
-  const onClose = useCallback(() => {
-    session.close();
-    const closed = send({ type: "closeAsk" });
-    const next = carryOnEvent(closed.state);
-    if (next !== null) send(next);
-  }, [send, session]);
+  // What Ask was opened from, read when it closes (outside render).
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  });
+  // Closing Ask (ARCHITECTURE.md section 5.6): "Got it, carry on" resumes a lesson stopped
+  // mid-step; Escape or the agent ending goes back to how it was before Ask.
+  const onClose = useCallback(
+    (how: AskClose) => {
+      const before = stateRef.current;
+      session.close();
+      const closed = send({ type: "closeAsk" });
+      if (closed.outcome !== "changed" || before.kind !== "asking") return;
+      const next = afterAskEvent(how, before.from, closed.state);
+      if (next !== null) send(next);
+    },
+    [send, session],
+  );
   const onDropped = useCallback(() => {
     session.close();
     send({ type: "agentDisconnected" });

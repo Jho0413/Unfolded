@@ -204,6 +204,19 @@ describe("askCard", () => {
     expect(v.buttons).toEqual(carryOn);
   });
 
+  it("dropped (phase idle while open, not replay): Stopped to listen, nothing waiting, Carry on", () => {
+    const v = askCard(ask({ phase: "idle", question: typed, answer: "So." }));
+    expect(v.status).toBe(CARD_STATUS.stopped);
+    expect(v.tag).toBeNull();
+    expect(v.body).toEqual({
+      kind: "ask",
+      question: typed,
+      answer: null,
+      wait: null,
+    });
+    expect(v.buttons).toEqual(carryOn);
+  });
+
   it("waiting (mic prompt open), nothing asked: the mic hint", () => {
     const v = askCard(ask({ phase: "waiting" }));
     expect(v.status).toBe(CARD_STATUS.stopped);
