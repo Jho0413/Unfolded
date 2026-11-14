@@ -569,6 +569,22 @@ Each spike is time-boxed to 60 minutes, and its answer is written back into this
   - **Latency** (one call each, warm): 1.2–1.8 s for the 274-character M1 narration (about 19 s of audio), 0.46 s for 45 characters, and 0.25 s for 1 character. TTS is small next to the Claude step call.
   - **`cues.ts` on the real response:** no fix needed. On all three voices, every M1 cue time equals the direct alignment-index start (Alice: row 2601, col 3994, slide 5213, pair1 8498, pair2 9787, add 11146, total 12318, drop 14222, done 16718 ms). On the Unicode probe, cues after the emoji, at CJK, at a combining accent and at the end all land on the right entry. This hasn't been checked by ear: C1's ±100 ms check against the audio still applies.
 - **S2:** the Q&A agent's LLM, comparing two candidates on latency and tool-calling. Also: whether text-only sessions speak, and how long a `draw_scene` sketch takes.
+  - **Answer (2026-11-14, #53): `claude-haiku-5-5`.** It called `highlight` correctly every time. `gemini-3.5-flash` is about 0.3 s faster but highlighted the wrong target.
+  - **Method:** `agent/spikes/s2-llm.mjs` (`node --env-file=.env.local agent/spikes/s2-llm.mjs <llm> [--voice]`). It opens the real agent's conversation WebSocket through a signed URL (`GET /v1/convai/conversation/get-signed-url`) and overrides `prompt.llm` and `conversation.text_only` per session. It sends one `contextual_update` shaped like `qa/context.ts` for M1, with the narration so far and the ids `a, times, b, equals, c, p1, p2, sum`, then 4 typed questions. Each `client_tool_call` is answered with `"ok"`. The overrides work because the agent config allows them (`platform_settings.overrides`). Each model had 2 runs, so 8 turns per model, in `text_only` sessions with the draft prompt in `agent/agent_configs/tutor.json`.
+  - **Latency**, measured from `user_message` to the first agent event (a tool call or text) and to the final `agent_response`, over the 8 turns, as median (range):
+
+    | LLM | first event | full answer |
+    |---|---|---|
+    | `gemini-3.5-flash` | 0.97 s (0.68–1.09) | 1.56 s (1.08–1.97) |
+    | `claude-haiku-5-5` | 1.26 s (0.79–1.69) | 1.89 s (1.34–2.59) |
+
+  - **Tool calls:** the questions were "highlight the row of A we're using" (expected `{a, row 0}`), "which number in B gets multiplied by the two" (expected `{b, row 1, col 0}`), "where does the nineteen go" (expected `{c, row 0, col 0}`), and "why a row and a column" (no tool needed).
+    - **Haiku** was right 6 of 6 times. In one run it also highlighted the `2` in A (`{a, row 0, col 1}`) next to the `7` in B, which is a sensible extra.
+    - **Gemini** was right 4 of 6 times. Both times it answered "the row of A" with `{a, row 0, col 0}`, a single cell rather than the row.
+    - Both models called the tool before or as they started answering. Neither invented an id or sent a malformed parameter, and neither called a tool for the "why" question. Haiku's explanations were better: they gave the reason, not just the rule.
+  - **Text-only sessions don't speak.** None of the 16 `text_only: true` turns sent any `audio` event: there were only `agent_response`, `agent_chat_response_part`, `client_tool_call` and `agent_tool_response`. A **typed** question in a **voice** session *is* spoken: 27 audio chunks, with first audio at 1.96 s and the text at 2.19 s, for Haiku. So mic-denied sessions must start with `textOnly` (the override is allowed in the config), and typed questions in a voice session are answered aloud.
+  - **Not measured:** how long a `draw_scene` sketch takes. It needs `/api/sketch` (SK1), so SK1 measures it.
+  - **For Q1:** set `prompt.llm` to `claude-haiku-5-5`. Keep the `conversation.text_only` override (the React SDK's `textOnly` needs it). Drop the `prompt.llm` override unless we want to switch models live.
 - **S3:** whether Sonnet 5.5 writes valid, good `Step` scripts from the Attention paper and from a second, different paper (non-ML or math-heavy), and the effort level needed for steps, plans and sketches.
 - **S4:** which fal image model to use for the cover (M3) and for in-scene images (E1, stretch), and its latency. Download the images into `runs/`, in case fal's URLs expire. Keep the generations few: the budget is about 25 US dollars per teammate.
 - **S5:** the ElevenLabs CLI commands that push the agent and its client tools from `agent/`, and how its tracking file records the agent id.
