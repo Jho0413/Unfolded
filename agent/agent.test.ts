@@ -104,6 +104,22 @@ describe("agent config", () => {
     );
   });
 
+  it("makes the board tools the default in the prompt (issue #82)", () => {
+    const prompt: string = agent.conversation_config.agent.prompt.prompt;
+    for (const tool of CLIENT_TOOLS) expect(prompt).toContain(tool.name);
+    expect(prompt).toMatch(
+      /"why", "how" or "explain" question, call draw_scene/,
+    );
+    expect(prompt).toMatch(
+      /whenever you refer to something that is on the board, call highlight/,
+    );
+    expect(prompt).toMatch(/wait silently/);
+  });
+
+  it("never takes a turn on the learner's silence (no 'are you still there?')", () => {
+    expect(agent.conversation_config.turn.turn_timeout).toBe(-1);
+  });
+
   // CI has no env, so this runs where a key file exists. npm run agent:push
   // sets AGENT_PUSH=1, which makes a missing voice id fail instead of skip.
   const voiceId = voiceIdFromEnv();
