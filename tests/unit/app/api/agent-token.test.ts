@@ -100,6 +100,8 @@ describe("GET /api/agent/token", () => {
     expect(init.headers).toEqual({ "xi-api-key": KEY });
     expect(init.signal).toBeInstanceOf(AbortSignal);
     expect(timeout).toHaveBeenCalledWith(config.agentToken.timeoutMs);
+    expect(init.cache).toBe("no-store");
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("missing ELEVENLABS_AGENT_ID: 503 with the unavailable message, ElevenLabs not called", async () => {
@@ -131,7 +133,11 @@ describe("GET /api/agent/token", () => {
   it("an ElevenLabs error body cut for the log: the key is redacted before the cut", async () => {
     useEnv(REAL);
     stubFetch(
-      async () => new Response(`${"x".repeat(495)}${KEY}`, { status: 400 }),
+      async () =>
+        new Response(
+          `${"x".repeat(config.agentToken.maxLoggedErrorChars - 5)}${KEY}`,
+          { status: 400 },
+        ),
     );
     const log = captureErrorLog();
 
