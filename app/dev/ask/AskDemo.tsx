@@ -21,8 +21,6 @@ import {
   askScene,
   EMPTY_LAYER,
 } from "@/qa/askBoard";
-import { sketchFailedUpdate } from "@/qa/drawScene";
-import { SKETCH_FAILED } from "@/shared/lesson";
 import { createClientTools, type HighlightAction } from "@/qa/tools";
 import { Whiteboard } from "@/player/Whiteboard";
 
@@ -180,10 +178,7 @@ export function AskDemo({ replay }: { replay: boolean }) {
           setHighlights((h) => [...h, a]);
         },
         drawSketch: machine.addSketch,
-        sketchFailed: (description) => {
-          ask.showNotice(SKETCH_FAILED);
-          ask.tellAgent(sketchFailedUpdate(description));
-        },
+        ...ask,
         send,
         isAsking: () => machine.get().state.kind === "asking",
         askId: machine.askId,

@@ -81,7 +81,8 @@ function harness(start: PlayerState) {
     isAsking: () => state.kind === "asking",
     askId: () => 1,
     drawSketch: () => {},
-    sketchFailed: () => {},
+    showNotice: () => {},
+    tellAgent: () => {},
     fetch: vi.fn(() => new Promise<Response>(() => {})),
   });
   return { tools, highlights, send, state: () => state };

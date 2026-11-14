@@ -30,7 +30,7 @@ export type ClientToolDeps = {
   isAsking: () => boolean;
 } & Pick<
   DrawSceneDeps,
-  "askId" | "drawSketch" | "sketchFailed" | "fetch" | "timeoutMs"
+  "askId" | "drawSketch" | "showNotice" | "tellAgent" | "fetch" | "timeoutMs"
 >;
 
 /** What a tool that changes the board or the step returns after Ask closed. */

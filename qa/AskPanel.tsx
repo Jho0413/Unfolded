@@ -17,7 +17,7 @@ import { MESSAGES } from "@/player/machine";
 import { AgentTokenResponse, QA_UNAVAILABLE } from "@/shared/lesson";
 import { buildContextUpdate, type QaContext } from "./context";
 import { useQaConversation } from "./conversation";
-import type { QaMessage, QaTools } from "./types";
+import type { AskApi, QaMessage, QaTools } from "./types";
 
 export const ASK_MESSAGES = {
   unavailable: QA_UNAVAILABLE,
@@ -50,13 +50,7 @@ export type AskPanelProps = {
 /** How long a session may take to connect before Ask says it's unavailable. */
 const CONNECT_TIMEOUT_MS = 15_000;
 
-/** What tool handlers may ask of the panel. */
-export type AskApi = {
-  /** Shows a message in the panel (e.g. "Couldn't draw that."). */
-  showNotice: (message: string) => void;
-  /** Tells the agent something through sendContextualUpdate(). */
-  tellAgent: (text: string) => void;
-};
+export type { AskApi };
 
 /** Lets tools made before the conversation exists reach it once it does. */
 class AgentLink {
@@ -82,6 +76,9 @@ export function AskPanel({
 }: AskPanelProps) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [notice, setNotice] = useState<string | null>(null);
+  // A tool's message (a failed sketch), apart from the session's own notice,
+  // so it never hides "Mic is off" and a later success can clear it.
+  const [toolNotice, setToolNotice] = useState<string | null>(null);
   const [textOnly, setTextOnly] = useState(false);
   const [messages, setMessages] = useState<QaMessage[]>([]);
   const [questions, setQuestions] = useState<string[]>([]);
@@ -109,7 +106,7 @@ export function AskPanel({
   const resolvedTools = useMemo(
     () =>
       typeof tools === "function"
-        ? tools({ showNotice: setNotice, tellAgent: (t) => link.tell(t) })
+        ? tools({ showNotice: setToolNotice, tellAgent: (t) => link.tell(t) })
         : tools,
     [tools, link],
   );
@@ -198,6 +195,7 @@ export function AskPanel({
       setTextOnly(false);
       // Only a dropped session's message outlives the panel.
       setNotice((n) => (n === ASK_MESSAGES.ended ? n : null));
+      setToolNotice(null);
     };
   }, [open, replay, conversation, go, fail]);
 
@@ -279,6 +277,11 @@ export function AskPanel({
       {shownNotice && (
         <p role="status" data-testid="ask-notice" style={noticeStyle}>
           {shownNotice}
+        </p>
+      )}
+      {open && toolNotice && (
+        <p role="status" data-testid="ask-tool-notice" style={noticeStyle}>
+          {toolNotice}
         </p>
       )}
       {open && (

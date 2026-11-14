@@ -246,7 +246,7 @@ test.describe("draw_scene on /dev/ask (ROADMAP Q5)", () => {
     await expect
       .poll(async () => (await boardAttributes(page)).includes("accent"))
       .toBe(true);
-    await expect(notice(page)).toHaveCount(0);
+    await expect(page.getByTestId("ask-tool-notice")).toHaveCount(0);
     // Closing Ask throws the drawing away: the board's data-* attributes
     // match those from before Ask.
     await page.getByRole("button", { name: "Close" }).click();
@@ -277,7 +277,9 @@ test.describe("draw_scene on /dev/ask (ROADMAP Q5)", () => {
       await toPlaying(page);
       await askAndConnect(page);
       await typeQuestion(page, "can you draw it?");
-      await expect(notice(page)).toHaveText(ASK.sketchFailed);
+      await expect(page.getByTestId("ask-tool-notice")).toHaveText(
+        ASK.sketchFailed,
+      );
       await expect
         .poll(() => page.evaluate(() => window.__qaFake?.contextUpdates.at(-1)))
         .toContain("couldn't be drawn");
@@ -361,6 +363,25 @@ test.describe("Ask messages (ARCHITECTURE.md section 7)", () => {
     await expect(
       page.getByTestId("ask-transcript").locator('[data-role="agent"]').last(),
     ).toContainText("row times a column");
+  });
+
+  test("a failed sketch in a text-only session keeps the mic message", async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      (window as { __qaFakeMicDenied?: boolean }).__qaFakeMicDenied = true;
+    });
+    await page.route("**/api/sketch", (route) =>
+      route.fulfill({ status: 502, json: { error: ASK.sketchFailed } }),
+    );
+    await open(page);
+    await toPlaying(page);
+    await askAndConnect(page);
+    await typeQuestion(page, "can you draw it?");
+    await expect(page.getByTestId("ask-tool-notice")).toHaveText(
+      ASK.sketchFailed,
+    );
+    await expect(notice(page)).toHaveText(ASK.micOff);
   });
 
   test(`replay mode: "${ASK.needsConnection}"`, async ({ page }) => {

@@ -57,7 +57,8 @@ function setup(
     isAsking: vi.fn(() => true),
     askId: vi.fn(() => 1),
     drawSketch: vi.fn<DrawSceneDeps["drawSketch"]>(),
-    sketchFailed: vi.fn<DrawSceneDeps["sketchFailed"]>(),
+    showNotice: vi.fn<DrawSceneDeps["showNotice"]>(),
+    tellAgent: vi.fn<DrawSceneDeps["tellAgent"]>(),
     fetch: fetchMock as unknown as typeof fetch,
     timeoutMs: over.timeoutMs,
   };
@@ -72,7 +73,24 @@ function sentBody(fetchMock: ReturnType<typeof setup>["fetchMock"]) {
   return JSON.parse(String(init?.body));
 }
 
-vi.spyOn(console, "warn").mockImplementation(() => {});
+/** A failure shows SKETCH_FAILED, tells the agent, and logs `reason`. */
+function expectFailed(
+  deps: ReturnType<typeof setup>["deps"],
+  description: string,
+  reason: unknown,
+) {
+  expect(deps.showNotice).toHaveBeenCalledWith(SKETCH_FAILED);
+  expect(deps.tellAgent).toHaveBeenCalledWith(sketchFailedUpdate(description));
+  expect(warn).toHaveBeenLastCalledWith("[qa] draw_scene failed:", reason);
+  expect(deps.drawSketch).not.toHaveBeenCalled();
+}
+
+function expectSilent(deps: ReturnType<typeof setup>["deps"]) {
+  expect(deps.showNotice).not.toHaveBeenCalledWith(SKETCH_FAILED);
+  expect(deps.tellAgent).not.toHaveBeenCalled();
+}
+
+const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
 describe("drawScene", () => {
   it("posts { description, fresh, board } and draws a valid sketch on the board", async () => {
@@ -88,7 +106,8 @@ describe("drawScene", () => {
     expect(fresh).toBe(false);
     expect(sketch.objects[0].id).toBe("note");
     expect(sketch.actions[0].durationMs).toBe(400);
-    expect(deps.sketchFailed).not.toHaveBeenCalled();
+    expect(deps.showNotice).toHaveBeenCalledWith(null); // a success clears an earlier failure
+    expectSilent(deps);
   });
 
   it("fresh: sends an empty board and validates without the board's ids", async () => {
@@ -106,7 +125,8 @@ describe("drawScene", () => {
     const { deps } = setup(async () => json({ sketch: onBoard }));
     await drawScene(deps, "start over", true);
     expect(deps.drawSketch).not.toHaveBeenCalled();
-    expect(deps.sketchFailed).toHaveBeenCalledWith(
+    expectFailed(
+      deps,
       "start over",
       expect.stringContaining('unknown object "q"'),
     );
@@ -115,14 +135,14 @@ describe("drawScene", () => {
   it("an { error } response fails: Couldn't draw that", async () => {
     const { deps } = setup(async () => json({ error: SKETCH_FAILED }, 502));
     await drawScene(deps, "x", false);
-    expect(deps.sketchFailed).toHaveBeenCalledWith("x", "HTTP 502");
+    expectFailed(deps, "x", "HTTP 502");
     expect(deps.drawSketch).not.toHaveBeenCalled();
   });
 
   it("a malformed 200 response fails", async () => {
     const { deps } = setup(async () => json({ nope: true }));
     await drawScene(deps, "x", false);
-    expect(deps.sketchFailed).toHaveBeenCalledWith("x", "bad response");
+    expectFailed(deps, "x", "bad response");
   });
 
   it("a sketch invalid on the board as it is when it arrives fails", async () => {
@@ -135,10 +155,7 @@ describe("drawScene", () => {
       { board: () => current },
     );
     await drawScene(deps, "x", false);
-    expect(deps.sketchFailed).toHaveBeenCalledWith(
-      "x",
-      expect.stringContaining('unknown object "q"'),
-    );
+    expectFailed(deps, "x", expect.stringContaining('unknown object "q"'));
   });
 
   it("a timeout fails", async () => {
@@ -146,10 +163,7 @@ describe("drawScene", () => {
       Promise.reject(new DOMException("timed out", "TimeoutError")),
     );
     await drawScene(deps, "x", false);
-    expect(deps.sketchFailed).toHaveBeenCalledWith(
-      "x",
-      expect.stringContaining("TimeoutError"),
-    );
+    expectFailed(deps, "x", expect.stringContaining("TimeoutError"));
   });
 
   it("aborts the request after timeoutMs", async () => {
@@ -163,7 +177,8 @@ describe("drawScene", () => {
         ),
       )) as typeof fetch;
     await drawScene(deps, "x", false);
-    expect(deps.sketchFailed).toHaveBeenCalledOnce();
+    expect(deps.showNotice).toHaveBeenCalledWith(SKETCH_FAILED);
+    expect(deps.tellAgent).toHaveBeenCalledOnce();
   });
 
   it("drops a sketch, or a failure, that arrives after Ask closed", async () => {
@@ -175,7 +190,7 @@ describe("drawScene", () => {
     await drawScene(bad.deps, "x", false);
     for (const d of [ok.deps, bad.deps]) {
       expect(d.drawSketch).not.toHaveBeenCalled();
-      expect(d.sketchFailed).not.toHaveBeenCalled();
+      expectSilent(d);
     }
   });
 
@@ -192,7 +207,7 @@ describe("drawScene", () => {
       deps.askId.mockImplementation(() => session);
       await drawScene(deps, "x", false);
       expect(deps.drawSketch).not.toHaveBeenCalled();
-      expect(deps.sketchFailed).not.toHaveBeenCalled();
+      expectSilent(deps);
     }
   });
 
@@ -229,7 +244,8 @@ describe("boardToSend (config.maxBoardObjects)", () => {
     });
     await drawScene(deps, "x", false);
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(deps.sketchFailed).toHaveBeenCalledOnce();
+    expect(deps.showNotice).toHaveBeenCalledWith(SKETCH_FAILED);
+    expect(deps.tellAgent).toHaveBeenCalledOnce();
   });
 });
 

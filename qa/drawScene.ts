@@ -5,9 +5,10 @@
 // board may have changed meanwhile) and drawn on top, timed from arrival. A
 // failure shows "Couldn't draw that." and tells the agent, so it answers in
 // words.
-import { SketchResponse } from "@/shared/lesson";
+import { SKETCH_FAILED, SketchResponse } from "@/shared/lesson";
 import type { BoardState, Sketch } from "@/shared/scene";
 import { validateSketch } from "@/shared/validate";
+import type { AskApi } from "./types";
 
 /**
  * Mirrors config.maxBoardObjects (lib/config.ts is server-only); a unit test
@@ -33,8 +34,10 @@ export type DrawSceneDeps = {
   askId: () => number;
   /** Draws a validated sketch on top of the board, or on an empty one. */
   drawSketch: (sketch: Sketch, fresh: boolean) => void;
-  /** Shows SKETCH_FAILED (shared/lesson.ts) and tells the agent (the Ask panel does both). */
-  sketchFailed: (description: string, reason: string) => void;
+  /** The Ask panel's: a failure shows SKETCH_FAILED (a success clears it). */
+  showNotice: AskApi["showNotice"];
+  /** The Ask panel's: a failure tells the agent to answer in words. */
+  tellAgent: AskApi["tellAgent"];
   /** Injected in tests. */
   fetch?: typeof fetch;
   timeoutMs?: number;
@@ -88,6 +91,7 @@ async function requestSketch(
   if (!checked.ok)
     return fail(current, deps, description, checked.errors.join("; "));
   deps.drawSketch(checked.value, fresh);
+  deps.showNotice(null);
 }
 
 function fail(
@@ -97,7 +101,9 @@ function fail(
   reason: string,
 ): void {
   console.warn("[qa] draw_scene failed:", reason);
-  if (current()) deps.sketchFailed(description, reason);
+  if (!current()) return;
+  deps.showNotice(SKETCH_FAILED);
+  deps.tellAgent(sketchFailedUpdate(description));
 }
 
 /**
