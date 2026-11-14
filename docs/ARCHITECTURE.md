@@ -258,6 +258,8 @@ sequenceDiagram
   - The player fetches each step's audio as a blob and plays it from a `blob:` URL. That keeps seeking reliable without HTTP Range support in the route.
   - The route only serves names matching `^[a-z0-9][a-z0-9.-]{0,99}$` (so never `.` or `..`) with a known extension (`.json`, `.mp3`, `.png`, `.jpg`, `.jpeg`, `.webp`) from inside the run folder, and never a symlink or a folder. A bad `lessonId` or file name → 400; a file that isn't there → 404.
   - `lib/runs/store.ts` writes every file atomically (a temporary file, then a rename, or a hard link for step versions so they never replace a file), so a reader never sees half a file. A new step version is saved with `saveStepVersion`: its audio `step-<n>.v<k>.mp3` first (creating it claims version k; if k is taken, it tries the next version, and gives up with an error after 100 tries), then `step-<n>.v<k>.json`, so an older version is never overwritten and a listed version always has its audio.
+  - A step file holds `SavedStep` (`shared/lesson.ts`): `{ step, cueTimes }`. Its version and audio URL come from its name, so a saved step becomes a `StepResponse` without the step route. Writers (C1 `make:m1`, the step route) parse with `SavedStep` before `saveStepVersion`, and a run that's played on the lesson page also needs `plan.json` (`make:m1` writes it too).
+  - **The lesson page** (`app/lesson/[lessonId]/page.tsx`) reads `plan.json` and lists the saved step versions on the server (the browser can't list a run folder). The player then reads each step's latest saved version, `step-<n>.v<k>.json`, and its `.mp3` through this route. A bad `lessonId` or a lesson with no `plan.json` is a 404 page with "No such lesson or step." and a link back to upload; a step with no saved file fails in the player with "This step isn't in the saved run." Once the step route exists, it replaces the page's direct reads for steps not yet generated. Playing the step version recorded in `signals.json` waits for S1 (it plays the latest until then).
 
 ### 5.2 Cue markers become times (`lib/narration/cues.ts`, pure)
 
@@ -444,6 +446,7 @@ The developer gets the full error in the server log, tagged with the route, less
 | Player | Browser blocks autoplay | "Press play to start." | Play button |
 | Player | Audio fails to load or decode | "Couldn't play the audio. Retry?" | Retry |
 | Route | `lessonId` doesn't match `^[a-z0-9-]{1,40}$`, or `n` isn't a step in the plan | 400 "No such lesson or step." | Back to upload |
+| Lesson page | `/lesson/<lessonId>` with a bad `lessonId`, or a lesson with no saved or an invalid `plan.json` (logged) | A 404 page: "No such lesson or step." | "Back to upload" link |
 | Run file | `GET /api/runs/<lessonId>/<file>` with a bad `lessonId` or file name, an extension it doesn't serve, a symlink, a folder or another non-regular file | 400 "No such lesson or file." (a symlink, folder or other non-regular file is logged; a bad name isn't, as any URL can be typed) | The page shows its own error for the step or image |
 | Run file | The file isn't in the run folder | 404 `No saved file "<file>" in lesson "<lessonId>".` | As above |
 | Run file | Reading the file fails for another reason | 500 "Couldn't read this file." (the error is logged) | As above |
@@ -512,6 +515,7 @@ The developer gets the full error in the server log, tagged with the route, less
 | `FAKE_APIS` | `1` swaps all three providers for `lib/fakes/` (tests and CI), and lets a production server serve the dev-only `/dev/board` (unless `REPLAY_RUN` is set, which wins) |
 | `NEXT_PUBLIC_FAKE_APIS` | `1` swaps the browser's agent conversation for the scripted fake. It's inlined at build time, so CI builds with it set. |
 | `REPLAY_RUN` | serve a saved run from `runs/` |
+| `RUNS_DIR` | where run folders live, relative to the project (default `runs/`). Playwright sets `runs-e2e/`, so tests never write to, serve or delete a real run |
 
 **Required keys depend on how the app runs.** Each row gets a test:
 

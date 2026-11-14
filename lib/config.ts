@@ -39,8 +39,14 @@ export const config = {
     /** Served when FAKE_APIS=1, in ElevenLabs' response shape. */
     fixture: "elevenlabs-conversation-token.json",
   },
-  /** One folder per lesson: the store and the replay set (ARCHITECTURE.md section 5.5). */
-  runsDir: path.join(process.cwd(), "runs"),
+  /**
+   * One folder per lesson: the store and the replay set (ARCHITECTURE.md section 5.5).
+   * RUNS_DIR moves it (relative to the project), so e2e never touches the real runs/.
+   */
+  runsDir: path.resolve(
+    /* turbopackIgnore: true */ process.cwd(),
+    process.env.RUNS_DIR || "runs",
+  ),
   /** Recorded provider responses served when FAKE_APIS=1 (ARCHITECTURE.md section 10). */
   fixturesDir: path.join(process.cwd(), "lib", "fakes", "fixtures"),
 } as const;
