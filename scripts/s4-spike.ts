@@ -8,7 +8,8 @@
 //   npm run spike:s4 -- --price            (prices only, from fal's pricing API: free)
 // The key is FAL_KEY from the environment (.env or .env.local); it is never printed.
 // Images and evidence/70/log.jsonl go to evidence/70/ (gitignored). MAX_GENERATIONS caps
-// the spike's spend, counted from the log, so a rerun can't go over it.
+// the spike's spend: a "started" line is logged before each fal call, so a run that fails
+// after fal has charged still counts, and a rerun can't go over the cap.
 import { existsSync } from "node:fs";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -17,7 +18,7 @@ import { fal } from "@fal-ai/client";
 
 const OUT_DIR = path.join("evidence", "70");
 const LOG = path.join(OUT_DIR, "log.jsonl");
-/** The spike's budget: about 2 US dollars of the hackathon's fal credits. */
+/** The spike's budget: at most 0.24 US dollars at the dearest price tried (0.03 per image). */
 const MAX_GENERATIONS = 8;
 /** Wide, like the plan view's and the lesson page's header (1024 x 576, 0.59 MP). */
 const IMAGE_SIZE = "landscape_16_9";
@@ -28,9 +29,11 @@ const MODELS = [
   "fal-ai/flux-2-pro",
 ] as const;
 type Model = (typeof MODELS)[number];
+/** The FLUX models' `acceleration` input. */
+const ACCELERATIONS = ["none", "regular", "high"];
 
 /**
- * Written the way the plan prompt asks for a coverPrompt (L1, lib/pipeline/prompts/plan.ts):
+ * Written the way L1's plan prompt asks for a coverPrompt (branch 56-l1-lessons, PR #65):
  * a visual metaphor, no text in the image. `attention` is the coverPrompt of L1's recorded
  * plan for the Attention paper; `newton3p` is written to the same rule for Kelley's paper.
  */
@@ -69,9 +72,17 @@ function costOf(price: Price, w: number, h: number): number {
       price.unit_price * Math.ceil((w * h) / 1_000_000);
 }
 
+/**
+ * Generations started so far: every log line but the "done" ones (the first lines of the
+ * spike were logged only when done, with no `event`).
+ */
 async function generationsSoFar(): Promise<number> {
   if (!existsSync(LOG)) return 0;
-  return (await readFile(LOG, "utf8")).split("\n").filter(Boolean).length;
+  return (await readFile(LOG, "utf8"))
+    .split("\n")
+    .filter(Boolean)
+    .filter((line) => (JSON.parse(line) as { event?: string }).event !== "done")
+    .length;
 }
 
 async function main() {
@@ -82,7 +93,7 @@ async function main() {
       price: { type: "boolean", default: false },
       /** fal.run: one direct request, no queue to poll (fal.subscribe is the default). */
       direct: { type: "boolean", default: false },
-      /** The FLUX models' `acceleration` input: none, regular or high. */
+      /** One of ACCELERATIONS. */
       accel: { type: "string" },
     },
   });
@@ -100,10 +111,13 @@ async function main() {
   const model = MODELS.find((m) => m === values.model);
   if (!model) throw new Error(`--model must be one of ${MODELS.join(", ")}`);
   const promptName = values.prompt as PromptName;
-  if (!(promptName in PROMPTS))
+  if (!Object.hasOwn(PROMPTS, promptName))
     throw new Error(
       `--prompt must be one of ${Object.keys(PROMPTS).join(", ")}`,
     );
+
+  if (values.accel !== undefined && !ACCELERATIONS.includes(values.accel))
+    throw new Error(`--accel must be one of ${ACCELERATIONS.join(", ")}`);
 
   const done = await generationsSoFar();
   if (done >= MAX_GENERATIONS)
@@ -112,6 +126,15 @@ async function main() {
   fal.config({ credentials: key });
   const price = await priceOf(model, key);
   const prompt = PROMPTS[promptName];
+  const call = values.direct ? "run" : "subscribe";
+  const accel = values.accel ?? "default";
+  await mkdir(OUT_DIR, { recursive: true });
+  const log = (entry: object) =>
+    appendFile(
+      LOG,
+      `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`,
+    );
+  await log({ event: "started", model, prompt: promptName, call, accel });
   const started = performance.now();
   const input = {
     prompt,
@@ -135,16 +158,15 @@ async function main() {
   const bytes = Buffer.from(await res.arrayBuffer());
   const totalMs = Math.round(performance.now() - started);
 
-  await mkdir(OUT_DIR, { recursive: true });
   const variant = `${values.direct ? ".run" : ""}${values.accel ? `.${values.accel}` : ""}`;
   const file = `${model.replaceAll("/", "_")}.${promptName}${variant}.jpg`;
   await writeFile(path.join(OUT_DIR, file), bytes);
   const entry = {
-    at: new Date().toISOString(),
+    event: "done",
     model,
     prompt: promptName,
-    call: values.direct ? "run" : "subscribe",
-    accel: values.accel ?? "default",
+    call,
+    accel,
     size: `${image.width}x${image.height}`,
     generatedMs,
     totalMs,
@@ -153,7 +175,7 @@ async function main() {
     requestId: result.requestId,
     file,
   };
-  await appendFile(LOG, `${JSON.stringify(entry)}\n`);
+  await log(entry);
   console.log(JSON.stringify(entry));
   console.log(`generation ${done + 1} of ${MAX_GENERATIONS}`);
 }
