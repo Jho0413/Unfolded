@@ -194,13 +194,11 @@ test("Ask while loading: the board stays empty when the step arrives, then shows
   await using run = await savedRun("e2e-lesson-ask-loading");
   let release: () => void = () => {};
   const gate = new Promise<void>((r) => (release = r));
-  await page.route(
-    `**/api/runs/${run.lessonId}/step-0.v1.json`,
-    async (route) => {
-      await gate;
-      await route.continue();
-    },
-  );
+  // Hold step 0's request to the step route (ROADMAP L3) until Ask is open.
+  await page.route(`**/api/lessons/${run.lessonId}/steps/0`, async (route) => {
+    await gate;
+    await route.continue();
+  });
   await page.goto(`/lesson/${run.lessonId}`);
   await expect(player(page)).toHaveAttribute("data-state", "loading");
   await page.getByRole("button", { name: "Ask", exact: true }).click();

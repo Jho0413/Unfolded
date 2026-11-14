@@ -83,9 +83,12 @@ export interface Player {
 export function usePlayer({
   stepCount,
   fetchStep,
+  onStepReady,
 }: {
   stepCount: number;
   fetchStep: FetchStep;
+  /** The machine took step n (its script and audio arrived), e.g. to prefetch n + 1. */
+  onStepReady?: (n: number) => void;
 }): Player {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [view, setView] = useState<{
@@ -99,10 +102,12 @@ export function usePlayer({
   const stateRef = useRef(view.state);
   const ctxRef = useRef({ stepCount });
   const fetchStepRef = useRef(fetchStep);
+  const onStepReadyRef = useRef(onStepReady);
   useEffect(() => {
     ctxRef.current = { stepCount };
     fetchStepRef.current = fetchStep;
-  }, [stepCount, fetchStep]);
+    onStepReadyRef.current = onStepReady;
+  }, [stepCount, fetchStep, onStepReady]);
 
   // `send`, the effects it runs and the step loader. Built once per mount
   // (state, not a memo, so nothing rebuilds them): they read the refs above,
@@ -131,8 +136,10 @@ export function usePlayer({
       // under a state that didn't ask for it.
       ready: (step) => {
         const result = send({ type: "stepReady", i: step.step });
-        if (result.outcome === "changed") setLoaded(step);
-        else URL.revokeObjectURL(step.src);
+        if (result.outcome === "changed") {
+          setLoaded(step);
+          onStepReadyRef.current?.(step.step);
+        } else URL.revokeObjectURL(step.src);
       },
       failed: (step, message) => send({ type: "stepFailed", i: step, message }),
       log: console,

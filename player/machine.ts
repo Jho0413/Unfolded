@@ -116,7 +116,7 @@ export function transition(
     case "asking":
       return fromAsking(state, event);
     case "failed":
-      return fromFailed(state, event);
+      return fromFailed(state, event, ctx);
     case "finished":
       return fromFinished(state, event);
   }
@@ -415,6 +415,7 @@ function closeAsk(
 function fromFailed(
   state: Extract<PlayerState, { kind: "failed" }>,
   event: PlayerEvent,
+  ctx: PlayerContext,
 ): TransitionResult {
   const { step } = state;
   switch (event.type) {
@@ -440,10 +441,14 @@ function fromFailed(
       return toLoading(event.n, true);
     case "retry":
       return toLoading(step, true);
+    case "next":
+      // Skip a step that can't be made; there's nothing after the last one.
+      return step >= ctx.stepCount - 1
+        ? ignored(state)
+        : toLoading(step + 1, true);
     case "pause":
     case "resume":
     case "replay":
-    case "next":
       return ignored(state);
   }
 }

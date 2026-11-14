@@ -1,13 +1,15 @@
 // The lesson page (ROADMAP P6): a saved lesson in runs/<lessonId>/ plays in the player, its
-// step files and audio coming through GET /api/runs. Saved runs are written by
-// ./support/savedRun.ts (no provider is called). The controls themselves are covered on
+// steps coming through POST /api/lessons/<id>/steps/<n> (saved: no generation) and their
+// audio through GET /api/runs. Generation, prefetch and failures: lesson-live.spec.ts.
+// Saved runs are written by ./support/savedRun.ts (no provider is called). The controls themselves are covered on
 // /dev/player (player.spec.ts); here, what the page adds: loading a run, the ARCHITECTURE.md
 // section 7 messages for a missing lesson or step, and demo-m1.
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { STEP_ROUTE_ERRORS } from "@/app/api/lessons/[lessonId]/steps/[n]/errors";
 import { MESSAGES } from "@/player/machine";
-import { NO_SUCH_LESSON, STEP_NOT_IN_RUN } from "@/shared/lesson";
+import { NO_SUCH_LESSON } from "@/shared/lesson";
 import { savedRun, savedStepTitle } from "./support/savedRun";
 
 test.use({
@@ -69,14 +71,18 @@ test("plays a saved lesson: step 0 autoplays, Next plays step 1", async ({
   await expect(page.getByTestId("player-status")).toHaveText(MESSAGES.finished);
 });
 
-test("the step and its audio come through the runs route", async ({ page }) => {
+test("a saved step comes through the step route, and its audio through the runs route", async ({
+  page,
+}) => {
   await using run = await savedRun("e2e-lesson-route");
   const requests: string[] = [];
-  page.on("request", (req) => requests.push(new URL(req.url()).pathname));
+  page.on("request", (req) =>
+    requests.push(`${req.method()} ${new URL(req.url()).pathname}`),
+  );
   await page.goto(`/lesson/${run.lessonId}`);
   await expectState(page, "playing", 0);
-  expect(requests).toContain(`/api/runs/${run.lessonId}/step-0.v1.json`);
-  expect(requests).toContain(`/api/runs/${run.lessonId}/step-0.v1.mp3`);
+  expect(requests).toContain(`POST /api/lessons/${run.lessonId}/steps/0`);
+  expect(requests).toContain(`GET /api/runs/${run.lessonId}/step-0.v1.mp3`);
 });
 
 test("plays the latest saved version of a step", async ({ page }) => {
@@ -88,9 +94,10 @@ test("plays the latest saved version of a step", async ({ page }) => {
   );
 });
 
-test("Step: replay, and the step isn't in the run -> failed with the message, Back recovers", async ({
+test("Step: an unsaved step the route can't make (no paper.json) -> failed with the message, Back recovers", async ({
   page,
 }) => {
+  // Not in replay mode, so the route tries to generate step 1, and fails: no paper to send.
   await using run = await savedRun("e2e-lesson-unsaved", {
     steps: 2,
     unsaved: [1],
@@ -100,8 +107,10 @@ test("Step: replay, and the step isn't in the run -> failed with the message, Ba
   await endStep(page, 0);
   await control(page, "Next").click();
   await expectState(page, "failed", 1);
-  await expect(page.getByTestId("player-error")).toHaveText(STEP_NOT_IN_RUN);
-  await screenshot(page, "step-not-in-run");
+  await expect(page.getByTestId("player-error")).toHaveText(
+    STEP_ROUTE_ERRORS.failed,
+  );
+  await screenshot(page, "step-failed");
   await control(page, "Back").click();
   await expectState(page, "playing", 0);
 });
