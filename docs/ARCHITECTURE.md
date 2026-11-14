@@ -540,6 +540,21 @@ The developer gets the full error in the server log, tagged with the route, less
 Each spike is time-boxed to 60 minutes, and its answer is written back into this file:
 
 - **S1:** the exact shape of ElevenLabs' timestamps for our narration (how characters are counted, normalisation, whether `alignment` can be null), and latency per step.
+  - **Answer (2026-11-14, #10).** Tested on the M1 narration with markers stripped by `stripMarkers` (274 characters), plus one short Unicode probe. The real response is `lib/fakes/fixtures/tts-demo-m1.json` (its `audio_base64` is cut to 4 KB).
+  - **Voice:** `ELEVENLABS_VOICE_ID=Xb7hH8MSUJpSbSDYk0k2` (Alice, "Clear, Engaging Educator": British, premade, built for informative/educational use). It was compared with Matilda (`XrExE9yKIg1WjnnlVkGX`) and Daniel (`onwK4e9ZLuTAKqWW03F9`). Alice reads M1 in 19.0 s, Matilda in 19.3 s, and Daniel in 23.3 s, which is slow for a 30 s step budget. The agent (Q1) uses the same id.
+  - **Model:** `eleven_multilingual_v2`, sent as `model_id` with `output_format=mp3_44100_128`. `eleven_v4` also returns timestamps in the same shape, but it took 5.4 s rather than 1.2–1.8 s, so we stay on v2.
+  - **Response shape:** `{ audio_base64, alignment, normalized_alignment, quality_check }`. `quality_check` was always `null`. `alignment` has `characters: string[]`, `character_start_times_seconds: number[]` and `character_end_times_seconds: number[]`.
+    - The three arrays are the same length. Times are in seconds to the millisecond, they start at 0, never decrease, and touch end to start with no gaps.
+    - Some characters that aren't spoken (`√`, an emoji, the space after it) get zero duration (start = end).
+  - **Character counting:** `alignment.characters` echoes the text we sent exactly (`characters.join("") === text`), with **one entry per Unicode code point**.
+    - An emoji is one entry but two UTF-16 units in JavaScript.
+    - Nothing is normalised: a combining accent (`e` + U+0301) stays as two entries, and `é`, `²`, `×`, `½` and CJK are kept as written.
+    - So index-for-index lookup only works for text without astral characters. The walk in `cues.ts` handles every case.
+  - **`normalized_alignment`** is the text as spoken, not as sent: it gets a leading and trailing space, and `x²` → `x2`, `½` → `1/2`, `×` → `x`, `√4` → `4`, `注意` → `Zhu Yi`. We ignore it.
+    - Maths symbols are read badly (`√` is skipped). Narration must write maths out in words ("x squared", "the square root of four"), as M1 already does. G1's step prompt should say so.
+  - **Null alignment:** never seen. Even an emoji-only or space-only text got a one-entry alignment. `cues.ts` still throws `no alignment` on `null` or empty arrays (checked).
+  - **Latency** (one call each, warm): 1.2–1.8 s for the 274-character M1 narration (about 19 s of audio), 0.46 s for 45 characters, and 0.25 s for 1 character. TTS is small next to the Claude step call.
+  - **`cues.ts` on the real response:** no fix needed. On all three voices, every M1 cue time equals the direct alignment-index start (Alice: row 2601, col 3994, slide 5213, pair1 8498, pair2 9787, add 11146, total 12318, drop 14222, done 16718 ms). On the Unicode probe, cues after the emoji, at CJK, at a combining accent and at the end all land on the right entry. This hasn't been checked by ear: C1's ±100 ms check against the audio still applies.
 - **S2:** the Q&A agent's LLM, comparing two candidates on latency and tool-calling. Also: whether text-only sessions speak, and how long a `draw_scene` sketch takes.
 - **S3:** whether Sonnet 5.5 writes valid, good `Step` scripts from the Attention paper and from a second, different paper (non-ML or math-heavy), and the effort level needed for steps, plans and sketches.
 - **S4:** which fal image model to use for the cover (M3) and for in-scene images (E1, stretch), and its latency. Download the images into `runs/`, in case fal's URLs expire. Keep the generations few: the budget is about 25 US dollars per teammate.
