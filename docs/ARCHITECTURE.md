@@ -101,12 +101,11 @@ tests/e2e/                          Playwright, with FAKE_APIS=1 and NEXT_PUBLIC
 evidence/                           gitignored: screenshots and recordings for PRs
 ```
 
-The ownership areas line up with folders:
-- **player** owns `player/` and `shared/`.
-- **pipeline** owns `lib/pipeline`, `lib/narration`, `lib/media`, `lib/runs` and the lesson and step routes.
-- **voice** owns `qa/`, `agent/` and the sketch and token routes.
+There are two ownership areas, and the folders of each are in the `AGENTS.md` §4 table:
+- **A, browser:** the contract, the player and the Q&A browser side.
+- **B, server:** the pipeline, the API routes (including `/api/sketch`), voice (`agent/`) and fal.
 
-Folder owners go in the table in `AGENTS.md` when we split the work, and task owners go on the GitHub issues. Files every task touches (`package.json`, `lib/config.ts`, `lib/env.ts`, `lib/fakes/`, `tests/e2e/`, `.github/`, `app/layout.tsx`) can be edited by anyone, with a post on the board.
+Task owners go on the GitHub issues. Files every task touches (`package.json`, `lib/config.ts`, `lib/env.ts`, `lib/fakes/`, `tests/e2e/`, `.github/`, `app/layout.tsx`) can be edited by anyone, with a post on the board.
 
 ## 4. The scene contract (`shared/scene.ts`)
 
@@ -448,7 +447,7 @@ The developer gets the full error in the server log, tagged with the route, less
 - **Agent config in the repo.** We use the official **ElevenLabs CLI** (`@elevenlabs/cli`) rather than writing our own sync script.
   - The agent and its client tools are config files in `agent/`, pushed with the CLI's agent and tool `push` commands.
   - The CLI tracks the agent's id. Its tracking file is committed, so the team shares **one** agent.
-  - Only the person who owns the voice area runs `push`.
+  - Only the owner of `agent/` (`AGENTS.md` §4) runs `push`.
   - Spike S5 confirms the exact commands and that client tools with `expects_response` work this way.
 - **One voice.** `ELEVENLABS_VOICE_ID` is the source. The agent config uses the same id, and a unit test checks they're equal.
 
