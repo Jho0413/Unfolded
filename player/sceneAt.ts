@@ -113,16 +113,22 @@ function matrixPart(
   return { state, matrix };
 }
 
-/** Cells (r, c) a target covers in its matrix: the whole matrix, a row, a column or one cell. */
+/**
+ * Whether a target covers cell (r, c) of its matrix: the whole matrix, the
+ * cell's row or column, or the cell itself. The renderer uses it too.
+ */
+export function coversCell(t: Target, r: number, c: number): boolean {
+  return (
+    (t.row === undefined || t.row === r) && (t.col === undefined || t.col === c)
+  );
+}
+
+/** Cells (r, c) a target covers in its matrix. */
 function cellsOf(matrix: MatrixObject, t: Target): [number, number][] {
   const out: [number, number][] = [];
   matrix.rows.forEach((row, r) =>
     row.forEach((_, c) => {
-      if (
-        (t.row === undefined || t.row === r) &&
-        (t.col === undefined || t.col === c)
-      )
-        out.push([r, c]);
+      if (coversCell(t, r, c)) out.push([r, c]);
     }),
   );
   return out;
@@ -358,28 +364,6 @@ function planMove(board: Board, action: Action): MovePlan | undefined {
   return from && to ? { from, to } : undefined;
 }
 
-/**
- * Whether an action names a real target (an object, or an in-range part of a
- * matrix), so it belongs in `active`. Ignored actions never do.
- */
-function targetsValid(
-  base: Board,
-  action: Action,
-  plan: MovePlan | undefined,
-): boolean {
-  const t = action.target;
-  if (!base.byId.has(t.id)) return false;
-  if (isPart(t) && !matrixPart(base, t)) return false;
-  if (action.do === "move") return plan !== undefined;
-  if (action.do === "show") return !isPart(t);
-  if (action.do === "write") {
-    const kind = base.byId.get(t.id)?.object.kind;
-    if (kind === "text") return !isPart(t);
-    return kind === "matrix" && t.row !== undefined && t.col !== undefined;
-  }
-  return true;
-}
-
 /** Applies `entries` (all started by `tMs`) to a copy of `base`, in order. */
 function run(
   base: Board,
@@ -392,6 +376,28 @@ function run(
   return board;
 }
 
+/** Board content only, for comparing two boards. */
+function snapshot(board: Board): string {
+  return JSON.stringify([board.states, board.copies]);
+}
+
+/**
+ * Whether an action, once complete, changes `before` (the board as it
+ * started). One that doesn't (a show of a visible object, a highlight in the
+ * colour its cells already have, a write of the same value, or any action on
+ * an unknown or invalid target) is left out of `active`, so the renderer never
+ * fades in what is already there.
+ */
+function changesBoard(
+  before: Board,
+  e: Entry,
+  plan: MovePlan | undefined,
+): boolean {
+  const after = cloneBoard(before);
+  apply(after, e, 1, plan);
+  return snapshot(after) !== snapshot(before);
+}
+
 /**
  * The board at `tMs`: `objects` as the step starts, with every action of
  * `timed` that has started by then applied. Actions apply in start order;
@@ -400,8 +406,8 @@ function run(
  * - `show`, `highlight`, `unhighlight` and `write` take effect when they
  *   start; `hide` when it ends. `move` slides linearly from where its target
  *   was when the move started to where its anchor was then.
- * - `active` lists the actions in progress (start <= t < start + duration),
- *   with how far along they are, 0..1.
+ * - `active` lists the actions in progress (start <= t < start + duration)
+ *   that change the board, with how far along they are, 0..1.
  * - Actions on unknown or invalid targets are ignored (validate.ts rejects
  *   them before they reach the player).
  */
@@ -440,7 +446,11 @@ export function sceneAt(
         (e, i) =>
           e.durationMs > 0 &&
           tMs < e.startMs + e.durationMs &&
-          targetsValid(base, e.action, plans[i]),
+          changesBoard(
+            run(base, started.slice(0, i), plans, e.startMs),
+            e,
+            plans[i],
+          ),
       )
       .map((e) => ({
         action: structuredClone(e.action),

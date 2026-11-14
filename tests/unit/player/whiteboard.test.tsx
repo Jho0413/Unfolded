@@ -5,12 +5,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { FIXED } from "@/app/dev/board/scenes";
 import { Whiteboard } from "@/player/Whiteboard";
+import { coversCell, sceneAt, type TimedAction } from "@/player/sceneAt";
+import { cellProgress, fadeOpacity } from "@/player/primitives/style";
 import {
-  cellProgress,
-  coversCell,
-  fadeOpacity,
-} from "@/player/primitives/style";
-import { type ActiveAction, BoardState } from "@/shared/scene";
+  type Action,
+  type ActiveAction,
+  type BoardObject,
+  BoardState,
+} from "@/shared/scene";
 
 const hide = (progress: number): ActiveAction => ({
   action: { do: "hide", target: { id: "t" }, durationMs: 400 },
@@ -39,9 +41,14 @@ describe("fadeOpacity", () => {
 
 describe("coversCell and cellProgress", () => {
   it("a row covers its cells only", () => {
-    expect(coversCell({ id: "m", row: 1 }, "m", 1, 0)).toBe(true);
-    expect(coversCell({ id: "m", row: 1 }, "m", 0, 0)).toBe(false);
-    expect(coversCell({ id: "m" }, "m", 3, 2)).toBe(true);
+    expect(coversCell({ id: "m", row: 1 }, 1, 0)).toBe(true);
+    expect(coversCell({ id: "m", row: 1 }, 0, 0)).toBe(false);
+    expect(coversCell({ id: "m" }, 3, 2)).toBe(true);
+  });
+  it("a cell covers itself only", () => {
+    expect(coversCell({ id: "m", row: 0, col: 1 }, 0, 1)).toBe(true);
+    expect(coversCell({ id: "m", row: 0, col: 1 }, 0, 0)).toBe(false);
+    expect(coversCell({ id: "m", row: 0, col: 1 }, 1, 1)).toBe(false);
   });
   it("a highlight in progress fades its cells in", () => {
     const hl: ActiveAction = {
@@ -54,6 +61,7 @@ describe("coversCell and cellProgress", () => {
     };
     expect(cellProgress([hl], "highlight", "m", 0, 1, "accent")).toBe(0.4);
     expect(cellProgress([hl], "highlight", "m", 0, 0, "accent")).toBe(1);
+    expect(cellProgress([hl], "highlight", "n", 0, 1, "accent")).toBe(1);
   });
   it("doesn't borrow the progress of an overwritten highlight", () => {
     const hl: ActiveAction = {
@@ -81,6 +89,32 @@ describe("coversCell and cellProgress", () => {
 describe("Whiteboard", () => {
   it("the dev page's fixed scene is a valid BoardState", () => {
     expect(() => BoardState.parse(FIXED)).not.toThrow();
+  });
+  const objects: BoardObject[] = [
+    { kind: "matrix", id: "m", x: 100, y: 100, rows: [["1", "2"]] },
+    { kind: "text", id: "t", x: 500, y: 500, text: "hi" },
+  ];
+  const mid = (action: Action): string => {
+    const timed: TimedAction[] = [{ action, startMs: 0, durationMs: 400 }];
+    return renderToStaticMarkup(
+      <Whiteboard state={sceneAt(objects, timed, 200)} />,
+    );
+  };
+  it("a show of a visible object doesn't blink: it stays fully opaque", () => {
+    const html = mid({ do: "show", target: { id: "t" }, durationMs: 400 });
+    expect(html).toMatch(/data-object-id="t"[^>]*data-opacity="1"/);
+  });
+  it("a moved single cell renders as a one-cell copy", () => {
+    const html = mid({
+      do: "move",
+      target: { id: "m", row: 0, col: 1 },
+      to: { x: 800, y: 300 },
+      durationMs: 400,
+    });
+    const copy = html.slice(html.indexOf('data-copy-of="m:r0c1"'));
+    expect(copy).toMatch(/^data-copy-of="m:r0c1"/);
+    expect(copy.match(/data-cell=/g)).toHaveLength(1);
+    expect(copy).toMatch(/data-cell="0,1"[^>]*data-value="2"/);
   });
   it("renders the 1600 x 900 canvas with data attributes", () => {
     const html = renderToStaticMarkup(<Whiteboard state={FIXED} />);

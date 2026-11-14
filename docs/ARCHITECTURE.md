@@ -282,6 +282,7 @@ sceneAt(objects: BoardObject[], timed: { action; startMs; durationMs }[], tMs: n
   - `show`, `highlight`, `unhighlight` and `write` take effect when they start. `hide` takes effect when it ends, so the renderer can fade it out using progress.
   - `move` slides in a straight line from where its target was when the move started to where its anchor was then. Its path doesn't change if the anchor moves later.
   - An action is in `active` while `startMs <= tMs < startMs + durationMs`. A 0 ms action is complete at its start and never active.
+  - An action that, once complete, would leave the board as it was when it started is never in `active`: for example a `show` of a visible object, a `highlight` in the colour its cells already have, or a `write` of the value already there. So the renderer never fades in what is already on the board.
   - `unhighlight` with a `color` clears only that colour. Without one, it clears every colour.
   - A whole-matrix highlight sets every cell in `cellHighlight`. A matrix's own `highlight` stays `null`.
   - Actions on unknown or out-of-range targets are ignored and never listed in `active`. `validate.ts` rejects them first.

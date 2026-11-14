@@ -320,6 +320,34 @@ describe("sceneAt: move", () => {
     expect(obj(end, "m").visible).toBe(true);
   });
 
+  it("moving a single cell slides a copy of that cell", () => {
+    const timed = [
+      at(0, {
+        do: "move",
+        target: { id: "m", row: 0, col: 1 },
+        to: { x: 800, y: 300 },
+      }),
+    ];
+    const start = cellCentre(100, 100, 0, 1);
+    const mid = sceneAt(board(), timed, 200);
+    expect(mid.copies).toEqual([
+      {
+        source: { id: "m", row: 0, col: 1 },
+        x: (start.x + 800) / 2,
+        y: (start.y + 300) / 2,
+        visible: true,
+      },
+    ]);
+    const end = sceneAt(board(), timed, 400);
+    expect(copy(end, "m", 0, 1)).toMatchObject({ x: 800, y: 300 });
+    expect(copy(end, "m", 0)).toBeUndefined();
+    expect(obj(end, "m").object).toEqual(board()[0]);
+    expect(resolveAnchor(end, { id: "m", row: 0, col: 1 })).toEqual({
+      x: 800,
+      y: 300,
+    });
+  });
+
   it("a later highlight of a moved row changes both (the copy reads the source cells)", () => {
     const s = sceneAt(
       board(),
@@ -559,6 +587,75 @@ describe("sceneAt: write", () => {
         ["x", "4"],
       ],
     });
+  });
+});
+
+// ---------------------------------------------------------------- no-ops
+
+describe("sceneAt: an action that changes nothing is never active", () => {
+  it("a show of a visible object", () => {
+    const s = sceneAt(
+      board(),
+      [at(0, { do: "show", target: { id: "t" } })],
+      200,
+    );
+    expect(s.active).toEqual([]);
+  });
+
+  it("a highlight in the colour the cells already have", () => {
+    const timed = [
+      at(0, { do: "highlight", target: { id: "m", row: 0 }, durationMs: 0 }),
+      at(1000, { do: "highlight", target: { id: "m", row: 0 } }),
+      at(1000, { do: "highlight", target: { id: "m", row: 0, col: 1 } }),
+    ];
+    expect(sceneAt(board(), timed, 1200).active).toEqual([]);
+  });
+
+  it("a highlight during an identical one in progress: the first keeps fading in", () => {
+    const first = at(0, { do: "highlight", target: { id: "t" } });
+    const s = sceneAt(
+      board(),
+      [first, at(100, { do: "highlight", target: { id: "t" } })],
+      200,
+    );
+    expect(s.active).toEqual([{ action: first.action, progress: 0.5 }]);
+  });
+
+  it("a write of the value already there", () => {
+    const s = sceneAt(
+      board(),
+      [
+        at(0, { do: "write", target: { id: "t" }, value: "hi" }),
+        at(0, { do: "write", target: { id: "m", row: 0, col: 1 }, value: "2" }),
+      ],
+      200,
+    );
+    expect(s.active).toEqual([]);
+  });
+
+  it("a hide of a hidden object, an unhighlight of nothing, a hide of a part that never moved", () => {
+    const s = sceneAt(
+      board(),
+      [
+        at(0, { do: "hide", target: { id: "h" } }),
+        at(0, { do: "unhighlight", target: { id: "m" } }),
+        at(0, { do: "hide", target: { id: "m", row: 0 } }),
+      ],
+      200,
+    );
+    expect(s.active).toEqual([]);
+  });
+
+  it("a highlight that changes at least one cell is active", () => {
+    const timed = [
+      at(0, { do: "highlight", target: { id: "m", row: 0 }, durationMs: 0 }),
+      at(1000, { do: "highlight", target: { id: "m" } }),
+      at(1000, { do: "highlight", target: { id: "m", row: 0 }, color: "warn" }),
+    ];
+    expect(sceneAt(board(), timed, 1200).active).toEqual([
+      { action: timed[1].action, progress: 0.5 },
+      { action: timed[2].action, progress: 0.5 },
+    ]);
   });
 });
 
