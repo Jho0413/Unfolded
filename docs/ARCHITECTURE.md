@@ -109,27 +109,29 @@ Folder owners go in the table in `AGENTS.md` when we split the work, and task ow
 
 ## 4. The scene contract (`shared/scene.ts`)
 
-This is the one contract between the step generator, the renderer and the Q&A tools. A change to it is posted on the board before it merges. The first version is deliberately small (what milestone M1 needs). New primitives get added only when the demo paper needs them.
+This is the one contract between the step generator, the renderer and the Q&A tools. A change to it is posted on the board before it merges. The first version is deliberately small (what milestone M1 needs). New primitives get added only when a lesson needs them, and only as general primitives, never for one paper.
 
 ```ts
 // Virtual canvas: every coordinate is in a 1600 x 900 viewBox, origin top-left.
+// Matrix cells have a fixed size, CELL = 64 x 48 (w x h), so a board can be laid out without overlaps.
 type ObjectId = string;                       // /^[a-z][a-z0-9_]{0,31}$/
 
-type BoardObject =                            // discriminated on `kind`
-  | { kind: "matrix"; id; x; y; rows: string[][]; label?: string }   // 1..8 x 1..8 cells
-  | { kind: "text";   id; x; y; text: string; size?: "s" | "m" | "l" }
-  | { kind: "latex";  id; x; y; tex: string }
+type BoardObject = (                          // discriminated on `kind`
+  | { kind: "matrix"; id; x; y; rows: string[][]; label?: string }   // 1..8 x 1..8 cells; x,y is the top-left corner
+  | { kind: "text";   id; x; y; text: string; size?: "s" | "m" | "l" }   // x,y is the centre of the text
+  | { kind: "latex";  id; x; y; tex: string }                        // x,y is the centre
   | { kind: "arrow";  id; from: Anchor; to: Anchor; label?: string }
-  | { kind: "image";  id; x; y; w; h; prompt: string };     // fal illustration; the server adds mediaUrl
+  | { kind: "image";  id; x; y; w; h; prompt: string }      // fal illustration, x,y top-left; the server adds mediaUrl
+) & { hidden?: boolean };                     // true: not drawn until a `show` (default false)
 
-type Anchor = { id: ObjectId } | { x: number; y: number };   // an object's centre, or a point
-type Target = { id: ObjectId; row?: number; col?: number };  // a row, a column or a cell of a matrix
+type Target = { id: ObjectId; row?: number; col?: number };  // an object, or a row, column or cell of a matrix (0-based)
+type Anchor = Target | { x: number; y: number };             // the centre of a target, or a point
 
 type Action =
   | { do: "show" | "hide"; target: Target }
   | { do: "highlight" | "unhighlight"; target: Target; color?: "accent" | "warn" }
-  | { do: "move"; target: Target; to: { x; y } }
-  | { do: "write"; target: Target; value: string };          // drop a value into one matrix cell
+  | { do: "move"; target: Target; to: Anchor }               // the target's centre ends on the anchor
+  | { do: "write"; target: Target; value: string };          // a matrix cell's value, or a text object's text
 // Every action also carries durationMs (0..3000, default 400).
 
 type Step = {                                 // what Claude writes for one lesson step
@@ -147,6 +149,16 @@ type Sketch = {                               // what /api/sketch returns for a 
 
 - `mediaUrl` isn't part of the schema Claude fills in. The server adds it after fal returns and the image is saved to `runs/`. The page never loads a URL that a model wrote.
 - When several actions start at the same time, `sceneAt` applies them in their array order.
+- **Geometry.** Cell (r, c) of a matrix at x,y has its centre at (x + 64c + 32, y + 48r + 24). Brackets and the label are drawn outside that box. The centre of a row or column is the centre of its cells, an arrow's is the midpoint of its ends, and an image's is the middle of its box. `CELL` is exported from `shared/scene.ts`, and the renderer and the prompts both use it.
+- **Hidden objects.** An object with `hidden: true` is on the board from the start but isn't drawn until a `show`. That's how product terms and sums appear partway through a step.
+- **Moving part of a matrix.** `move` on a whole object moves it. `move` on a row, column or cell slides a **copy** of those cells (same values and highlight), so the source matrix stays whole, with no gap. A later `move` of the same part moves that copy on, and `hide` on the part removes the copy. The source cells are never hidden on their own.
+- **Writing.** `write` replaces a matrix cell's value or a text object's text, so a text showing `1·5 + 2·7` can become `19` and then move into a cell.
+
+**The M1 demo in this contract** (`lib/fakes/fixtures/demo-m1.step.json`, hand-written in F3 as the contract's acceptance test). Matrices `a` and `b` and an empty result `c` are visible; `p1` (`1·5`), `p2` (`2·7`) and `sum` are hidden `text` objects.
+1. `[[row]]`: highlight row 0 of `a` and move it (a copy) to a point left of `c`. `[[col]]`: highlight column 0 of `b` and move it beside the row's copy. The row and column slide together.
+2. `[[pair1]]`, `[[pair2]]`: show `p1`, then `p2`. The pairs multiply.
+3. `[[add]]`: show `sum` with `1·5 + 2·7`. `[[total]]`: write `19` to `sum`.
+4. `[[drop]]`: move `sum` to `{ id: "c", row: 0, col: 0 }`. `[[done]]`: write `19` to that cell, hide `sum` and hide both copies. The sum has dropped into (1,1).
 
 **`shared/validate.ts`** checks the rules zod can't express. It runs on the server after Claude responds and in the browser before a tool draws. Each row gets a test.
 
@@ -158,11 +170,14 @@ type Sketch = {                               // what /api/sketch returns for a 
 | A marker appears twice in `narration` | rejected: `duplicate cue "x"` |
 | A malformed marker (`[[Row 1]]`, a stray `[[` or `]]`) | rejected: `malformed marker "[[Row 1]]"` (otherwise it would be read aloud) |
 | A marker in `narration` that no action uses | allowed (it's ignored) |
-| A `target.id` with no object | rejected: `unknown object "x"` |
-| `row` or `col` outside the matrix, or set on a non-matrix | rejected: `target out of range` |
-| `write` without both `row` and `col` | rejected: `write needs a cell` |
+| A `target.id`, or an anchor's `id`, with no object | rejected: `unknown object "x"` |
+| `row` or `col` outside the matrix, or set on a non-matrix (in a target or an anchor) | rejected: `target out of range` |
+| `write` on a matrix without both `row` and `col` | rejected: `write needs a cell` |
+| `write` on a `latex`, `arrow` or `image` | rejected: `can't write to "x"` |
+| `show` with `row` or `col` | rejected: `show needs a whole object` |
+| `show` on a visible object, `hide` on a hidden one, or `hide` on a part that hasn't moved | allowed (no change) |
 | `tex` that KaTeX can't parse | rejected: `invalid LaTeX in "x"` (the renderer also uses `throwOnError: false` as a safety net) |
-| An object's x,y outside the 1600 × 900 canvas (for `text` and `latex`, only the anchor point is checked) | rejected: `off canvas` |
+| An object, or an `{x, y}` point in an anchor, outside the 1600 × 900 canvas (for a matrix, its whole cell box; for `text` and `latex`, only their x,y) | rejected: `off canvas` |
 | Two objects with the same id | rejected: `duplicate id "x"` |
 | Narration longer than `config.maxNarrationChars` after the markers are stripped | rejected: `narration too long` |
 
@@ -244,7 +259,7 @@ Property-based tests (fast-check) check three things:
 sceneAt(objects: BoardObject[], timed: { action; startMs; durationMs }[], tMs: number): BoardState
 ```
 
-- `BoardState` is every object with its visibility, highlight, position and value at `tMs`. For each action in progress, it also includes how far along it is (0..1).
+- `BoardState` is every object with its visibility, highlight, position and value at `tMs`, plus the moved copies of matrix parts. For each action in progress, it also includes how far along it is (0..1).
 - **Lesson mode:** `timed` comes from `cueTimes`, and `tMs` is `audio.currentTime * 1000`.
 - **Q&A mode:** `timed` comes from the sketch's `atMs`, and `tMs` is the time since the sketch arrived.
 - Back, Replay and scrubbing are just seeks on the audio element. There's no animation state to undo.
