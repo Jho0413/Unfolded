@@ -11,7 +11,8 @@ What we build, in what order, and how each piece is proven to work. [`ARCHITECTU
 3. Start a task once its dependencies are merged. You can also start once just their interface in `shared/` is merged and build against those types. If you're blocked, say so on the board, with the issue number.
 4. **Shared files anyone may edit** (post on the board when you do): `package.json`, `lib/config.ts`, `lib/env.ts`, `lib/fakes/`, `tests/e2e/`, `.github/`, `app/layout.tsx`. Everything else follows the owner's folder.
 5. Each spike's answer goes into `ARCHITECTURE.md` §11 and onto the board. **Each spike is time-boxed to 60 minutes.** If it isn't settled by then, post what you know and take the simplest option.
-6. **The cut rule:** if the M4 demo check isn't done when 25% of hacking time is left, stop all new features and go to M4.5.
+6. **Milestones are checkpoints, not a queue.** A task starts when its dependencies are merged, whatever its milestone. In particular, the Q track (S2, S5, Q1, Q2) depends only on M0 work, so it **starts in parallel from M0** and runs alongside M1–M3. It isn't held for M3.
+7. **The cut rule:** if the M4 demo check isn't done when 25% of hacking time is left, stop all new features and go to M4.5.
 
 ## Definition of done
 
@@ -98,7 +99,7 @@ Goal: upload a paper and get a playable lesson. The Attention paper is the demo;
 
 ## M4: Interrupt and ask
 
-Goal: the learner asks, by voice or by typing, and the tutor answers aloud and draws. Then the lesson resumes.
+Goal: the learner asks, by voice or by typing, and the tutor answers aloud and draws. Then the lesson resumes. S2, S5, Q1 and Q2 start back in M0 (see How we coordinate); Q3 onwards needs the player.
 
 | ID | Task | Depends on | Proven by |
 |---|---|---|---|
