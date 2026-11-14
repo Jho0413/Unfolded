@@ -1,6 +1,13 @@
 // GET /api/runs/<lessonId>/<file> (ARCHITECTURE.md sections 5.1 and 7): serves a saved file;
 // a missing file -> 404 with a clear message; a bad lessonId or file name -> 400.
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { NextRequest } from "next/server";
@@ -73,7 +80,7 @@ describe("serves a saved file", () => {
 });
 
 describe("missing file -> 404 with a clear message", () => {
-  it("a file that isn't in the run folder", async () => {
+  it("a file that isn't in the run folder (pins the wording)", async () => {
     await writeRunFile("demo-m1", "plan.json", "{}");
     const res = await get("demo-m1", "step-9.v1.json");
     expect(res.status).toBe(404);
@@ -163,6 +170,9 @@ describe("bad file name -> 400", () => {
     await symlink(outside, path.join(dirs.runs, "demo-m1", "plan.json"));
     try {
       await expectBadName("demo-m1", "plan.json");
+      expect(console.warn).toHaveBeenCalledWith(
+        "[api/runs] demo-m1/plan.json refused: symlink",
+      );
     } finally {
       await rm(outside, { force: true });
     }
@@ -180,4 +190,23 @@ describe("bad file name -> 400", () => {
     });
     await expectBadName("demo-m1", "media.json");
   });
+});
+
+describe("unreadable file -> 500, logged", () => {
+  // Root can read a 000 file, so this row needs a normal user (as on CI and the laptops).
+  it.skipIf(process.getuid?.() === 0)(
+    "a read that fails for another reason",
+    async () => {
+      await writeRunFile("demo-m1", "plan.json", "{}");
+      await chmod(path.join(dirs.runs, "demo-m1", "plan.json"), 0o000);
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      const res = await get("demo-m1", "plan.json");
+      expect(res.status).toBe(500);
+      expect(await res.json()).toEqual({ error: RUNS_ROUTE_ERRORS.failed });
+      expect(error).toHaveBeenCalledWith(
+        "[api/runs] demo-m1/plan.json read failed",
+        expect.any(Error),
+      );
+    },
+  );
 });

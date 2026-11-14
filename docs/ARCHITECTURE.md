@@ -245,7 +245,7 @@ sequenceDiagram
 - **Files reach the browser through `GET /api/runs/<lessonId>/<file>`.** `runs/` is outside `public/`, and `next start` won't serve files added after the build.
   - The player fetches each step's audio as a blob and plays it from a `blob:` URL. That keeps seeking reliable without HTTP Range support in the route.
   - The route only serves names matching `^[a-z0-9][a-z0-9.-]{0,99}$` (so never `.` or `..`) with a known extension (`.json`, `.mp3`, `.png`, `.jpg`, `.jpeg`, `.webp`) from inside the run folder, and never a symlink or a folder. A bad `lessonId` or file name → 400; a file that isn't there → 404.
-  - `lib/runs/store.ts` writes every file atomically (a temporary file, then a rename), so a reader never sees half a file. A new step version is a new file (`step-<n>.v<k>.json` and `step-<n>.v<k>.mp3`); an older version is never overwritten.
+  - `lib/runs/store.ts` writes every file atomically (a temporary file, then a rename), so a reader never sees half a file. A new step version is saved with `saveStepVersion`: its audio `step-<n>.v<k>.mp3` first (creating it claims version k, and fails if k is taken), then `step-<n>.v<k>.json`, so an older version is never overwritten and a listed version always has its audio.
 
 ### 5.2 Cue markers become times (`lib/narration/cues.ts`, pure)
 
@@ -422,6 +422,9 @@ The developer gets the full error in the server log, tagged with the route, less
 | Player | Browser blocks autoplay | "Press play to start." | Play button |
 | Player | Audio fails to load or decode | "Couldn't play the audio. Retry?" | Retry |
 | Route | `lessonId` doesn't match `^[a-z0-9-]{1,40}$`, or `n` isn't a step in the plan | 400 "No such lesson or step." | Back to upload |
+| Run file | `GET /api/runs/<lessonId>/<file>` with a bad `lessonId` or file name, an extension it doesn't serve, a symlink or a folder | 400 "No such lesson or file." (the reason is logged) | The page shows its own error for the step or image |
+| Run file | The file isn't in the run folder | 404 `No saved file "<file>" in lesson "<lessonId>".` | As above |
+| Run file | Reading the file fails for another reason | 500 "Couldn't read this file." (the error is logged) | As above |
 | Ask | Token route fails, or the agent can't connect | "Questions are unavailable right now." | The lesson carries on; close the panel |
 | Ask | Session drops mid-question | "Q&A ended unexpectedly." | Ask again |
 | Ask | Microphone permission denied | "Mic is off. Type your question; the answer will appear as text." | Typed input (text-only session) |

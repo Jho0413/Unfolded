@@ -72,7 +72,10 @@ export const StepResponse = z.object({
   /** Served by GET /api/runs/<lessonId>/<file>, never a model-written URL. */
   audioUrl: z
     .string()
-    .refine(isRunFileUrl, "not a /api/runs/<lessonId>/<file> URL"),
+    .refine(
+      (url) => isRunFileUrl(url) && url.endsWith(".mp3"),
+      "not a /api/runs/<lessonId>/<file>.mp3 URL",
+    ),
   cueTimes: CueTimes,
 });
 export type StepResponse = z.infer<typeof StepResponse>;

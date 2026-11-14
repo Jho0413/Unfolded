@@ -1,5 +1,6 @@
 // lib/runs/store.ts: versioned step files and atomic, contained reads and writes of
 // runs/<lessonId>/ (ARCHITECTURE.md sections 5.1 and 5.5).
+import { execFileSync } from "node:child_process";
 import {
   mkdir,
   mkdtemp,
@@ -13,15 +14,15 @@ import path from "node:path";
 import fc from "fast-check";
 import { z } from "zod";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { RUN_FILE_RE } from "@/shared/lesson";
+import { LESSON_ID_RE, RUN_FILE_RE } from "@/shared/lesson";
 import {
   RunNameError,
-  contentTypeFor,
-  isServableName,
   listRunFiles,
   nextStepVersion,
   readRunFile,
   readRunJson,
+  saveStepVersion,
+  servableContentType,
   stepAudioFileName,
   stepFileName,
   stepVersions,
@@ -71,6 +72,12 @@ describe("versioned step file names", () => {
     expect(nextStepVersion(files, 2)).toBe(4);
   });
 
+  it("only versions with a JSON file are saved versions", () => {
+    expect(
+      stepVersions(["step-0.v1.json", "step-0.v1.mp3", "step-0.v2.mp3"], 0),
+    ).toEqual([1]);
+  });
+
   it("ignores files that only look like step files", () => {
     const files = [
       "step-01.v1.json",
@@ -96,32 +103,98 @@ describe("versioned step file names", () => {
 
 describe("servable names", () => {
   it("serves .json, .mp3 and images with their content types", () => {
-    expect(contentTypeFor("step-0.v1.json")).toBe(
-      "application/json; charset=utf-8",
-    );
-    expect(contentTypeFor("step-0.v1.mp3")).toBe("audio/mpeg");
-    expect(contentTypeFor("cover.png")).toBe("image/png");
-    expect(contentTypeFor("cover.jpg")).toBe("image/jpeg");
-    expect(contentTypeFor("cover.webp")).toBe("image/webp");
+    const type = (file: string) => servableContentType("demo-m1", file);
+    expect(type("step-0.v1.json")).toBe("application/json; charset=utf-8");
+    expect(type("step-0.v1.mp3")).toBe("audio/mpeg");
+    expect(type("cover.png")).toBe("image/png");
+    expect(type("cover.jpg")).toBe("image/jpeg");
+    expect(type("cover.jpeg")).toBe("image/jpeg");
+    expect(type("cover.webp")).toBe("image/webp");
   });
 
   it("never serves an unknown extension", () => {
     for (const file of ["page.html", "x.js", "x.svg", "noext", "x.tmp"])
-      expect(isServableName("demo-m1", file)).toBe(false);
+      expect(servableContentType("demo-m1", file)).toBeUndefined();
   });
 
-  it("property: a name with a slash, a backslash, a leading dot or any other character is refused", () => {
+  it("never serves a bad lessonId", () => {
+    expect(servableContentType("Demo", "plan.json")).toBeUndefined();
+    expect(servableContentType("..", "plan.json")).toBeUndefined();
+  });
+
+  it("property: a servable name always stays directly inside its own run folder", () => {
+    const root = path.resolve("/runs");
     fc.assert(
-      fc.property(fc.string(), fc.string(), (a, b) => {
-        for (const file of [`${a}/${b}.json`, `${a}\\${b}.json`, `.${a}.json`])
-          expect(isServableName("demo-m1", file)).toBe(false);
-      }),
+      fc.property(
+        fc.oneof(fc.string(), fc.stringMatching(LESSON_ID_RE)),
+        fc.oneof(fc.string(), fc.stringMatching(RUN_FILE_RE)),
+        (id, file) => {
+          if (servableContentType(id, file) === undefined) return;
+          const full = path.resolve(root, id, file);
+          expect(path.dirname(path.dirname(full))).toBe(root);
+          expect(path.basename(path.dirname(full))).toBe(id);
+          expect(path.basename(full)).toBe(file);
+        },
+      ),
     );
-    fc.assert(
-      fc.property(fc.string({ minLength: 1, maxLength: 40 }), (s) => {
-        if (!/^[a-z0-9-]+$/.test(s))
-          expect(isServableName(s, "plan.json")).toBe(false);
-      }),
+  });
+});
+
+describe("saving step versions", () => {
+  it("the first save of a step is version 1, with its audio and JSON", async () => {
+    const k = await saveStepVersion(
+      "demo-m1",
+      0,
+      { title: "x" },
+      new Uint8Array([1]),
+    );
+    expect(k).toBe(1);
+    expect((await listRunFiles("demo-m1")).sort()).toEqual([
+      "step-0.v1.json",
+      "step-0.v1.mp3",
+    ]);
+    expect(
+      await readRunJson(
+        "demo-m1",
+        "step-0.v1.json",
+        z.object({ title: z.string() }),
+      ),
+    ).toEqual({
+      title: "x",
+    });
+  });
+
+  it("a regeneration is saved as a new version and the older one is kept", async () => {
+    await saveStepVersion("demo-m1", 0, { v: 1 }, new Uint8Array([1]));
+    expect(
+      await saveStepVersion("demo-m1", 0, { v: 2 }, new Uint8Array([2])),
+    ).toBe(2);
+    expect(
+      await readRunJson(
+        "demo-m1",
+        "step-0.v1.json",
+        z.object({ v: z.number() }),
+      ),
+    ).toEqual({
+      v: 1,
+    });
+  });
+
+  it("two saves at once never share a version", async () => {
+    const versions = await Promise.all(
+      [1, 2, 3, 4].map((i) =>
+        saveStepVersion("demo-m1", 2, { i }, new Uint8Array([i])),
+      ),
+    );
+    expect(versions.sort()).toEqual([1, 2, 3, 4]);
+  });
+
+  it("a version whose save stopped after its audio is never reused", async () => {
+    await writeRunFile("demo-m1", "step-0.v1.mp3", new Uint8Array([9]));
+    expect(nextStepVersion(await listRunFiles("demo-m1"), 0)).toBe(2);
+    expect(stepVersions(await listRunFiles("demo-m1"), 0)).toEqual([]);
+    expect(await saveStepVersion("demo-m1", 0, {}, new Uint8Array([1]))).toBe(
+      2,
     );
   });
 });
@@ -149,6 +222,30 @@ describe("writes", () => {
     ).toEqual({
       title: "b",
     });
+  });
+
+  it("a failed write leaves no temporary file behind", async () => {
+    await mkdir(path.join(dirs.runs, "demo-m1", "plan.json"), {
+      recursive: true,
+    });
+    await expect(writeRunJson("demo-m1", "plan.json", {})).rejects.toThrow();
+    expect(await readdir(path.join(dirs.runs, "demo-m1"))).toEqual([
+      "plan.json",
+    ]);
+  });
+
+  it("never writes through a symlinked lesson folder", async () => {
+    const outside = await mkdtemp(path.join(tmpdir(), "runs-outside-"));
+    try {
+      await symlink(outside, path.join(dirs.runs, "linked"));
+      await expect(writeRunFile("linked", "plan.json", "{}")).rejects.toThrow(
+        RunNameError,
+      );
+      await expect(listRunFiles("linked")).rejects.toThrow(RunNameError);
+      expect(await readdir(outside)).toEqual([]);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 
   it("refuses to write a bad lessonId or file name", async () => {
@@ -199,6 +296,12 @@ describe("reads", () => {
       recursive: true,
     });
     expect((await readRunFile("demo-m1", "media.json")).kind).toBe("refused");
+  });
+
+  it("a FIFO is refused without blocking", async () => {
+    await mkdir(path.join(dirs.runs, "demo-m1"));
+    execFileSync("mkfifo", [path.join(dirs.runs, "demo-m1", "pipe.json")]);
+    expect((await readRunFile("demo-m1", "pipe.json")).kind).toBe("refused");
   });
 
   it("a run file that fails its schema throws", async () => {
