@@ -83,6 +83,7 @@ lib/                                server-only (import "server-only")
   pipeline/plan.ts, step.ts, sketch.ts, prompts/
   narration/cues.ts                 pure: strip markers, cue offsets -> times
   narration/tts.ts                  ElevenLabs TTS with timestamps
+  agent/token.ts                    the Q&A agent's conversation token (fixture when FAKE_APIS=1)
   media/fal.ts
   runs/store.ts                     read/write runs/<lessonId>/
   fakes/                            fake Claude/ElevenLabs/fal for tests (FAKE_APIS=1)
@@ -432,7 +433,8 @@ The developer gets the full error in the server log, tagged with the route, less
 
 - **Starting a session:** the learner presses **Ask**, or presses the `A` key (Space stays play/pause).
   1. The player moves to `asking` and pauses the narration. Ask also works while a step is loading (section 6.1).
-  2. The browser calls `GET /api/agent/token`, and the server gets a WebRTC conversation token with `ELEVENLABS_API_KEY`.
+  2. The browser calls `GET /api/agent/token`, and the server gets a WebRTC conversation token with `ELEVENLABS_API_KEY` (ElevenLabs' `GET /v1/convai/conversation/token?agent_id=…`).
+     - It answers `{ conversationToken }`, never cached. On failure it answers `{ error: "Questions are unavailable right now." }`: 503 when Q&A isn't set up (no `ELEVENLABS_AGENT_ID`, or a replay run), 502 when ElevenLabs fails or times out (`config.agentToken.timeoutMs`). The reason goes to the server log, never the key.
   3. `startSession({ conversationToken })` starts the session through `qa/conversation.ts`.
      - That adapter is the only file that imports `@elevenlabs/react`, which also needs a `ConversationProvider` around the lesson page.
      - With `NEXT_PUBLIC_FAKE_APIS=1` the adapter is a scripted fake: it replays canned agent turns and calls the tool handlers directly, so Playwright can test Q&A without a network.
