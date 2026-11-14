@@ -516,15 +516,26 @@ export function sceneAt(
     );
   });
 
-  // The cells each started cell action changed, judged like `changesBoard`
-  // (against every earlier action complete). Computed only when needed.
+  // The board each started action is judged against (`beforeAt`), built once.
+  const befores = new Map<number, Board>();
+  const beforeOf = (i: number): Board => {
+    let before = befores.get(i);
+    if (!before) {
+      before = run(base, started.slice(0, i), plans, beforeAt(started[i]));
+      befores.set(i, before);
+    }
+    return before;
+  };
+
+  // The cells each started cell action changed, judged like `changesBoard`.
+  // Computed only when needed.
   const cellChanges = new Map<number, Set<string>>();
   const changedBy = (i: number): Set<string> => {
     let cells = cellChanges.get(i);
     if (!cells) {
       const e = started[i];
       const field = cellField(e.action);
-      const before = run(base, started.slice(0, i), plans, beforeAt(e));
+      const before = beforeOf(i);
       const after = cloneBoard(before);
       apply(after, e, 1, plans[i]);
       cells = new Set(
@@ -561,11 +572,7 @@ export function sceneAt(
         e.durationMs <= 0 ||
         tMs >= e.startMs + e.durationMs ||
         undoneByShow(started, i, tMs) ||
-        !changesBoard(
-          run(base, started.slice(0, i), plans, beforeAt(e)),
-          e,
-          plans[i],
-        )
+        !changesBoard(beforeOf(i), e, plans[i])
       )
         return [];
       const onMatrix =

@@ -187,7 +187,7 @@ type Sketch = {                               // what /api/sketch returns for a 
 | `move` on an `arrow` | rejected: `can't move "x"` |
 | `show` on a visible object, `hide` on a hidden one, or `hide` on a part that hasn't moved | allowed (no change) |
 | `tex` that KaTeX can't parse | rejected: `invalid LaTeX in "x"` (the renderer also uses `throwOnError: false` as a safety net) |
-| An object, or an `{x, y}` point in an anchor, outside the 1600 × 900 canvas (for a matrix, its whole cell box; for `text` and `latex`, only their x,y) | rejected: `off canvas "x"` (x is the object, or for a point, the object that moves there) |
+| An object, or an `{x, y}` point in an anchor, outside the 1600 × 900 canvas (for a matrix, its whole cell box; for `text` and `latex`, only their x,y) | rejected: `off canvas "x"` (x is the object, an arrow for its own point ends, or for a `move` to a point, the object that moves) |
 | Two objects with the same id | rejected: `duplicate id "x"` |
 | Narration longer than `config.maxNarrationChars` after the markers are stripped | rejected: `narration too long` |
 | Narration with nothing left after the markers are stripped (only markers or spaces) | rejected: `narration empty` (TTS would fail after validation, too late to retry) |

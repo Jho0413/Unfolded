@@ -784,6 +784,19 @@ describe("sceneAt: the cells a matrix action changed", () => {
     expect(cellsAt(timed, 200)).toEqual([[[0, 0]]]);
   });
 
+  it("a later write to the same cell takes it from an earlier write", () => {
+    const timed = [
+      at(0, { do: "write", target: { id: "m", row: 0, col: 0 }, value: "9" }),
+      at(100, {
+        do: "write",
+        target: { id: "m", row: 0, col: 0 },
+        value: "7",
+        durationMs: 0,
+      }),
+    ];
+    expect(cellsAt(timed, 200)).toEqual([[]]);
+  });
+
   it("actions on other objects have no cells", () => {
     const timed = [at(0, { do: "highlight", target: { id: "t" } })];
     expect(sceneAt(board(), timed, 100).active[0]).not.toHaveProperty("cells");
