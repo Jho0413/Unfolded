@@ -4,7 +4,8 @@
 // machine for tests. `debug` adds an overlay with the clock and the last cue
 // (pages turn it on with `?debug=1`). `renderAsk` is the Ask panel's mount
 // point: it gets the player (state and send), so the panel can open and close
-// Ask through the machine.
+// Ask through the machine. `renderBoard` replaces the board (the Ask panel
+// draws its highlights and sketches on top of the frozen board, section 8).
 import type { CSSProperties, ReactNode } from "react";
 import { CANVAS } from "@/shared/scene";
 import { playPauseEvent, statusFor } from "./controls";
@@ -18,12 +19,15 @@ export function Player({
   fetchStep,
   debug = false,
   renderAsk,
+  renderBoard,
 }: {
   stepCount: number;
   fetchStep: FetchStep;
   debug?: boolean;
   /** The Ask panel, rendered under the controls (ROADMAP Q3). */
   renderAsk?: (player: PlayerApi) => ReactNode;
+  /** The board; the default is `<Whiteboard state={player.board} />`. */
+  renderBoard?: (player: PlayerApi) => ReactNode;
 }) {
   const player = usePlayer({ stepCount, fetchStep });
   const { state } = player;
@@ -42,7 +46,11 @@ export function Player({
         <h2 style={{ margin: 0, fontSize: 20 }}>{player.loaded?.step.title}</h2>
       </header>
       <div style={BOARD_FRAME}>
-        <Whiteboard state={player.board} />
+        {renderBoard ? (
+          renderBoard(player)
+        ) : (
+          <Whiteboard state={player.board} />
+        )}
         {debug && <DebugOverlay tMs={player.tMs} lastCue={player.lastCue} />}
       </div>
       <Status player={player} />

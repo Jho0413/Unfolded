@@ -145,7 +145,8 @@ export function usePlayer({
             if (audioRef.current) audioRef.current.currentTime = 0;
             break;
           case "restoreBoard":
-            // Nothing to restore yet: the Q&A drawing arrives with Q3.
+            // The board is sceneAt(step, tMs) again by itself (the clock
+            // stayed at pausedT); the page drops its Ask layer when Ask closes.
             break;
           case "notice":
             break; // shown through `view.notice` in send
