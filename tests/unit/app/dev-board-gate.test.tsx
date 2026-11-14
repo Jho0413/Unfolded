@@ -1,6 +1,10 @@
-// The dev-only /dev/board page (ARCHITECTURE.md section 3) is not reachable
-// in a production server unless FAKE_APIS=1 (how e2e and CI run it).
-import { afterEach, describe, expect, it, vi } from "vitest";
+// The dev-only /dev/board page (ARCHITECTURE.md sections 3 and 9) is not
+// reachable in a production server unless in fake mode (lib/env.ts:
+// FAKE_APIS=1 without REPLAY_RUN), which is how e2e and CI run it.
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import DevBoardPage from "@/app/dev/board/page";
 import { resetEnvForTests } from "@/lib/env";
 
@@ -10,6 +14,24 @@ const { connection } = vi.hoisted(() => ({
   connection: vi.fn(() => Promise.resolve()),
 }));
 vi.mock("next/server", () => ({ connection }));
+
+// Replay mode needs a saved run folder: point config.runsDir at a temp one.
+const { runsDir } = vi.hoisted(() => ({ runsDir: { path: "" } }));
+vi.mock("@/lib/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/config")>();
+  return {
+    ...actual,
+    config: {
+      ...actual.config,
+      get runsDir() {
+        return runsDir.path;
+      },
+    },
+  };
+});
+runsDir.path = mkdtempSync(path.join(tmpdir(), "dev-board-gate-"));
+mkdirSync(path.join(runsDir.path, "saved-run"));
+afterAll(() => rmSync(runsDir.path, { recursive: true, force: true }));
 
 const props = { searchParams: Promise.resolve({}) };
 
@@ -41,7 +63,16 @@ describe("/dev/board gate", () => {
   it("renders in production with FAKE_APIS=1", async () => {
     realMode();
     vi.stubEnv("FAKE_APIS", "1");
+    vi.stubEnv("BUILT_WITH_BROWSER_FAKES", "1"); // as e2e and CI build it
     await expect(DevBoardPage(props)).resolves.toBeTruthy();
+  });
+  it("404s in production when REPLAY_RUN wins over FAKE_APIS", async () => {
+    realMode();
+    vi.stubEnv("FAKE_APIS", "1");
+    vi.stubEnv("REPLAY_RUN", "saved-run");
+    await expect(DevBoardPage(props)).rejects.toThrow(
+      /NEXT_HTTP_ERROR_FALLBACK;404/,
+    );
   });
   it("renders outside production", async () => {
     vi.stubEnv("NODE_ENV", "development");
