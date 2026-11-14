@@ -70,7 +70,8 @@ app/
   api/lessons/[lessonId]/signals/route.ts     POST: record a learner signal or "step n started" (section 5.4)
   api/runs/[lessonId]/[file]/route.ts         GET: serve step JSON, audio and media from runs/ (no path traversal)
   api/agent/token/route.ts          GET: ElevenLabs conversation token
-  dev/board/page.tsx                dev only: renders a fixed BoardState, or demo-m1 at ?t= via sceneAt (renderer tests); 404 in production unless FAKE_APIS=1
+  dev/board/page.tsx                dev only: renders a fixed BoardState, or demo-m1 at ?t= via sceneAt (renderer tests); 404 in production unless in fake mode (FAKE_APIS=1, no REPLAY_RUN)
+  dev/board/scenes.ts               the dev page's fixed BoardState and demo-m1 scenes
 instrumentation.ts                  register(): validates env once at server start (not at build)
 shared/                             imported by server and browser (the contract)
   scene.ts                          zod schemas: board objects, actions, step, sketch, board state
@@ -284,14 +285,15 @@ sceneAt(objects: BoardObject[], timed: { action; startMs; durationMs }[], tMs: n
   - `move` slides in a straight line from where its target was when the move started to where its anchor was then. Its path doesn't change if the anchor moves later.
   - An action is in `active` while `startMs <= tMs < startMs + durationMs`. A 0 ms action is complete at its start and never active.
   - An action that changes nothing is never in `active`: one that, once complete, would leave the board as it would be with every earlier action complete. For example a `show` of a visible object, a `highlight` in the colour its cells already have, or a `write` of the value already there. So the renderer doesn't fade in an object, value or highlight that is already there. The check is per action, not per cell: a highlight that changes some of its cells is active, and fades in all of them, including those that already had its colour.
+  - A `show` that starts while a `hide` of the same object is in progress takes over: the renderer fades the object back up from where the hide had got to, and once the show ends the hide leaves `active` (the show applies after it, so the object stays visible). A `hide` during a `show` likewise fades down from where the show had got to.
   - `unhighlight` with a `color` clears only that colour. Without one, it clears every colour.
   - A whole-matrix highlight sets every cell in `cellHighlight`. A matrix's own `highlight` stays `null`.
   - Actions on unknown or out-of-range targets are ignored and never listed in `active`. `validate.ts` rejects them first.
   - When a `hide` on a moved part ends, its copy leaves `copies`. Anchors naming that part then resolve to the source cells, and a later `move` of it makes a fresh copy.
   - A copy is independent of its matrix once made: hiding or moving the whole matrix leaves its copies where they are.
-  - `player/sceneAt.ts` also exports `timeline(actions, cueTimes)`, which builds `timed` in lesson mode, and `resolveAnchor(board, anchor)`, which gives the renderer arrow ends.
+  - `player/sceneAt.ts` also exports `timeline(actions, cueTimes)`, which builds `timed` in lesson mode, and `resolveAnchor(board, anchor)`, which gives the renderer arrow ends. The renderer reuses its target helpers (`partKey`, `isPart`, `coversCell`, `highlightColor`) rather than copying them.
 - Back, Replay and scrubbing are just seeks on the audio element. There's no animation state to undo.
-- `Whiteboard.tsx` renders `BoardState` as SVG on each animation frame. It interpolates from each action's progress, and exposes state as `data-*` attributes for tests.
+- `Whiteboard.tsx` renders `BoardState` as SVG on each animation frame. Positions (moves included) come from `sceneAt`; the renderer only fades shows, hides, highlights and writes by each action's progress, and exposes state as `data-*` attributes for tests.
 - Motion is only used for UI chrome, such as panels and buttons, not for board objects, so the board always matches the clock.
 
 ### 5.4 Adaptation
@@ -481,7 +483,7 @@ The developer gets the full error in the server log, tagged with the route, less
 | `ELEVENLABS_VOICE_ID` | narration and the agent (one voice) |
 | `ELEVENLABS_AGENT_ID` | the token route (from the CLI's tracking file) |
 | `FAL_KEY` | `lib/media/fal.ts` (optional: without it, every image is hidden) |
-| `FAKE_APIS` | `1` swaps all three providers for `lib/fakes/` (tests and CI), and lets a production server serve the dev-only `/dev/board` |
+| `FAKE_APIS` | `1` swaps all three providers for `lib/fakes/` (tests and CI), and lets a production server serve the dev-only `/dev/board` (unless `REPLAY_RUN` is set, which wins) |
 | `NEXT_PUBLIC_FAKE_APIS` | `1` swaps the browser's agent conversation for the scripted fake. It's inlined at build time, so CI builds with it set. |
 | `REPLAY_RUN` | serve a saved run from `runs/` |
 

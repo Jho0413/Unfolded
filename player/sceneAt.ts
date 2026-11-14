@@ -54,6 +54,13 @@ interface Board {
   copyByKey: Map<string, PartCopy>;
 }
 
+/** The colour a highlight sets: its own, or accent by default. The renderer uses it too. */
+export function highlightColor(action: {
+  color?: HighlightColor;
+}): HighlightColor {
+  return action.color ?? "accent";
+}
+
 /** A part's key, "a:r0", "a:c1" or "a:r0c1"; the renderer uses it to name copies. */
 export function partKey(t: Target): string {
   return `${t.id}:${t.row !== undefined ? `r${t.row}` : ""}${
@@ -306,7 +313,7 @@ function apply(
       }
       break;
     case "highlight":
-      setHighlight(board, t, action.color ?? "accent", undefined);
+      setHighlight(board, t, highlightColor(action), undefined);
       break;
     case "unhighlight":
       setHighlight(board, t, null, action.color);
@@ -375,6 +382,29 @@ function run(
   const board = cloneBoard(base);
   entries.forEach((e, i) => apply(board, e, progressAt(e, tMs), plans[i]));
   return board;
+}
+
+/**
+ * Whether entry `i` is a hide that a later show of the same object has
+ * already finished undoing by `tMs`. The show applies after it, so the object
+ * ends visible: the hide no longer fades anything and leaves `active`.
+ */
+function undoneByShow(
+  started: readonly Entry[],
+  i: number,
+  tMs: number,
+): boolean {
+  const { action } = started[i];
+  if (action.do !== "hide") return false;
+  const key = partKey(action.target);
+  return started
+    .slice(i + 1)
+    .some(
+      (later) =>
+        later.action.do === "show" &&
+        partKey(later.action.target) === key &&
+        tMs >= later.startMs + later.durationMs,
+    );
 }
 
 /** Board content only, for comparing two boards. */
@@ -448,6 +478,7 @@ export function sceneAt(
         (e, i) =>
           e.durationMs > 0 &&
           tMs < e.startMs + e.durationMs &&
+          !undoneByShow(started, i, tMs) &&
           changesBoard(
             run(base, started.slice(0, i), plans, Infinity),
             e,

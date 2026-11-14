@@ -7,7 +7,7 @@ import type {
   HighlightColor,
   Target,
 } from "@/shared/scene";
-import { coversCell, isPart, partKey } from "@/player/sceneAt";
+import { coversCell, highlightColor, isPart, partKey } from "@/player/sceneAt";
 
 /** Light theme (ARCHITECTURE.md section 1). */
 export const INK = "#1f2937";
@@ -39,16 +39,28 @@ export function highlightAttr(color: HighlightColor | null | undefined) {
  * ends). 1 when nothing is in progress. A show of an object already visible
  * never fades from 0: sceneAt leaves actions that change nothing out of
  * `active`.
+ *
+ * `active` is in start order, so the later of a show and a hide takes over
+ * from where the earlier one had got to, with no jump: a show during a hide
+ * fades back up from the hide's opacity (the max), and a hide during a show
+ * fades down from the show's (the min).
  */
 export function fadeOpacity(
   active: readonly ActiveAction[],
   target: Target,
 ): number {
   let opacity = 1;
+  let hiding = false;
   for (const { action, progress } of active) {
     if (partKey(action.target) !== partKey(target)) continue;
-    if (action.do === "show") opacity = Math.min(opacity, progress);
-    if (action.do === "hide") opacity = Math.min(opacity, 1 - progress);
+    if (action.do === "hide") {
+      opacity = Math.min(opacity, 1 - progress);
+      hiding = true;
+    }
+    if (action.do === "show")
+      opacity = hiding
+        ? Math.max(opacity, progress)
+        : Math.min(opacity, progress);
   }
   return opacity;
 }
@@ -60,7 +72,7 @@ export function fadeOpacity(
  * action whose result was since overwritten.
  */
 function setsCurrent(action: Action, current: string | null): boolean {
-  if (action.do === "highlight") return (action.color ?? "accent") === current;
+  if (action.do === "highlight") return highlightColor(action) === current;
   if (action.do === "write") return action.value === current;
   return false;
 }

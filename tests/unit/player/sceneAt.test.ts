@@ -673,6 +673,18 @@ describe("sceneAt: an action that changes nothing is never active", () => {
     expect(s.active.map((a) => a.action)).toContainEqual(show.action);
   });
 
+  it("a hide leaves active once a later show of the same object has ended", () => {
+    const timed = [
+      at(0, { do: "hide", target: { id: "t" }, durationMs: 1000 }),
+      at(300, { do: "show", target: { id: "t" } }),
+    ];
+    expect(sceneAt(board(), timed, 600).active).toHaveLength(2);
+    const after = sceneAt(board(), timed, 800);
+    expect(after.active).toEqual([]);
+    expect(obj(after, "t").visible).toBe(true);
+    expect(obj(sceneAt(board(), timed, 1000), "t").visible).toBe(true);
+  });
+
   it("a highlight that changes at least one cell is active", () => {
     const timed = [
       at(0, { do: "highlight", target: { id: "m", row: 0 }, durationMs: 0 }),

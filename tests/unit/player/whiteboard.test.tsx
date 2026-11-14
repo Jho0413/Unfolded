@@ -6,7 +6,11 @@ import { describe, expect, it } from "vitest";
 import { FIXED } from "@/app/dev/board/scenes";
 import { Whiteboard } from "@/player/Whiteboard";
 import { sceneAt, type TimedAction } from "@/player/sceneAt";
-import { cellProgress, fadeOpacity } from "@/player/primitives/style";
+import {
+  cellProgress,
+  fadeOpacity,
+  objectProgress,
+} from "@/player/primitives/style";
 import {
   type Action,
   type ActiveAction,
@@ -18,6 +22,10 @@ const hide = (progress: number): ActiveAction => ({
   action: { do: "hide", target: { id: "t" }, durationMs: 400 },
   progress,
 });
+const show = (progress: number): ActiveAction => ({
+  action: { do: "show", target: { id: "t" }, durationMs: 400 },
+  progress,
+});
 
 describe("fadeOpacity", () => {
   it("is 1 with nothing in progress", () => {
@@ -27,15 +35,63 @@ describe("fadeOpacity", () => {
     expect(fadeOpacity([hide(0.25)], { id: "t" })).toBe(0.75);
   });
   it("fades in with a show's progress", () => {
-    const show: ActiveAction = {
-      action: { do: "show", target: { id: "t" }, durationMs: 400 },
-      progress: 0.3,
-    };
-    expect(fadeOpacity([show], { id: "t" })).toBe(0.3);
+    expect(fadeOpacity([show(0.3)], { id: "t" })).toBe(0.3);
   });
   it("ignores actions on other targets or parts", () => {
     expect(fadeOpacity([hide(0.5)], { id: "u" })).toBe(1);
     expect(fadeOpacity([hide(0.5)], { id: "t", row: 0 })).toBe(1);
+  });
+  it("a show after a hide fades up from the hide's opacity (the max)", () => {
+    expect(fadeOpacity([hide(0.75), show(0.5)], { id: "t" })).toBe(0.5);
+    expect(fadeOpacity([hide(0.5), show(0.25)], { id: "t" })).toBe(0.5);
+  });
+  it("a hide after a show fades down from the show's opacity (the min)", () => {
+    expect(fadeOpacity([show(0.5), hide(0.25)], { id: "t" })).toBe(0.5);
+    expect(fadeOpacity([show(0.9), hide(0.5)], { id: "t" })).toBe(0.5);
+  });
+});
+
+describe("objectProgress", () => {
+  const hl = (target: ActiveAction["action"]["target"], progress: number) =>
+    ({
+      action: { do: "highlight", target, durationMs: 300 },
+      progress,
+    }) satisfies ActiveAction;
+  it("a highlight in progress fades the object's highlight in", () => {
+    expect(
+      objectProgress([hl({ id: "t" }, 0.4)], "highlight", "t", "accent"),
+    ).toBe(0.4);
+  });
+  it("ignores other objects and parts", () => {
+    expect(
+      objectProgress([hl({ id: "u" }, 0.4)], "highlight", "t", "accent"),
+    ).toBe(1);
+    expect(
+      objectProgress(
+        [hl({ id: "t", row: 0 }, 0.4)],
+        "highlight",
+        "t",
+        "accent",
+      ),
+    ).toBe(1);
+  });
+  it("doesn't borrow the progress of an overwritten highlight", () => {
+    expect(
+      objectProgress([hl({ id: "t" }, 0.4)], "highlight", "t", "warn"),
+    ).toBe(1);
+  });
+  it("a write in progress fades the text in", () => {
+    const write: ActiveAction = {
+      action: {
+        do: "write",
+        target: { id: "t" },
+        value: "19",
+        durationMs: 300,
+      },
+      progress: 0.5,
+    };
+    expect(objectProgress([write], "write", "t", "19")).toBe(0.5);
+    expect(objectProgress([write], "write", "t", "other")).toBe(1);
   });
 });
 
@@ -90,26 +146,48 @@ describe("Whiteboard", () => {
       <Whiteboard state={sceneAt(objects, timed, 200)} />,
     );
   };
-  it("a show during a hide in progress fades back in, never popping", () => {
+  /** `t`'s rendered opacity at each time, for a hide then a show of it. */
+  const showDuringHide = (
+    hide: [number, number],
+    show: [number, number],
+    times: number[],
+  ) => {
     const timed: TimedAction[] = [
       {
-        action: { do: "hide", target: { id: "t" }, durationMs: 400 },
-        startMs: 0,
-        durationMs: 400,
+        action: { do: "hide", target: { id: "t" }, durationMs: hide[1] },
+        startMs: hide[0],
+        durationMs: hide[1],
       },
       {
-        action: { do: "show", target: { id: "t" }, durationMs: 400 },
-        startMs: 200,
-        durationMs: 400,
+        action: { do: "show", target: { id: "t" }, durationMs: show[1] },
+        startMs: show[0],
+        durationMs: show[1],
       },
     ];
-    const opacity = (tMs: number) =>
-      renderToStaticMarkup(
-        <Whiteboard state={sceneAt(objects, timed, tMs)} />,
-      ).match(/data-object-id="t"[^>]*data-opacity="([^"]+)"/)?.[1];
-    expect(opacity(399)).toBe("0"); // min(hide 0.0025 left, show 0.4975)
-    expect(opacity(400)).toBe("0.5"); // hide done; the show carries on
-    expect(opacity(600)).toBe("1");
+    return times.map((tMs) =>
+      Number(
+        renderToStaticMarkup(
+          <Whiteboard state={sceneAt(objects, timed, tMs)} />,
+        ).match(/data-object-id="t"[^>]*data-opacity="([^"]+)"/)?.[1],
+      ),
+    );
+  };
+  it("a show during a hide fades back up from where the hide got to, with no jump", () => {
+    // Hide 0..400, show 200..600: down to 0.5, the hide carries on to 0.25,
+    // then the show takes over.
+    expect(
+      showDuringHide([0, 400], [200, 400], [199, 200, 300, 399, 400, 600]),
+    ).toEqual([0.5, 0.5, 0.25, 0.5, 0.5, 1]);
+  });
+  it("a show that ends before the hide it interrupted leaves the object fully visible", () => {
+    // Hide 0..1000, show 300..700: the hide no longer fades it after 700.
+    expect(
+      showDuringHide(
+        [0, 1000],
+        [300, 400],
+        [299, 300, 500, 699, 700, 999, 1000],
+      ),
+    ).toEqual([0.7, 0.7, 0.5, 1, 1, 1, 1]);
   });
   it("a show of a visible object doesn't blink: it stays fully opaque", () => {
     const html = mid({ do: "show", target: { id: "t" }, durationMs: 400 });
