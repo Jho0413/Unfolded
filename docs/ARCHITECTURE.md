@@ -70,7 +70,7 @@ app/
   api/lessons/[lessonId]/signals/route.ts     POST: record a learner signal or "step n started" (section 5.4)
   api/runs/[lessonId]/[file]/route.ts         GET: serve step JSON, audio and media from runs/ (no path traversal)
   api/agent/token/route.ts          GET: ElevenLabs conversation token
-  dev/board/page.tsx                dev only: renders a fixed BoardState (renderer tests)
+  dev/board/page.tsx                dev only: renders a fixed BoardState, or demo-m1 at ?t= via sceneAt (renderer tests); 404 in production unless FAKE_APIS=1
 instrumentation.ts                  register(): validates env once at server start (not at build)
 shared/                             imported by server and browser (the contract)
   scene.ts                          zod schemas: board objects, actions, step, sketch, board state
@@ -480,7 +480,7 @@ The developer gets the full error in the server log, tagged with the route, less
 | `ELEVENLABS_VOICE_ID` | narration and the agent (one voice) |
 | `ELEVENLABS_AGENT_ID` | the token route (from the CLI's tracking file) |
 | `FAL_KEY` | `lib/media/fal.ts` (optional: without it, every image is hidden) |
-| `FAKE_APIS` | `1` swaps all three providers for `lib/fakes/` (tests and CI) |
+| `FAKE_APIS` | `1` swaps all three providers for `lib/fakes/` (tests and CI), and lets a production server serve the dev-only `/dev/board` |
 | `NEXT_PUBLIC_FAKE_APIS` | `1` swaps the browser's agent conversation for the scripted fake. It's inlined at build time, so CI builds with it set. |
 | `REPLAY_RUN` | serve a saved run from `runs/` |
 
