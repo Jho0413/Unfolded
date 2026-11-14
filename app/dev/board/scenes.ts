@@ -141,7 +141,8 @@ export const FIXED: BoardState = {
   ],
 };
 
-const m1 = Step.parse(demoM1);
+/** The hand-written demo-m1 step (lib/fakes/fixtures), also the fake step on /dev/player. */
+export const m1 = Step.parse(demoM1);
 
 /** Cue times for demo-m1 on the dev page (ms); the real ones come from TTS. */
 export const M1_CUE_TIMES: CueTimes = {
