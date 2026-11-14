@@ -59,6 +59,7 @@ PDF ──► Lesson planner (LLM)
 ### Open questions (spike these in the first 1–2 hours)
 
 - **Who speaks: Anam or ElevenLabs?** Can Anam lip-sync to ElevenLabs audio or voices, or does each run its own voice pipeline? The answer decides whether lesson narration and Q&A share one voice. Check the Anam docs or ask the sponsor booth. (Anam API access is "coming soon" in My Pass.)
+- **Anam fallback:** Anam access isn't confirmed yet. Design the tool layer (`draw_scene`, `highlight`, `go_to_step`, `simplify_upcoming`) so it doesn't depend on Anam: the ElevenLabs agent calls the same tools with no avatar. Anam then plugs in as an extra layer if it becomes available.
 - **Scene description format:** start small (matrix, vector, arrow, text, LaTeX, group) and grow it only when the demo paper needs more.
 - **Latency:** generate the current step and the next one ahead of time, and generate only Q&A answers live.
 
@@ -101,4 +102,4 @@ Fill in `AGENTS.md § Who owns what` at kickoff. Suggested split:
 | Lesson pipeline: PDF parse, planner, scene generation | `server/pipeline/` |
 | Real-time: Q&A agent, ElevenLabs, Anam, tool calls | `server/realtime/` + `web/realtime/` |
 
-**Shared contract:** the scene script schema (`shared/scene.schema.json`). Agree on it early. Any change to it must be posted on the board.
+**Shared contract:** the scene script schema (`shared/scene.schema.json`), owned by whoever owns the player. Agree on it early. Any change to it must be posted on the board.
