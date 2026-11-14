@@ -213,14 +213,14 @@ describe("validate: ARCHITECTURE.md section 4 table", () => {
     });
   });
 
-  describe("row or col outside the matrix, or set on a non-matrix (in a target or an anchor): rejected: target out of range", () => {
+  describe('row or col outside the matrix, or set on a non-matrix (in a target or an anchor): rejected: target out of range "x"', () => {
     it("row outside the matrix in a target", () => {
       expectErrors(
         validateStep(
           stepWith(addAction({ do: "highlight", target: { id: "m", row: 2 } })),
           limits,
         ),
-        "target out of range",
+        'target out of range "m"',
       );
     });
     it("col outside the matrix in an anchor", () => {
@@ -235,7 +235,20 @@ describe("validate: ARCHITECTURE.md section 4 table", () => {
           ),
           limits,
         ),
-        "target out of range",
+        'target out of range "m"',
+      );
+    });
+    it("names each object, so two bad targets give two errors", () => {
+      expectErrors(
+        validateStep(
+          stepWith((s) => {
+            addAction({ do: "highlight", target: { id: "m", row: 2 } })(s);
+            addAction({ do: "highlight", target: { id: "t", row: 0 } })(s);
+          }),
+          limits,
+        ),
+        'target out of range "m"',
+        'target out of range "t"',
       );
     });
     it("row set on a non-matrix target", () => {
@@ -244,7 +257,7 @@ describe("validate: ARCHITECTURE.md section 4 table", () => {
           stepWith(addAction({ do: "highlight", target: { id: "t", row: 0 } })),
           limits,
         ),
-        "target out of range",
+        'target out of range "t"',
       );
     });
     it("col set on a non-matrix arrow anchor", () => {
@@ -260,7 +273,7 @@ describe("validate: ARCHITECTURE.md section 4 table", () => {
           ),
           limits,
         ),
-        "target out of range",
+        'target out of range "t"',
       );
     });
   });
@@ -353,9 +366,9 @@ describe("validate: ARCHITECTURE.md section 4 table", () => {
     );
   });
 
-  describe("An object, or an {x, y} point in an anchor, outside the 1600 x 900 canvas: rejected: off canvas", () => {
-    const off = (edit: Edit) =>
-      expectErrors(validateStep(stepWith(edit), limits), "off canvas");
+  describe('An object, or an {x, y} point in an anchor, outside the 1600 x 900 canvas: rejected: off canvas "x"', () => {
+    const off = (edit: Edit, id = "x") =>
+      expectErrors(validateStep(stepWith(edit), limits), `off canvas "${id}"`);
     it("a matrix whose cell box crosses the right edge", () => {
       // 2 columns x 64 = 128 wide: x = 1500 ends at 1628.
       off((s) =>
@@ -430,8 +443,27 @@ describe("validate: ARCHITECTURE.md section 4 table", () => {
         }),
       );
     });
+    it("names each object, so two off-canvas objects give two errors", () => {
+      expectErrors(
+        validateStep(
+          stepWith((s) =>
+            s.objects.push(
+              { kind: "text", id: "q", x: -1, y: 10, text: "a" },
+              { kind: "text", id: "r", x: 1601, y: 10, text: "b" },
+            ),
+          ),
+          limits,
+        ),
+        'off canvas "q"',
+        'off canvas "r"',
+      );
+    });
     it("a point in a move anchor", () => {
-      off(addAction({ do: "move", target: { id: "t" }, to: { x: 10, y: -5 } }));
+      // Named after the object that moves there.
+      off(
+        addAction({ do: "move", target: { id: "t" }, to: { x: 10, y: -5 } }),
+        "t",
+      );
     });
   });
 

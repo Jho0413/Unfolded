@@ -181,14 +181,14 @@ type Sketch = {                               // what /api/sketch returns for a 
 | A malformed marker (`[[Row 1]]`, a stray `[[` or `]]`) | rejected: `malformed marker "[[Row 1]]"` (otherwise it would be read aloud) |
 | A marker in `narration` that no action uses | allowed (it's ignored) |
 | A `target.id`, or an anchor's `id`, with no object | rejected: `unknown object "x"` |
-| `row` or `col` outside the matrix, or set on a non-matrix (in a target or an anchor) | rejected: `target out of range` |
+| `row` or `col` outside the matrix, or set on a non-matrix (in a target or an anchor) | rejected: `target out of range "x"` (x is the id the target or anchor names) |
 | `write` on a matrix without both `row` and `col` | rejected: `write needs a cell` |
 | `write` on a `latex`, `arrow` or `image` | rejected: `can't write to "x"` |
 | `show` with `row` or `col` | rejected: `show needs a whole object` |
 | `move` on an `arrow` | rejected: `can't move "x"` |
 | `show` on a visible object, `hide` on a hidden one, or `hide` on a part that hasn't moved | allowed (no change) |
 | `tex` that KaTeX can't parse | rejected: `invalid LaTeX in "x"` (the renderer also uses `throwOnError: false` as a safety net) |
-| An object, or an `{x, y}` point in an anchor, outside the 1600 × 900 canvas (for a matrix, its whole cell box; for `text` and `latex`, only their x,y) | rejected: `off canvas` |
+| An object, or an `{x, y}` point in an anchor, outside the 1600 × 900 canvas (for a matrix, its whole cell box; for `text` and `latex`, only their x,y) | rejected: `off canvas "x"` (x is the object, an arrow for its own point ends, or for a `move` to a point, the object that moves) |
 | Two objects with the same id | rejected: `duplicate id "x"` |
 | Narration longer than `config.maxNarrationChars` after the markers are stripped | rejected: `narration too long` |
 | Narration with nothing left after the markers are stripped (only markers or spaces) | rejected: `narration empty` (TTS would fail after validation, too late to retry) |
@@ -284,7 +284,7 @@ Property-based tests (fast-check) check three things:
 sceneAt(objects: BoardObject[], timed: { action; startMs; durationMs }[], tMs: number): BoardState
 ```
 
-- `BoardState` (a zod schema in `shared/scene.ts`, since `/api/sketch` receives it) is every object with its visibility, highlight, position and value at `tMs`, plus the moved copies of matrix parts. For each action in progress, it also includes how far along it is (0..1).
+- `BoardState` (a zod schema in `shared/scene.ts`, since `/api/sketch` receives it) is every object with its visibility, highlight, position and value at `tMs`, plus the moved copies of matrix parts. For each action in progress, it also includes how far along it is (0..1) and, for a matrix highlight, unhighlight or write, the cells it changed.
 - **Lesson mode:** `timed` comes from `cueTimes`, and `tMs` is `audio.currentTime * 1000`.
 - **Q&A mode:** the lesson board stays at `pausedT`, with the Q&A drawing on top (section 8). `objects` is the step's objects plus each sketch's objects. `timed` is the step's actions that started by `pausedT`, plus each Q&A action at `pausedT` + the time since Ask opened when it arrived (+ `atMs` for a sketch). `tMs` is `pausedT` + the time since Ask opened. After a `fresh` sketch, the step and earlier sketches are left out.
 - **Timing rules** (what `sceneAt` does with each action):
@@ -292,7 +292,8 @@ sceneAt(objects: BoardObject[], timed: { action; startMs; durationMs }[], tMs: n
   - `show`, `highlight`, `unhighlight` and `write` take effect when they start. `hide` takes effect when it ends, so the renderer can fade it out using progress.
   - `move` slides in a straight line from where its target was when the move started to where its anchor was then. Its path doesn't change if the anchor moves later.
   - An action is in `active` while `startMs <= tMs < startMs + durationMs`. A 0 ms action is complete at its start and never active.
-  - An action that changes nothing is never in `active`: one that, once complete, would leave the board as it would be with every earlier action complete (for a `hide`, which takes effect when it ends: with the earlier actions as they are then, so a shorter `hide` during a longer one is active). For example a `show` of a visible object, a `highlight` in the colour its cells already have, or a `write` of the value already there. So the renderer doesn't fade in an object, value or highlight that is already there. The check is per action, not per cell: a highlight that changes some of its cells is active, and fades in all of them, including those that already had its colour.
+  - An action that changes nothing is never in `active`: one that, once complete, would leave the board as it would be with every earlier action complete (for a `hide`, which takes effect when it ends: with the earlier actions as they are then, so a shorter `hide` during a longer one is active). For example a `show` of a visible object, a `highlight` in the colour its cells already have, or a `write` of the value already there. So the renderer doesn't fade in an object, value or highlight that is already there. The check is per action: a highlight that changes some of its cells is active.
+  - A `highlight`, `unhighlight` or `write` on a matrix also lists its `cells` in `active`: the cells [row, col] it changed (judged as above) that no later started action has changed since (a later `highlight` or `unhighlight` for a highlight, a later `write` for a write). The renderer fades in only those, so a cell that already had the colour or value doesn't blink, and a cell a later 0 ms action has set is shown at once.
   - A `show` that starts while a `hide` of the same object is in progress takes over with no jump: the renderer shows the larger of the two opacities, so the object keeps fading until the show overtakes the hide, then fades in. Once the show ends, the hide leaves `active` (the show applies after it, so the object stays visible). A `hide` during a `show` mirrors this with the smaller opacity: the object keeps fading in until the hide overtakes the show.
   - `unhighlight` with a `color` clears only that colour. Without one, it clears every colour.
   - A whole-matrix highlight sets every cell in `cellHighlight`. A matrix's own `highlight` stays `null`.
