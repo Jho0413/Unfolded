@@ -5,7 +5,7 @@
 // + 50 ms, never by waiting. Blocked autoplay is in player-autoplay.spec.ts.
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { M1_CUE_TIMES } from "@/app/dev/board/scenes";
-import { FAKE_AUDIO_MS } from "@/app/dev/player/fakeLesson";
+import { FAKE_AUDIO_MS, FAKE_SERVER_ERROR } from "@/app/dev/player/fakeLesson";
 import { MESSAGES } from "@/player/machine";
 
 // Chromium's default autoplay policy sometimes blocks the first play in
@@ -58,6 +58,24 @@ async function open(page: Page, query = "") {
   await expectState(page, "playing", 0);
 }
 
+/** Opens the page and plays on to step 1 (the second, last step). */
+async function openStep1(page: Page, query = "") {
+  await open(page, query);
+  await endStep(page, 0);
+  await control(page, "Next").click();
+  await expectState(page, "playing", 1);
+}
+
+/** Asserts which controls are enabled; the others on screen are disabled. */
+async function expectEnabled(page: Page, enabled: string[]) {
+  for (const name of ["Back", "Replay", "Play", "Pause", "Next"]) {
+    const button = control(page, name);
+    if ((await button.count()) === 0) continue; // Play and Pause swap
+    if (enabled.includes(name)) await expect(button).toBeEnabled();
+    else await expect(button).toBeDisabled();
+  }
+}
+
 function cell(page: Page, id: string, r: number, c: number): Locator {
   return page.locator(`[data-object-id="${id}"] [data-cell="${r},${c}"]`);
 }
@@ -88,7 +106,13 @@ test.describe("controls", () => {
     await expectState(page, "playing", 0);
   });
 
-  test("Space pauses and plays", async ({ page }) => {
+  test("playing + pause (Space): → paused", async ({ page }) => {
+    await open(page);
+    await page.keyboard.press("Space");
+    await expectState(page, "paused", 0);
+  });
+
+  test("paused + resume (Space): → playing", async ({ page }) => {
     await open(page);
     await page.keyboard.press("Space");
     await expectState(page, "paused", 0);
@@ -155,7 +179,7 @@ test.describe("controls", () => {
     await control(page, "Next").click();
     await expectState(page, "finished", 1);
     await expect(page.getByTestId("player-status")).toHaveText(
-      "End of the lesson.",
+      MESSAGES.finished,
     );
   });
 
@@ -169,6 +193,7 @@ test.describe("controls", () => {
     await expectState(page, "finished", 1);
     await control(page, "Replay").click();
     await expectState(page, "playing", 1);
+    expect(await currentTimeMs(page)).toBeLessThan(1000);
   });
 
   test("finished + back: → loading(last), then playing", async ({ page }) => {
@@ -185,10 +210,23 @@ test.describe("controls", () => {
   });
 
   test("playing + back: → loading(prev), then playing", async ({ page }) => {
-    await open(page);
-    await endStep(page, 0);
-    await control(page, "Next").click();
-    await expectState(page, "playing", 1);
+    await openStep1(page);
+    await control(page, "Back").click();
+    await expectState(page, "playing", 0);
+    expect(await currentTimeMs(page)).toBeLessThan(1000);
+  });
+
+  test("paused + back: → loading(prev), then playing", async ({ page }) => {
+    await openStep1(page);
+    await control(page, "Pause").click();
+    await expectState(page, "paused", 1);
+    await control(page, "Back").click();
+    await expectState(page, "playing", 0);
+  });
+
+  test("stepEnded + back: → loading(prev), then playing", async ({ page }) => {
+    await openStep1(page);
+    await endStep(page, 1);
     await control(page, "Back").click();
     await expectState(page, "playing", 0);
   });
@@ -220,11 +258,98 @@ test.describe("controls", () => {
   });
 });
 
+test.describe("ignored controls are disabled", () => {
+  test("loading: every control ignored", async ({ page }) => {
+    await open(page, "?delay=1500");
+    await endStep(page, 0);
+    await control(page, "Next").click();
+    await expectState(page, "loading", 1);
+    await expectEnabled(page, []);
+  });
+
+  test("playing: next ignored", async ({ page }) => {
+    await open(page);
+    await expectEnabled(page, ["Back", "Replay", "Pause"]);
+  });
+
+  test("paused: next ignored", async ({ page }) => {
+    await open(page);
+    await control(page, "Pause").click();
+    await expectEnabled(page, ["Back", "Replay", "Play"]);
+  });
+
+  test("stepEnded: resume (Play, Space) ignored", async ({ page }) => {
+    await open(page);
+    await endStep(page, 0);
+    await expectEnabled(page, ["Back", "Replay", "Next"]);
+    await page.keyboard.press("Space");
+    await expectState(page, "stepEnded", 0);
+  });
+
+  test("finished: next and resume ignored", async ({ page }) => {
+    await openStep1(page);
+    await endStep(page, 1);
+    await control(page, "Next").click();
+    await expectState(page, "finished", 1);
+    await expectEnabled(page, ["Back", "Replay"]);
+  });
+});
+
+test.describe("play and pause from outside the page (media keys)", () => {
+  test("playing + pause from outside: → paused", async ({ page }) => {
+    await open(page);
+    await page
+      .getByTestId("player-audio")
+      .evaluate((audio: HTMLAudioElement) => audio.pause());
+    await expectState(page, "paused", 0);
+  });
+
+  test("paused + play from outside: → playing", async ({ page }) => {
+    await open(page);
+    await control(page, "Pause").click();
+    await page
+      .getByTestId("player-audio")
+      .evaluate((audio: HTMLAudioElement) => audio.play());
+    await expectState(page, "playing", 0);
+  });
+
+  test("stepEnded + play from outside: ignored, the audio stops again", async ({
+    page,
+  }) => {
+    await open(page);
+    await endStep(page, 0);
+    // The player pauses it again, which rejects this play() with AbortError.
+    await page
+      .getByTestId("player-audio")
+      .evaluate((audio: HTMLAudioElement) => audio.play().catch(() => {}));
+    await expectState(page, "stepEnded", 0);
+    await expect
+      .poll(() =>
+        page
+          .getByTestId("player-audio")
+          .evaluate((audio: HTMLAudioElement) => audio.paused),
+      )
+      .toBe(true);
+  });
+});
+
 test.describe("failures", () => {
   test("loading + stepFailed(k): → failed with the server's message", async ({
     page,
   }) => {
-    await open(page, "?fail=1");
+    await open(page, "?fail=server");
+    await endStep(page, 0);
+    await control(page, "Next").click();
+    await expectState(page, "failed", 1);
+    await expect(page.getByTestId("player-error")).toHaveText(
+      FAKE_SERVER_ERROR,
+    );
+  });
+
+  test("loading + stepFailed(k), network down: → failed (Couldn't make this step. Retry?)", async ({
+    page,
+  }) => {
+    await open(page, "?fail=network");
     await endStep(page, 0);
     await control(page, "Next").click();
     await expectState(page, "failed", 1);
@@ -234,7 +359,7 @@ test.describe("failures", () => {
   });
 
   test("failed + retry: → loading(same), then playing", async ({ page }) => {
-    await open(page, "?fail=1");
+    await open(page, "?fail=server");
     await endStep(page, 0);
     await control(page, "Next").click();
     await expectState(page, "failed", 1);
@@ -244,7 +369,7 @@ test.describe("failures", () => {
   });
 
   test("failed + back: → loading(prev)", async ({ page }) => {
-    await open(page, "?fail=1");
+    await open(page, "?fail=server");
     await endStep(page, 0);
     await control(page, "Next").click();
     await expectState(page, "failed", 1);
@@ -260,7 +385,9 @@ test.describe("failures", () => {
     await expect(page.getByTestId("player-error")).toHaveText(
       MESSAGES.audioFailed,
     );
-    await expect(control(page, "Retry")).toBeVisible();
+    await expect(control(page, "Retry")).toBeEnabled();
+    // failed + back on step 0: ignored.
+    await expect(control(page, "Back")).toBeDisabled();
   });
 
   test("audio fails to load: loading + stepFailed(k) → failed (Couldn't play the audio. Retry?)", async ({
