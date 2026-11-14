@@ -446,6 +446,7 @@ The developer gets the full error in the server log, tagged with the route, less
 | Player | Browser blocks autoplay | "Press play to start." | Play button |
 | Player | Audio fails to load or decode | "Couldn't play the audio. Retry?" | Retry |
 | Route | `lessonId` doesn't match `^[a-z0-9-]{1,40}$`, or `n` isn't a step in the plan | 400 "No such lesson or step." | Back to upload |
+| Lesson page | `/lesson/<lessonId>` with a bad `lessonId`, or a lesson with no saved `plan.json` | A 404 page: "No such lesson or step." | "Back to upload" link |
 | Run file | `GET /api/runs/<lessonId>/<file>` with a bad `lessonId` or file name, an extension it doesn't serve, a symlink, a folder or another non-regular file | 400 "No such lesson or file." (a symlink, folder or other non-regular file is logged; a bad name isn't, as any URL can be typed) | The page shows its own error for the step or image |
 | Run file | The file isn't in the run folder | 404 `No saved file "<file>" in lesson "<lessonId>".` | As above |
 | Run file | Reading the file fails for another reason | 500 "Couldn't read this file." (the error is logged) | As above |
