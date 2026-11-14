@@ -2,8 +2,10 @@
 // The lesson player (ROADMAP P5): the whiteboard, the controls and the one
 // audio element, driven by usePlayer. `data-state` and `data-step` expose the
 // machine for tests. `debug` adds an overlay with the clock and the last cue
-// (pages turn it on with `?debug=1`).
-import type { CSSProperties } from "react";
+// (pages turn it on with `?debug=1`). `renderAsk` is the Ask panel's mount
+// point: it gets the player (state and send), so the panel can open and close
+// Ask through the machine.
+import type { CSSProperties, ReactNode } from "react";
 import { CANVAS } from "@/shared/scene";
 import { playPauseEvent, statusFor } from "./controls";
 import { FRAME_BORDER, MUTED, PAGE_BG } from "./primitives/style";
@@ -15,10 +17,13 @@ export function Player({
   stepCount,
   fetchStep,
   debug = false,
+  renderAsk,
 }: {
   stepCount: number;
   fetchStep: FetchStep;
   debug?: boolean;
+  /** The Ask panel, rendered under the controls (ROADMAP Q3). */
+  renderAsk?: (player: PlayerApi) => ReactNode;
 }) {
   const player = usePlayer({ stepCount, fetchStep });
   const { state } = player;
@@ -42,6 +47,7 @@ export function Player({
       </div>
       <Status player={player} />
       <Controls player={player} />
+      {renderAsk?.(player)}
       <audio {...player.audioProps} data-testid="player-audio" />
     </section>
   );
