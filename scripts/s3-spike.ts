@@ -6,12 +6,15 @@
 //   npm run spike:s3 -- --probe
 //   npm run spike:s3 -- --paper attention=/tmp/papers/attention.pdf \
 //     --paper newton3p=/tmp/papers/newton3p.pdf --effort low,medium --fixtures medium
+// --schema picks the output schema (SCHEMA_VARIANTS); the default is one-action, because
+// the API rejects the contract's own schema (issue #27). The key is read from .env only.
 // The concepts per paper come from scripts/s3-spike.lessons.json (paper-specific content
 // lives in data, never in the prompt). Results go to evidence/s3/ (gitignored); with
 // --fixtures <effort>, the valid steps of that effort go to lib/fakes/fixtures/.
+import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { parseArgs } from "node:util";
+import { parseArgs, parseEnv } from "node:util";
 import Anthropic, { toFile } from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { config, type Effort } from "@/lib/config";
@@ -54,7 +57,7 @@ Actions (each has a cue, and durationMs from 0 to ${MAX_DURATION_MS})
 - write: replace the value of a matrix cell (needs both row and col) or the text of a text object. Never write to latex or arrows.
 
 Narration and cues
-- Plain spoken English, as a friendly teacher would say it aloud: no markdown, no LaTeX, no maths symbols. Spell maths out in words, since the voice skips or misreads symbols: "Q times K transpose", "the square root of d k", "x squared".
+- Plain spoken English, as a friendly teacher would say it aloud: no markdown, no LaTeX, no maths symbols. Spell maths out in words, since the voice skips or misreads symbols: "a times b", "x squared", "the square root of n".
 - The narration is the final script: never correct yourself or think aloud in it.
 - At most ${config.maxNarrationChars} characters once markers are removed; aim for 60 to 90 seconds of speech.
 - Put a cue marker [[name]] right before the word where an action should fire. name matches ^[a-z][a-z0-9_]{0,31}$, and each marker appears once. Never write [[ or ]] for anything else.
@@ -74,6 +77,8 @@ interface Paper {
 
 /** One request: a first try or the retry with the validation errors. */
 interface Attempt {
+  /** The SCHEMA_VARIANTS entry the request used. */
+  schema: string;
   paper: string;
   concept: string;
   effort: Effort;
@@ -141,6 +146,7 @@ const mergeActions = (schema: Json, a: string, b: string) => {
   const branches = actionBranches(schema);
   const i = branches.findIndex((x) => x.properties.do.const === a);
   const j = branches.findIndex((x) => x.properties.do.const === b);
+  if (i < 0 || j < 0) throw new Error(`no action branch "${a}" or "${b}"`);
   branches[i].properties.do = { enum: [a, b] } as never;
   branches.splice(j, 1);
 };
@@ -151,10 +157,11 @@ const dropKind = (schema: Json, kind: string) => {
     items: { anyOf: { properties: { kind: unknown } }[] };
   };
   const all = objects.items.anyOf;
-  all.splice(
-    all.findIndex((o) => JSON.stringify(o.properties.kind).includes(kind)),
-    1,
+  const i = all.findIndex((o) =>
+    JSON.stringify(o.properties.kind).includes(kind),
   );
+  if (i < 0) throw new Error(`no object kind "${kind}"`);
+  all.splice(i, 1);
 };
 
 /**
@@ -271,15 +278,37 @@ async function runStep(
   const attempts: Attempt[] = [];
   for (const attempt of [1, 2] as const) {
     const started = Date.now();
-    const msg = await client.messages
-      .stream({
-        model: config.models.step,
-        max_tokens: MAX_TOKENS,
-        system: SYSTEM,
-        output_config: { effort, format: outputFormat(Step, variant) },
-        messages,
-      })
-      .finalMessage();
+    let msg: Anthropic.Message;
+    try {
+      msg = await client.messages
+        .stream({
+          model: config.models.step,
+          max_tokens: MAX_TOKENS,
+          system: SYSTEM,
+          output_config: { effort, format: outputFormat(Step, variant) },
+          messages,
+        })
+        .finalMessage();
+    } catch (err) {
+      // The SDK has already retried; record the failure so the paid results still get saved.
+      if (!(err instanceof Anthropic.APIError)) throw err;
+      console.log(
+        `${paper.slug}/${paper.concepts[i].slug} ${effort} try ${attempt}: request failed: ${err.message}`,
+      );
+      attempts.push({
+        schema: variant,
+        paper: paper.slug,
+        concept: paper.concepts[i].slug,
+        effort,
+        attempt,
+        ok: false,
+        errors: [`request failed: ${err.message}`],
+        stopReason: null,
+        latencyMs: Date.now() - started,
+        usage: { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 },
+      });
+      break;
+    }
     const latencyMs = Date.now() - started;
     const text = msg.content.find((b) => b.type === "text")?.text ?? "";
     let result: ReturnType<typeof validateStep>;
@@ -289,6 +318,7 @@ async function runStep(
       result = { ok: false, errors: [`not JSON: ${String(err)}`] };
     }
     const a: Attempt = {
+      schema: variant,
       paper: paper.slug,
       concept: paper.concepts[i].slug,
       effort,
@@ -331,37 +361,37 @@ function safeJson(text: string): unknown {
 }
 
 async function main() {
-  process.loadEnvFile(".env");
-  // Explicit, so the SDK never falls back to another credential (an `ant` login profile).
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  // Only .env counts: the key and the host are passed explicitly, so the SDK never uses a
+  // shell ANTHROPIC_API_KEY or ANTHROPIC_BASE_URL, or an `ant` login profile.
+  const apiKey = parseEnv(readFileSync(".env", "utf8")).ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set in .env");
-  const workspace = process.env.ANTHROPIC_WORKSPACE_ID;
-  client = new Anthropic({
-    apiKey,
-    // A key that isn't scoped to a workspace needs the workspace named on every request.
-    defaultHeaders: workspace ? { "anthropic-workspace-id": workspace } : {},
-  });
+  client = new Anthropic({ apiKey, baseURL: "https://api.anthropic.com" });
   const { values } = parseArgs({
     options: {
       probe: { type: "boolean", default: false },
       paper: { type: "string", multiple: true, default: [] },
       effort: { type: "string", default: "low,medium" },
       fixtures: { type: "string" },
-      schema: { type: "string", default: "contract" },
+      schema: { type: "string", default: "one-action" },
     },
   });
   if (values.probe) return probe();
 
+  if (values.paper.length === 0) throw new Error("give at least one --paper");
+  outputFormat(Step, values.schema); // fails fast on an unknown --schema
   const efforts = values.effort.split(",") as Effort[];
   for (const e of efforts)
     if (!EFFORTS.includes(e)) throw new Error(`unknown effort: ${e}`);
+  if (values.fixtures && !efforts.includes(values.fixtures as Effort))
+    throw new Error(`--fixtures ${values.fixtures} isn't one of --effort`);
   const lessons = JSON.parse(
     await readFile("scripts/s3-spike.lessons.json", "utf8"),
   ) as { papers: Paper[] };
 
   const results: Attempt[] = [];
   for (const arg of values.paper) {
-    const [slug, pdf] = arg.split("=");
+    const [slug, ...rest] = arg.split("=");
+    const pdf = rest.join("=");
     const paper = lessons.papers.find((p) => p.slug === slug);
     if (!paper || !pdf) throw new Error(`--paper wants <slug>=<pdf>: ${arg}`);
     const file = await client.files.upload({
