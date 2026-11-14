@@ -27,6 +27,43 @@ export const HIGHLIGHT: Record<
 export const TEXT_SIZE = { s: 24, m: 32, l: 48 } as const;
 export const CELL_FONT = 26;
 
+/**
+ * A text object's box (its highlight, and where arrows stop), from a rough
+ * width: a pure render has no layout pass to measure the text.
+ */
+export function textBox(text: string, fontSize: number) {
+  const width = Math.max(1, [...text].length) * fontSize * 0.62;
+  return { w: width + fontSize, h: fontSize * 1.4 };
+}
+
+/** Font size (px) a latex object's formula is set in: the size of a medium text. */
+export const LATEX_FONT = TEXT_SIZE.m;
+/**
+ * The box a latex object is laid out in, centred on its x,y. KaTeX's size is
+ * only known after layout, so the formula is centred in a box big enough for
+ * any lesson formula; what overflows it is still drawn.
+ */
+export const LATEX_BOX = { w: 1200, h: 400 } as const;
+
+/**
+ * The box arrows stop at for a latex object. KaTeX's size is only known after
+ * layout, so this is a short formula's (about `f(x) = x^2`).
+ */
+export const LATEX_ARROW_BOX = { w: 160, h: 64 } as const;
+
+/**
+ * Arrow look. An end that names a target stops `margin` outside the target's
+ * box, so the head points at the object instead of covering it; a point end
+ * is exact.
+ */
+export const ARROW = {
+  stroke: 3,
+  head: { len: 18, w: 14 },
+  margin: 10,
+  labelFont: 22,
+  labelOffset: 18,
+} as const;
+
 /** The `data-highlight` value of a highlight. */
 export function highlightAttr(color: HighlightColor | null | undefined) {
   return color ?? "none";
