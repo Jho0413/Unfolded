@@ -69,6 +69,10 @@ export function AskDemo({ replay }: { replay: boolean }) {
   );
 
   const step = currentStep(state);
+  // The board stays on the step Ask opened from until Ask closes (section 8);
+  // a go_to_step jump is sent as the next step.
+  const boardStep = state.kind === "asking" ? state.from.step : step;
+  const nextStep = state.kind === "asking" ? state.goTo : undefined;
   const loading =
     state.kind === "loading" ||
     (state.kind === "asking" && state.from.kind === "loading");
@@ -114,10 +118,11 @@ export function AskDemo({ replay }: { replay: boolean }) {
           replay={replay}
           context={{
             planTitles: PLAN.map((p) => p.title),
-            step,
+            step: boardStep,
+            nextStep,
             narrationSoFar: loading ? null : NARRATION,
-            stepGoal: PLAN[step].goal,
-            boardIds: loading ? [] : BOARD_IDS[step],
+            stepGoal: PLAN[boardStep].goal,
+            boardIds: loading ? [] : BOARD_IDS[boardStep],
           }}
           tools={tools}
           onAsk={onAsk}

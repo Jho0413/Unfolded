@@ -473,6 +473,7 @@ The developer gets the full error in the server log, tagged with the route, less
   - the current step's narration up to the point where it was paused (or, while a step is loading, that step's goal from the plan)
   - the ids of the objects on the board
   - the questions asked earlier in this lesson
+  - after a `go_to_step` jump, that step as the next one: the board ids and narration stay those of the frozen board until Ask closes
 
   So the agent knows what "this" means and which ids `highlight` can use. The browser also sends one when a `draw_scene` sketch fails, so the agent answers in words.
 - **Client tools.** Names and parameters are in `shared/tools.ts`. The agent config and `qa/tools.ts` both use that list, and a test checks they match.

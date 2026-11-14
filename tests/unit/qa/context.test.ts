@@ -64,6 +64,20 @@ describe("buildContextUpdate", () => {
   });
 });
 
+describe("buildContextUpdate after a go_to_step jump", () => {
+  it("keeps the board step current and names the next step", () => {
+    const text = buildContextUpdate({ ...base, nextStep: 2 });
+    expect(text).toContain("2. Row times column (current step)");
+    expect(text).toContain("3. Attention (next, after this question)");
+    expect(text).toContain(
+      "After this question the lesson goes to step 3; the board stays on step 2 until then.",
+    );
+    expect(buildContextUpdate({ ...base, nextStep: 1 })).not.toContain(
+      "After this question",
+    );
+  });
+});
+
 describe("narrationUpTo", () => {
   const narration = "Take the first [[row1]]row and the [[col1]]column.";
   const cues = { row1: 1000, col1: 2500 };

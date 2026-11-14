@@ -7,8 +7,13 @@ import { CUE_MARKER_RE } from "@/shared/scene";
 export type QaContext = {
   /** The plan's step titles, in order. */
   planTitles: readonly string[];
-  /** The current step, 0-based. */
+  /** The current step, 0-based: the one on the board. */
   step: number;
+  /**
+   * A step the agent jumped to (go_to_step), 0-based. It loads once Ask
+   * closes; until then the board stays on `step` (section 8).
+   */
+  nextStep?: number;
   /**
    * The current step's narration up to where it was paused (markers stripped,
    * see `narrationUpTo`), or null while the step is loading.
@@ -26,10 +31,20 @@ export type QaContext = {
 export function buildContextUpdate(ctx: QaContext): string {
   const lines: string[] = ["Lesson plan:"];
   ctx.planTitles.forEach((title, i) => {
-    const mark = i === ctx.step ? " (current step)" : "";
+    const mark =
+      i === ctx.step
+        ? " (current step)"
+        : i === ctx.nextStep
+          ? " (next, after this question)"
+          : "";
     lines.push(`${i + 1}. ${title}${mark}`);
   });
   lines.push("");
+  if (ctx.nextStep !== undefined && ctx.nextStep !== ctx.step) {
+    lines.push(
+      `After this question the lesson goes to step ${ctx.nextStep + 1}; the board stays on step ${ctx.step + 1} until then.`,
+    );
+  }
   if (ctx.narrationSoFar !== null) {
     const said = ctx.narrationSoFar.trim();
     lines.push(

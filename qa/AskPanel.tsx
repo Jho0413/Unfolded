@@ -165,9 +165,9 @@ export function AskPanel({
     };
   }, [open, replay, conversation, go, fail]);
 
-  // Tell the agent about every step change while connected.
-  const step = context.step;
-  const sentStep = useRef<number | null>(null);
+  // Tell the agent about every step change (or jump) while connected.
+  const step = `${context.step}:${context.nextStep ?? ""}`;
+  const sentStep = useRef<string | null>(null);
   useEffect(() => {
     if (phase !== "connected") {
       sentStep.current = null;
@@ -261,7 +261,9 @@ export function AskPanel({
               placeholder={connected ? "Type your question" : ""}
               value={draft}
               disabled={!connected}
-              onFocus={() => conversation.setMicMuted(true)}
+              onFocus={() => {
+                if (!textOnly) conversation.setMicMuted(true);
+              }}
               onBlur={() => {
                 if (!textOnly) conversation.setMicMuted(false);
               }}
