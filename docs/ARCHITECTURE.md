@@ -74,7 +74,7 @@ app/
   dev/board/scenes.ts               the dev page's fixed BoardState and demo-m1 scenes
   dev/player/page.tsx               dev only: the player with a fake two-step lesson (player tests); same gate (dev/devOnly.ts)
   dev/player/audio/route.ts         dev only: that lesson's silent audio (or broken, or missing)
-  dev/ask/page.tsx, AskDemo.tsx     dev only: the Ask panel driven by the player machine and a fake three-step lesson (?replay=1 as in a replay run); gated like dev/board
+  dev/ask/page.tsx, AskDemo.tsx     dev only: the Ask panel driven by the player machine and a fake three-step lesson (?replay=1 as in a replay run); same gate
 instrumentation.ts                  register(): validates env once at server start (not at build)
 shared/                             imported by server and browser (the contract)
   scene.ts                          zod schemas: board objects, actions, step, sketch, board state

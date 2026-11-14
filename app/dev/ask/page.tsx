@@ -5,11 +5,10 @@
 //   /dev/ask             the Ask panel, the conversation real or fake per build
 //   /dev/ask?replay=1    as in a replay run: "Q&A needs a connection."
 //
-// Gated like /dev/board: 404 in production unless in fake mode.
+// Production servers answer 404 unless in fake mode (app/dev/devOnly.ts).
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { connection } from "next/server";
-import { fakesEnabled } from "@/lib/fakes";
+import { devPagesEnabled } from "../devOnly";
 import { AskDemo } from "./AskDemo";
 
 export const metadata: Metadata = {
@@ -22,8 +21,7 @@ export default async function DevAskPage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
-  await connection();
-  if (process.env.NODE_ENV === "production" && !fakesEnabled()) notFound();
+  if (!(await devPagesEnabled())) notFound();
   const { replay } = await searchParams;
   return <AskDemo replay={replay === "1"} />;
 }
