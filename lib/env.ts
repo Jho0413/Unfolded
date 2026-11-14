@@ -105,8 +105,8 @@ export type EnvFor<K extends RequiredKey> =
  * `required`, e.g. `npm run make:m1` needs the ElevenLabs keys and not ANTHROPIC_API_KEY.
  * Not cached, so it never stands in for the server's getEnv().
  */
-export function loadEnvFor<K extends RequiredKey>(
-  required: readonly K[],
+export function loadEnvFor<const K extends RequiredKey>(
+  required: readonly [K, ...K[]],
 ): EnvFor<K> {
   return parseEnvNeeding(
     process.env,

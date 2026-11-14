@@ -143,6 +143,21 @@ describe("real mode", () => {
     expect(err.message).toContain(String(status));
   });
 
+  it("a request that times out is a provider error", async () => {
+    stubFetch(async () => {
+      throw new DOMException(
+        "The operation was aborted due to timeout",
+        "TimeoutError",
+      );
+    });
+    const err = (await synthesize("x", real).catch(
+      (e: unknown) => e,
+    )) as TtsError;
+    expect(err).toBeInstanceOf(TtsError);
+    expect(err.reason).toBe("provider");
+    expect(err.message).toContain("TimeoutError");
+  });
+
   it("never puts the key in an error message", async () => {
     stubFetch(async () => new Response(`bad key ${KEY}`, { status: 400 }));
     const a = (await synthesize("x", real).catch((e: unknown) => e)) as Error;
