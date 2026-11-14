@@ -84,7 +84,7 @@ shared/                             imported by server and browser (the contract
 lib/                                server-only (import "server-only")
   config.ts                         model ids, effort, limits, paths: one place
   env.ts                            reads and validates env vars once
-  pipeline/plan.ts, step.ts, sketch.ts, prompts/
+  pipeline/plan.ts, step.ts, sketch.ts, prompts/, outputFormat.ts (the step's structured-output schema)
   narration/cues.ts                 pure: strip markers, cue offsets -> times
   narration/tts.ts                  ElevenLabs TTS with timestamps
   agent/token.ts                    the Q&A agent's conversation token (fixture when FAKE_APIS=1)
@@ -238,9 +238,11 @@ sequenceDiagram
   - The step system prompt must be byte-identical for every step.
   - The plan, goal, signals and (for a sketch) the current board go *after* the document block.
   - The plan and sketch requests use a different output format, so they build their own cache.
-- **Structured output.** Requests stream: `client.messages.stream({ output_config: { format: zodOutputFormat(Step) } })` (the helper is in `@anthropic-ai/sdk/helpers/zod`), then `(await stream.finalMessage()).parsed_output`.
-  - Constraints the API can't enforce (number ranges, item counts) are checked by the SDK with zod after the response arrives, and a failure *throws*. The generator catches it as a rejection.
+- **Structured output.** Requests stream: `client.messages.stream({ output_config: { format } })`, then `await stream.finalMessage()`. For a step, `format` is `lib/pipeline/outputFormat.ts`'s JSON schema (today `zodOutputFormat(Step).schema`, from `@anthropic-ai/sdk/helpers/zod`), kept in its own file so it can be swapped for a simpler one.
+  - The generator checks `stop_reason` first: `refusal` and `max_tokens` fail the step (section 6.2). Otherwise it parses the text itself with `validateStep`, not the SDK's `parsed_output` (whose parser throws before a refusal can be seen). So a schema failure, including constraints the API can't enforce (number ranges, item counts), and a `validate.ts` rejection give the same error list for the one retry.
+  - The retry resends the first request, then Claude's rejected answer (unchanged, thinking included) and the errors, so it reuses the cached paper.
   - Effort per request type (plan, step, sketch) is set in `lib/config.ts`.
+  - The full `Step` schema is currently rejected with "The compiled grammar is too large" (found in S3 and G1); S3 is simplifying it. The rest of the step request (document by `file_id`, 1-hour cache, effort) was accepted on 2026-11-14.
 - **Prompts are generic.** No paper-specific logic, hard-coded concept lists or examples taken from the demo paper, in prompts or code. Paper-specific content lives only in fixtures and demo checks.
 - **Prompts** live in `lib/pipeline/prompts/`. A step prompt receives:
   - the plan and the step's goal
@@ -518,7 +520,7 @@ The developer gets the full error in the server log, tagged with the route, less
 - The mode is picked in this order: `REPLAY_RUN` set → replay; else `FAKE_APIS=1` → fake; else real. An empty value (`KEY=`, as copied from `.env.example`) counts as unset.
 - A build made with `NEXT_PUBLIC_FAKE_APIS=1` (for example, left over from a local `npm run e2e`) refuses to start in real mode, since the browser would use the fake agent: run `npm run build` again first. `next.config.ts` bakes that build-time value in as `BUILT_WITH_BROWSER_FAKES`, so the check never depends on the shell `npm start` runs in. The reverse, `FAKE_APIS=1` on a normal build, starts with a warning.
 - Keys are only read in `lib/` and the API routes, which import `"server-only"`. The browser never sees a key.
-- All of these live in `lib/config.ts`: model ids, effort per request type, `maxNarrationChars`, `maxPdfMb`, `coverTimeoutMs`, `maxBoardObjects` (the cap on the board a sketch request sends, section 8), the image cap per lesson (E1), the agent token's URL, timeout and fixture (section 8), and the `runs/` path.
+- All of these live in `lib/config.ts`: model ids, effort per request type, `maxNarrationChars`, the step request's output cap and timeout, `maxPdfMb`, `coverTimeoutMs`, `maxBoardObjects` (the cap on the board a sketch request sends, section 8), the image cap per lesson (E1), the agent token's URL, timeout and fixture (section 8), and the `runs/` path.
 
 ## 10. Testing: how we prove it works
 
