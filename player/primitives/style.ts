@@ -81,10 +81,21 @@ function setsCurrent(action: Action, current: string | null): boolean {
 }
 
 /**
- * Progress (0..1) of the latest in-progress action of kind `kind` on matrix
- * cell (r, c) that set its `current` highlight or value, or 1 if none: a new
- * highlight or written value fades in. An unhighlight takes effect at once
- * (sceneAt clears the colour when it starts), so it doesn't fade out.
+ * Whether an in-progress action changed matrix cell (r, c): one of its
+ * `cells` (set by sceneAt), or any cell its target covers if `cells` is absent.
+ */
+function changedCell(a: ActiveAction, r: number, c: number): boolean {
+  return a.cells
+    ? a.cells.some(([cr, cc]) => cr === r && cc === c)
+    : coversCell(a.action.target, r, c);
+}
+
+/**
+ * Progress (0..1) of the latest in-progress action of kind `kind` that
+ * changed matrix cell (r, c) and set its `current` highlight or value, or 1
+ * if none: a new highlight or written value fades in, and a cell that already
+ * had it doesn't blink. An unhighlight takes effect at once (sceneAt clears
+ * the colour when it starts), so it doesn't fade out.
  */
 export function cellProgress(
   active: readonly ActiveAction[],
@@ -95,14 +106,14 @@ export function cellProgress(
   current: string | null,
 ): number {
   let p = 1;
-  for (const { action, progress } of active)
+  for (const a of active)
     if (
-      action.do === kind &&
-      action.target.id === id &&
-      coversCell(action.target, r, c) &&
-      setsCurrent(action, current)
+      a.action.do === kind &&
+      a.action.target.id === id &&
+      changedCell(a, r, c) &&
+      setsCurrent(a.action, current)
     )
-      p = progress;
+      p = a.progress;
   return p;
 }
 

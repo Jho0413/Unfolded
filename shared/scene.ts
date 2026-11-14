@@ -234,6 +234,14 @@ export const ActiveAction = z.object({
   action: Action,
   /** How far along the action is, 0..1. */
   progress: z.number().min(0).max(1),
+  /**
+   * For a highlight, unhighlight or write on a matrix: the cells [row, col]
+   * it changed that no later action has changed since. The renderer fades in
+   * only these. Absent for every other action.
+   */
+  cells: z
+    .array(z.tuple([z.number().int().min(0), z.number().int().min(0)]))
+    .optional(),
 });
 export type ActiveAction = z.infer<typeof ActiveAction>;
 
