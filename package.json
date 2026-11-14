@@ -13,6 +13,7 @@
     "e2e": "playwright test"
   },
   "dependencies": {
+    "@elevenlabs/react": "^1.22.1",
     "katex": "^0.19.1",
     "next": "16.4.6",
     "react": "19.3.0",
