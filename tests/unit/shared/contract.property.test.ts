@@ -186,12 +186,17 @@ describe("schema details", () => {
 });
 
 describe("client tools (ARCHITECTURE.md section 8)", () => {
-  it("is one list with the four tools, their waits and their parameters", () => {
+  it("is one list with the board tools and the lesson control tools (#93), their waits and their parameters", () => {
     expect(CLIENT_TOOL_NAMES).toEqual([
       "highlight",
       "go_to_step",
       "draw_scene",
       "simplify_upcoming",
+      "resume_lesson",
+      "pause_lesson",
+      "next_step",
+      "previous_step",
+      "replay_step",
     ]);
     const waits = Object.fromEntries(
       CLIENT_TOOLS.map((t) => [t.name, t.expectsResponse]),
@@ -201,6 +206,11 @@ describe("client tools (ARCHITECTURE.md section 8)", () => {
       go_to_step: true,
       draw_scene: false,
       simplify_upcoming: false,
+      resume_lesson: false,
+      pause_lesson: false,
+      next_step: false,
+      previous_step: false,
+      replay_step: false,
     });
     const params = Object.fromEntries(
       CLIENT_TOOLS.map((t) => [t.name, Object.keys(t.parameters.shape).sort()]),
@@ -210,6 +220,11 @@ describe("client tools (ARCHITECTURE.md section 8)", () => {
       go_to_step: ["step"],
       draw_scene: ["description", "fresh"],
       simplify_upcoming: ["reason"],
+      resume_lesson: [],
+      pause_lesson: [],
+      next_step: [],
+      previous_step: [],
+      replay_step: [],
     });
   });
 

@@ -6,6 +6,10 @@
 //   go_to_step         goToStep(step - 1); "ok" or "no step n"
 //   simplify_upcoming  stub until A1 (returns nothing)
 //   draw_scene         no wait: returns nothing, the sketch is drawn when it arrives (qa/drawScene.ts)
+//   resume_lesson, pause_lesson, next_step, previous_step, replay_step
+//                      no wait: the learner's spoken commands (issue #93), run by `control`
+//                      once the agent has finished speaking (`afterAgentSpeaks`)
+import type { LessonCommand } from "@/player/controls";
 import type { PlayerEvent, TransitionResult } from "@/player/machine";
 import {
   type Action,
@@ -28,6 +32,16 @@ export type ClientToolDeps = {
   send: (event: PlayerEvent) => TransitionResult;
   /** True while the player is `asking`. A tool call can land after Ask closed. */
   isAsking: () => boolean;
+  /**
+   * Carries out a spoken lesson command (closing Ask first if it's open). Without it the
+   * control tools do nothing (e.g. /dev/ask, which has no lesson).
+   */
+  control?: (command: LessonCommand) => void;
+  /**
+   * Runs `fn` once the agent has finished speaking, so the narration never starts over it
+   * (AskApi.afterAgentSpeaks). Defaults to at once.
+   */
+  afterAgentSpeaks?: (fn: () => void) => void;
 } & Pick<
   DrawSceneDeps,
   "askId" | "drawSketch" | "showNotice" | "tellAgent" | "fetch" | "timeoutMs"
@@ -63,11 +77,24 @@ export function createClientTools(deps: ClientToolDeps): QaTools {
       if (!deps.isAsking()) return;
       void drawScene(deps, description, fresh);
     },
+    resume_lesson: () => command(deps, "resume"),
+    pause_lesson: () => command(deps, "pause"),
+    next_step: () => command(deps, "next"),
+    previous_step: () => command(deps, "previous"),
+    replay_step: () => command(deps, "replay"),
     // A1 replaces this with a signal to the server (section 5.4).
     simplify_upcoming: ({ reason }) => {
       console.info("[qa] simplify_upcoming (not built yet):", reason);
     },
   };
+}
+
+/** A control tool: no wait, so nothing goes back to the agent. */
+function command(deps: ClientToolDeps, cmd: LessonCommand): void {
+  const { control } = deps;
+  if (control === undefined) return;
+  const later = deps.afterAgentSpeaks ?? ((fn: () => void) => fn());
+  later(() => control(cmd));
 }
 
 /** Only objects the learner can see can be highlighted. */

@@ -66,7 +66,10 @@ const board: BoardState = {
 const CTX = { stepCount: 3 };
 
 /** The machine, run the way the lesson page runs it. */
-function harness(start: PlayerState) {
+function harness(
+  start: PlayerState,
+  extra: Partial<Parameters<typeof createClientTools>[0]> = {},
+) {
   let state = start;
   const highlights: HighlightAction[] = [];
   const send = (event: PlayerEvent) => {
@@ -84,6 +87,7 @@ function harness(start: PlayerState) {
     showNotice: () => {},
     tellAgent: () => {},
     fetch: vi.fn(() => new Promise<Response>(() => {})),
+    ...extra,
   });
   return { tools, highlights, send, state: () => state };
 }
@@ -250,5 +254,35 @@ describe("draw_scene", () => {
       fresh: false,
     });
     expect(result).toBeUndefined();
+  });
+});
+
+describe("lesson control tools (issue #93)", () => {
+  it.each([
+    ["resume_lesson", "resume"],
+    ["pause_lesson", "pause"],
+    ["next_step", "next"],
+    ["previous_step", "previous"],
+    ["replay_step", "replay"],
+  ] as const)(
+    "%s runs control(%s) once the agent has finished speaking, returning nothing",
+    async (tool, command) => {
+      const control = vi.fn();
+      let later: (() => void) | null = null;
+      const h = harness(asking, {
+        control,
+        afterAgentSpeaks: (fn) => (later = fn),
+      });
+      expect(await h.tools[tool]?.({})).toBeUndefined();
+      expect(control).not.toHaveBeenCalled();
+      later!();
+      expect(control).toHaveBeenCalledExactlyOnceWith(command);
+    },
+  );
+
+  it("without a lesson (no control), they do nothing", async () => {
+    const h = harness(asking);
+    expect(await h.tools.resume_lesson?.({})).toBeUndefined();
+    expect(h.state()).toEqual(asking);
   });
 });

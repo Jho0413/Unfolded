@@ -28,6 +28,9 @@ export const SimplifyUpcomingParams = z.object({
   reason: z.string().min(1).describe("Why the learner needs it simpler"),
 });
 
+/** The lesson control tools take nothing: they act on the step on screen. */
+export const NoParams = z.object({});
+
 export const CLIENT_TOOLS = [
   {
     name: "highlight",
@@ -55,6 +58,39 @@ export const CLIENT_TOOLS = [
     description: "Ask for the upcoming steps to be made simpler.",
     expectsResponse: false,
     parameters: SimplifyUpcomingParams,
+  },
+  // Lesson control (issue #93): the learner's spoken commands. No wait, so the agent never
+  // speaks after one; each acts once the agent has finished speaking.
+  {
+    name: "resume_lesson",
+    description:
+      "Carry on with the lesson from where it stopped (after a go_to_step jump, that step starts).",
+    expectsResponse: false,
+    parameters: NoParams,
+  },
+  {
+    name: "pause_lesson",
+    description: "Hold the lesson where it is until the learner says to carry on.",
+    expectsResponse: false,
+    parameters: NoParams,
+  },
+  {
+    name: "next_step",
+    description: "Skip ahead to the next step; it starts at once.",
+    expectsResponse: false,
+    parameters: NoParams,
+  },
+  {
+    name: "previous_step",
+    description: "Go back to the previous step; it starts at once.",
+    expectsResponse: false,
+    parameters: NoParams,
+  },
+  {
+    name: "replay_step",
+    description: "Say the current step again from its start.",
+    expectsResponse: false,
+    parameters: NoParams,
   },
 ] as const;
 
