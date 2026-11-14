@@ -141,6 +141,9 @@ test.describe("Ask with the fake conversation", () => {
     await page.getByRole("button", { name: "Close" }).click();
     await expect(state(page)).toHaveAttribute("data-state", "loading");
     await expect(state(page)).toHaveAttribute("data-step", "2");
+    await page.getByRole("button", { name: "stepReady" }).click();
+    await expect(state(page)).toHaveAttribute("data-state", "paused");
+    await expect(state(page)).toHaveAttribute("data-step", "2");
   });
 });
 
@@ -156,7 +159,9 @@ test.describe("client tools on /dev/ask (ROADMAP Q4)", () => {
       'highlight {"target_id":"q","row":0} -> ok',
     );
     await expect(
-      page.getByTestId("highlights").locator('[data-target="q,0,"]'),
+      page
+        .getByTestId("highlights")
+        .locator(`[data-target='${JSON.stringify({ id: "q", row: 0 })}']`),
     ).toHaveCount(1);
     await page.getByRole("button", { name: "Close" }).click();
     await expect(page.getByTestId("highlights").locator("li")).toHaveCount(0);

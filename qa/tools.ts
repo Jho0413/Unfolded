@@ -25,11 +25,17 @@ export type ClientToolDeps = {
   highlight: (action: HighlightAction) => void;
   /** Sends an event to the player machine and returns its result, synchronously. */
   send: (event: PlayerEvent) => TransitionResult;
+  /** True while the player is `asking`. A tool call can land after Ask closed. */
+  isAsking: () => boolean;
 };
+
+/** What a tool that changes the board or the step returns after Ask closed. */
+export const ASK_CLOSED = "Ask is closed";
 
 export function createClientTools(deps: ClientToolDeps): QaTools {
   return {
     highlight: ({ target_id, row, col }) => {
+      if (!deps.isAsking()) return ASK_CLOSED;
       const action: HighlightAction = {
         do: "highlight",
         target: { id: target_id, row, col },
@@ -42,7 +48,9 @@ export function createClientTools(deps: ClientToolDeps): QaTools {
     },
     // 1-based, as spoken. While asking, the machine remembers the step and
     // loads it paused once Ask closes (section 6.1).
+    // A late call after Ask closed would start the narration at a new step.
     go_to_step: ({ step }) => {
+      if (!deps.isAsking()) return ASK_CLOSED;
       const result = deps.send({ type: "goToStep", n: step - 1 });
       return result.outcome === "rejected" ? result.message : "ok";
     },

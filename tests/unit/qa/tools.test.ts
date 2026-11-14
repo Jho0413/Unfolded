@@ -6,7 +6,11 @@ import {
   type PlayerState,
   transition,
 } from "@/player/machine";
-import { createClientTools, type HighlightAction } from "@/qa/tools";
+import {
+  ASK_CLOSED,
+  createClientTools,
+  type HighlightAction,
+} from "@/qa/tools";
 import type { BoardObject, BoardState } from "@/shared/scene";
 
 const q: BoardObject = {
@@ -59,6 +63,7 @@ function harness(start: PlayerState) {
     board: () => board,
     highlight: (a) => highlights.push(a),
     send,
+    isAsking: () => state.kind === "asking",
   });
   return { tools, highlights, send, state: () => state };
 }
@@ -145,6 +150,28 @@ describe("go_to_step", () => {
       step: 1,
     });
   });
+});
+
+describe("a tool call that lands after Ask closed", () => {
+  const paused: PlayerState = { kind: "paused", step: 0 };
+
+  it("highlight: Ask is closed, nothing drawn", async () => {
+    const h = harness(paused);
+    expect(await h.tools.highlight?.({ target_id: "q" })).toBe(ASK_CLOSED);
+    expect(h.highlights).toEqual([]);
+  });
+
+  it("go_to_step: Ask is closed, the step doesn't change", async () => {
+    const h = harness(paused);
+    expect(await h.tools.go_to_step?.({ step: 2 })).toBe(ASK_CLOSED);
+    expect(h.state()).toEqual(paused);
+  });
+});
+
+describe("agent config tool names", () => {
+  // ROADMAP Q4: the agent config in agent/ (Q1, area B) must name exactly the
+  // tools in shared/tools.ts. agent/ doesn't exist yet.
+  it.todo("agent/ client tool names equal CLIENT_TOOL_NAMES (needs Q1)");
 });
 
 describe("simplify_upcoming", () => {

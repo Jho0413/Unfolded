@@ -113,7 +113,12 @@ export function AskDemo({ replay }: { replay: boolean }) {
   );
 
   const tools = useMemo(() => {
-    const t = createClientTools({ board, highlight, send });
+    const t = createClientTools({
+      board,
+      highlight,
+      send,
+      isAsking: () => machine.get().kind === "asking",
+    });
     // Log each call and its result for the e2e tests.
     return Object.fromEntries(
       Object.entries(t).map(([name, handler]) => [
@@ -122,13 +127,13 @@ export function AskDemo({ replay }: { replay: boolean }) {
           const result = await (handler as (p: never) => unknown)(p);
           setLog((l) => [
             ...l,
-            `${name} ${JSON.stringify(p)} -> ${String(result)}`,
+            `${name} ${JSON.stringify(p)} -> ${String(result ?? "(no result)")}`,
           ]);
           return result;
         },
       ]),
     ) as typeof t;
-  }, [board, highlight, send]);
+  }, [board, highlight, send, machine]);
 
   const step = currentStep(state);
   // The board stays on the step Ask opened from until Ask closes (section 8);
@@ -193,10 +198,7 @@ export function AskDemo({ replay }: { replay: boolean }) {
         />
         <ul data-testid="highlights">
           {highlights.map((a, i) => (
-            <li
-              key={i}
-              data-target={[a.target.id, a.target.row, a.target.col].join(",")}
-            >
+            <li key={i} data-target={JSON.stringify(a.target)}>
               highlight {JSON.stringify(a.target)}
             </li>
           ))}
