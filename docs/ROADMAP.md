@@ -40,7 +40,7 @@ Goal: keys work, CI checks everything, the contract exists, and the unknowns are
 
 | ID | Task | Depends on | Proven by |
 |---|---|---|---|
-| F0 | Accounts and keys: Anthropic, ElevenLabs and fal accounts with credits. Pick `ELEVENLABS_VOICE_ID`. Share keys privately, never on the board. | none | Each teammate's `.env.local` has the keys, and S1 can call each provider. |
+| F0 | Accounts and keys: Anthropic, ElevenLabs and fal accounts with credits (fal: about 25 US dollars per teammate, so every generation counts). Pick `ELEVENLABS_VOICE_ID`. Share keys privately, never on the board. | none | Each teammate's `.env.local` has the keys, and S1 can call each provider. |
 | F1 | Scaffold Next.js 16 + TypeScript.<br>• ESLint and Prettier, Vitest, fast-check and Playwright, each with one smoke test.<br>• `npm` scripts: `lint`, `typecheck`, `test`, `build`, `e2e`.<br>• GitHub Actions CI on PRs.<br>• `.gitignore`: `runs/`, `evidence/`, `.env.local`.<br>• Branch protection requiring CI, if the plan allows it. | none | CI green on the PR. Real run: the app loads at `localhost:3000`. |
 | F2 | Env and config: `lib/env.ts` (zod, per-mode rules in ARCH §9, checked at server start in `instrumentation.ts`), `.env.example`, `lib/config.ts`, `FAKE_APIS` wiring. | F1 | Unit tests, one per row of the ARCH §9 mode table. `next build` passes with no keys set. |
 | F3 | The contract: `shared/scene.ts`, `shared/lesson.ts`, `shared/tools.ts` (the tool-name list) and `shared/validate.ts`. Also the hand-written step `lib/fakes/fixtures/demo-m1.step.json`. | F1 | One unit test per row of the ARCH §4 validation table. **F3 is accepted only once `demo-m1.step.json` is hand-written against the contract, expresses the whole M1 demo in ARCH §4 (row and column slide together, the pairs multiply, the sum drops into (1,1)), and passes validation.** It's the contract's acceptance test. |
@@ -90,9 +90,11 @@ Goal: upload the Attention paper and get a playable lesson.
 | L1 | Upload page and `POST /api/lessons`: PDF checks, Files API upload, a plan with structured output, saved to `runs/`. The plan is shown as a list of step titles. | G1, F2, C2 | Route tests with PDFs generated in a temp dir (tiny valid, not a PDF, encrypted, over 600 pages, over 32 MB): each upload and plan row in ARCH §7, plus retry-once. Real run: the Attention paper gives a plan that passes the schema, has 5–12 steps, and covers dot product, scaling, softmax, multi-head and positional encoding. |
 | L2 | Prefetch: generate step N+1 while step N plays. | G2, P6 | Playwright with fakes: pressing Next on a prefetched step makes no new generation request. Real run: once warm, Next shows the next step in under 1 s. |
 | L3 | Error states in the UI: player `failed` with Retry, and the upload error messages. | L1, P5 | Playwright with failing fakes: each message in ARCH §7 appears, and Retry works. |
+| S4 | Spike: fal image model for the cover (and later E1). Measure quality and latency, with as few generations as possible. | F0 | The chosen model id in ARCH §11. |
+| L4 | Cover illustration (the early fal moment): one fal image per lesson plan, from the plan's `coverPrompt`, saved to `runs/<id>/`, shown on the plan page and as the lesson page header. Outside the scene contract and `sceneAt`. Hidden when `FAL_KEY` is missing or fal fails or is slow. One image per plan, never regenerated: fal credits are about 25 US dollars per teammate. | L1, S4 | Route tests with the fal fake (never real fal): a cover is saved and returned; a fal error, timeout or missing `FAL_KEY` still returns the plan without a cover; a saved cover isn't generated again. Real run: the plan page and the lesson page show the cover. |
 | C3 | Replay mode: `REPLAY_RUN` serves each step's played version from `runs/` with no provider calls. The upload page redirects to the lesson, and a missing step shows its message. | L1, G2 | Route tests: replay never calls the fakes; a missing step → "This step isn't in the saved run." Real run: the saved demo lesson plays with Wi-Fi off. |
 
-**M3 demo check:** in a real browser, uploading the Attention paper gives a plan, and steps 1–3 play back to back. Then the same run replays with Wi-Fi off.
+**M3 demo check:** in a real browser, uploading the Attention paper gives a plan with its cover illustration, and steps 1–3 play back to back. Then the same run replays with Wi-Fi off.
 
 ## M4: Interrupt and ask
 
@@ -117,12 +119,11 @@ Goal: the learner asks, by voice or by typing, and the tutor answers aloud and d
 | D2 | Demo script (from the brief, including the closing "extends to lectures and concepts" slide) and two timed rehearsals on the demo laptop, one on a phone hotspot. | M4 check, D0 | Two full run-throughs under 3 minutes. Problems found become issues. |
 | D3 | Rehearse the replay fallback: the full demo from `REPLAY_RUN` with Wi-Fi off. | C3, D2 | One full offline run-through. Re-run it after any stretch work merges. |
 
-## Stretch: M5 (adapt) and E1 (fal)
+## Stretch: M5 (adapt) and E1 (fal on the whiteboard)
 
 | ID | Task | Depends on | Proven by |
 |---|---|---|---|
 | A1 | Adaptation:<br>• `POST /api/lessons/[id]/signals` records questions (from the agent's user transcripts and typed text) and `simplify_upcoming` (the real handler replaces the Q4 stub), and bumps the signals version.<br>• The player reports each step as it starts playing.<br>• Stale steps are regenerated. The browser keeps its prefetched copy and plays it if the new version isn't ready when Next is pressed. | Q5, L2 | Unit tests: the cells of ARCH §6.2 marked A1. Playwright with fakes: a question during step N, then Next before N+1's new version is ready, plays the old version without waiting. Real run: after asking about √d, the next step's narration addresses √d. Step v1 and v2 are posted on the board. |
-| S4 | Spike: fal image model for illustrations. Measure quality and latency. | F0 | The chosen model id in ARCH §11. |
-| E1 | fal illustrations: render the `image` primitive. Images are generated alongside TTS and hidden on error. | S4, G2 | Route test: a fal error still gives a playable step. Real run: a clear fal moment in the demo lesson. |
+| E1 | fal illustrations: render the `image` primitive. Images are generated alongside TTS and hidden on error. A cap per lesson in `lib/config.ts` keeps them within the fal budget. | S4, G2 | Route test: a fal error still gives a playable step, and the cap holds. Real run: a clear fal moment in the demo lesson. |
 
 **Stretch demo check:** a question about √d changes the next step, and the demo lesson shows a fal illustration. D3 is re-run afterwards.

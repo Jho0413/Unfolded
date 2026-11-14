@@ -15,7 +15,7 @@ Any change to a decision, a contract or a state machine in this file goes in the
 | Q&A agent LLM | **Picked by spike S2**: two fast options from ElevenLabs' list, compared on the same questions. | It must answer in about a second and call tools reliably. |
 | Agent config | **In the repo** (`agent/`), pushed to ElevenLabs with the official ElevenLabs CLI. | Prompts and tool definitions are reviewed in PRs and can't drift from the browser handlers. |
 | Asking a question | **Voice or a typed message**, sent to the same agent. | A loud venue can break voice, so typing is the fallback. |
-| Media | **fal**, server-side only, for illustrations next to the whiteboard. | Precise diagrams are drawn by code. fal adds imagery. |
+| Media | **fal**, server-side only. One cover illustration per lesson plan (M3), and illustrations on the whiteboard as stretch (E1). Optional: without `FAL_KEY`, images are hidden. | Precise diagrams are drawn by code. fal adds imagery. The budget is about 25 US dollars of fal credits per teammate, so generations are capped and cached. |
 | Avatar | **None** (Anam dropped). | Removes the access risk. The bounties are Track 03 main, ElevenLabs and fal. |
 | Generation | **Fully live**, with step N+1 generated while step N plays. Every run is saved to `runs/` and can be replayed offline. | Live by default, with a safety net if the network fails during judging. |
 | Storage | **No database.** The `runs/<lessonId>/` folder is both the store and the replay set. | Fewer moving parts. |
@@ -36,6 +36,7 @@ flowchart LR
   end
   subgraph API["Next.js API routes (server-only keys)"]
     L["/api/lessons"] --> C[(Claude Sonnet 5.5)]
+    L --> F
     ST["/api/lessons/:id/steps/:n"] --> C
     ST --> E[(ElevenLabs TTS with timestamps)]
     ST --> F[(fal)]
@@ -200,7 +201,8 @@ sequenceDiagram
   participant F as fal
   B->>A: POST /api/lessons (PDF)
   A->>C: Files API upload, then plan request (structured output: LessonPlan)
-  A->>A: save runs/<id>/plan.json + paper file id
+  A->>F: one cover illustration (optional, time-limited)
+  A->>A: save runs/<id>/plan.json + paper file id + cover
   A-->>B: { lessonId, plan }
   B->>A: POST /api/lessons/<id>/steps/0
   A->>C: step request (paper + plan + learner signals) -> Step (zod)
@@ -208,7 +210,7 @@ sequenceDiagram
   par
     A->>E: TTS with timestamps (narration with markers stripped)
   and
-    A->>F: illustrations for image objects
+    A->>F: illustrations for image objects (stretch, E1)
   end
   A->>A: cue offsets -> cue times, save step-0.v1.json + step-0.v1.mp3
   A-->>B: { step, audioUrl, cueTimes }
@@ -230,6 +232,10 @@ sequenceDiagram
   - the plan and the step's goal
   - the previous step's narration if it has been generated, otherwise that step's goal from the plan (needed after a jump)
   - the learner signals (section 5.4)
+- **Cover illustration (fal).** The plan includes a `coverPrompt`. After the plan is saved, the server asks fal for **one** image and saves it as `runs/<id>/cover.<ext>`. The plan page shows it, and the lesson page shows it as a header.
+  - It sits outside the scene contract and `sceneAt`: it's page chrome, not a board object.
+  - The plan route waits for it up to `config.coverTimeoutMs`. If fal is slow, fails or has no `FAL_KEY`, the plan is returned and saved without a cover, and the pages show no image.
+  - Budget: about 25 US dollars of fal credits per teammate. So it's one image per lesson plan, a saved cover is never regenerated, replay never calls fal, and tests use the fal fake.
 - **Files reach the browser through `GET /api/runs/<lessonId>/<file>`.** `runs/` is outside `public/`, and `next start` won't serve files added after the build.
   - The player fetches each step's audio as a blob and plays it from a `blob:` URL. That keeps seeking reliable without HTTP Range support in the route.
   - The route only serves names matching `^[a-z0-9.-]+$` from inside the run folder.
@@ -286,7 +292,7 @@ sceneAt(objects: BoardObject[], timed: { action; startMs; durationMs }[], tMs: n
 
 ### 5.5 Replay safety net
 
-- Everything generated is written to `runs/<lessonId>/`: `plan.json`, `step-<n>.v<k>.json`, the audio, cue times and media for each step, and `signals.json`.
+- Everything generated is written to `runs/<lessonId>/`: `plan.json`, the cover, `step-<n>.v<k>.json`, the audio, cue times and media for each step, and `signals.json`.
 - Steps are **versioned** (`v1`, `v2`, ...) because a signal can regenerate one. `signals.json` records which version of each step started playing.
 - Starting the app with `REPLAY_RUN=<lessonId>`:
   - The upload page redirects to `/lesson/<lessonId>`.
@@ -394,7 +400,7 @@ The developer gets the full error in the server log, tagged with the route, less
 | Plan | Invalid plan twice, refusal, or Claude error | "Couldn't read this paper." | Retry, or another PDF |
 | Step | Any `failed` cause in section 6.2 | "Couldn't make this step." | Retry (player `failed` state) |
 | Step | Replay mode, and the step isn't in the run | "This step isn't in the saved run." | Back, or another step |
-| Step | fal error | Nothing: the step plays without the illustration | The image object is hidden and the error is logged |
+| Plan or step | fal error or timeout, or no `FAL_KEY` | Nothing: the plan or step shows without the illustration | The image is hidden and the error is logged |
 | Player | Browser blocks autoplay | "Press play to start." | Play button |
 | Player | Audio fails to load or decode | "Couldn't play the audio. Retry?" | Retry |
 | Route | `lessonId` doesn't match `^[a-z0-9-]{1,40}$`, or `n` isn't a step in the plan | 400 "No such lesson or step." | Back to upload |
@@ -455,7 +461,7 @@ The developer gets the full error in the server log, tagged with the route, less
 | `ELEVENLABS_API_KEY` | TTS, the token route, the ElevenLabs CLI |
 | `ELEVENLABS_VOICE_ID` | narration and the agent (one voice) |
 | `ELEVENLABS_AGENT_ID` | the token route (from the CLI's tracking file) |
-| `FAL_KEY` | `lib/media/fal.ts` |
+| `FAL_KEY` | `lib/media/fal.ts` (optional: without it, every image is hidden) |
 | `FAKE_APIS` | `1` swaps all three providers for `lib/fakes/` (tests and CI) |
 | `NEXT_PUBLIC_FAKE_APIS` | `1` swaps the browser's agent conversation for the scripted fake. It's inlined at build time, so CI builds with it set. |
 | `REPLAY_RUN` | serve a saved run from `runs/` |
@@ -464,14 +470,14 @@ The developer gets the full error in the server log, tagged with the route, less
 
 | Mode | Required | Not required |
 |---|---|---|
-| Real (`npm start`) | `ANTHROPIC_API_KEY`, `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, `FAL_KEY` | `ELEVENLABS_AGENT_ID` (only the token route needs it; without it, Ask shows "Questions are unavailable right now.") |
+| Real (`npm start`) | `ANTHROPIC_API_KEY`, `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` | `ELEVENLABS_AGENT_ID` (only the token route needs it; without it, Ask shows "Questions are unavailable right now."). `FAL_KEY` (without it, no images: fal can never stop the server from starting) |
 | `FAKE_APIS=1` (tests, CI) | none | all keys |
 | `REPLAY_RUN=<id>` | the run folder exists | all keys (Q&A is off) |
 | `next build` | none: env isn't checked at build | all keys |
 
 - `lib/env.ts` validates the env once, at server start, from `instrumentation.ts` `register()`, with zod. Code behind it trusts the values. A missing required key stops the server, and the error names the key.
 - Keys are only read in `lib/` and the API routes, which import `"server-only"`. The browser never sees a key.
-- All of these live in `lib/config.ts`: model ids, effort per request type, `maxNarrationChars`, `maxPdfMb` and the `runs/` path.
+- All of these live in `lib/config.ts`: model ids, effort per request type, `maxNarrationChars`, `maxPdfMb`, `coverTimeoutMs` and the `runs/` path.
 
 ## 10. Testing: how we prove it works
 
@@ -494,7 +500,7 @@ Each spike is time-boxed to 60 minutes, and its answer is written back into this
 - **S1:** the exact shape of ElevenLabs' timestamps for our narration (how characters are counted, normalisation, whether `alignment` can be null), and latency per step.
 - **S2:** the Q&A agent's LLM, comparing two candidates on latency and tool-calling. Also: whether text-only sessions speak, and how long a `draw_scene` sketch takes.
 - **S3:** whether Sonnet 5.5 writes valid, good `Step` scripts from the Attention paper, and the effort level needed for steps, plans and sketches.
-- **S4 (stretch):** which fal image model to use, and its latency. Download the images into `runs/`, in case fal's URLs expire.
+- **S4:** which fal image model to use for the cover (M3) and for in-scene images (E1, stretch), and its latency. Download the images into `runs/`, in case fal's URLs expire. Keep the generations few: the budget is about 25 US dollars per teammate.
 - **S5:** the ElevenLabs CLI commands that push the agent and its client tools from `agent/`, and how its tracking file records the agent id.
 
 ## Sources
