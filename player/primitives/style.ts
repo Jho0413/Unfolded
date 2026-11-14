@@ -41,9 +41,9 @@ export function highlightAttr(color: HighlightColor | null | undefined) {
  * `active`.
  *
  * `active` is in start order, so the later of a show and a hide takes over
- * from where the earlier one had got to, with no jump: a show during a hide
- * fades back up from the hide's opacity (the max), and a hide during a show
- * fades down from the show's (the min).
+ * with no jump: a show during a hide takes the larger opacity (the object
+ * keeps fading out until the show overtakes), and a hide during a show the
+ * smaller (it keeps fading in until the hide overtakes).
  */
 export function fadeOpacity(
   active: readonly ActiveAction[],

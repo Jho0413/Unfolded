@@ -402,9 +402,21 @@ function undoneByShow(
     .some(
       (later) =>
         later.action.do === "show" &&
+        !isPart(later.action.target) &&
         partKey(later.action.target) === key &&
         tMs >= later.startMs + later.durationMs,
     );
+}
+
+/**
+ * When the earlier actions are taken to be, to judge whether an action
+ * changes the board. A hide takes effect when it ends, so it is judged
+ * against the board then: a shorter hide during a longer one still hides the
+ * object first, so it is active. Anything else is judged against every
+ * earlier action complete, so a show during a hide in progress is active.
+ */
+function beforeAt(e: Entry): number {
+  return e.action.do === "hide" ? e.startMs + e.durationMs : Infinity;
 }
 
 /** Board content only, for comparing two boards. */
@@ -413,12 +425,11 @@ function snapshot(board: Board): string {
 }
 
 /**
- * Whether an action, once complete, changes `before` (the board with every
- * earlier action complete). One that doesn't (a show of a visible object, a
- * highlight in the colour its cells already have, a write of the same value,
- * or any action on an unknown or invalid target) is left out of `active`, so
- * the renderer doesn't fade in what is already there. Earlier actions count
- * as complete so that a show during a hide in progress still fades back in.
+ * Whether an action, once complete, changes `before`. One that doesn't (a
+ * show of a visible object, a highlight in the colour its cells already have,
+ * a write of the same value, or any action on an unknown or invalid target)
+ * is left out of `active`, so the renderer doesn't fade in what is already
+ * there. See `beforeAt` for which board it is judged against.
  */
 function changesBoard(
   before: Board,
@@ -480,7 +491,7 @@ export function sceneAt(
           tMs < e.startMs + e.durationMs &&
           !undoneByShow(started, i, tMs) &&
           changesBoard(
-            run(base, started.slice(0, i), plans, Infinity),
+            run(base, started.slice(0, i), plans, beforeAt(e)),
             e,
             plans[i],
           ),

@@ -673,6 +673,26 @@ describe("sceneAt: an action that changes nothing is never active", () => {
     expect(s.active.map((a) => a.action)).toContainEqual(show.action);
   });
 
+  it("a hide during a show in progress is active (the show would leave it visible)", () => {
+    const hide = at(200, { do: "hide", target: { id: "h" } });
+    const s = sceneAt(
+      board(),
+      [at(0, { do: "show", target: { id: "h" } }), hide],
+      300,
+    );
+    expect(s.active.map((a) => a.action)).toContainEqual(hide.action);
+  });
+
+  it("a shorter hide during a longer one is active (it hides the object first)", () => {
+    const short = at(100, { do: "hide", target: { id: "t" }, durationMs: 200 });
+    const s = sceneAt(
+      board(),
+      [at(0, { do: "hide", target: { id: "t" }, durationMs: 1000 }), short],
+      200,
+    );
+    expect(s.active.map((a) => a.action)).toContainEqual(short.action);
+  });
+
   it("a hide leaves active once a later show of the same object has ended", () => {
     const timed = [
       at(0, { do: "hide", target: { id: "t" }, durationMs: 1000 }),

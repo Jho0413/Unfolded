@@ -1,6 +1,7 @@
 // player/Whiteboard.tsx and its primitives (ROADMAP P3). The browser checks
-// are in tests/e2e/board.spec.ts; these cover the pure helpers and that the
-// dev page's fixed scene is a valid BoardState.
+// are in tests/e2e/board.spec.ts; these cover the pure helpers, that the dev
+// page's fixed scene is a valid BoardState, and what sceneAt's output renders
+// to over time (the fades of overlapping shows and hides, moved copies).
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { FIXED } from "@/app/dev/board/scenes";
@@ -41,11 +42,11 @@ describe("fadeOpacity", () => {
     expect(fadeOpacity([hide(0.5)], { id: "u" })).toBe(1);
     expect(fadeOpacity([hide(0.5)], { id: "t", row: 0 })).toBe(1);
   });
-  it("a show after a hide fades up from the hide's opacity (the max)", () => {
+  it("a show after a hide takes the larger opacity", () => {
     expect(fadeOpacity([hide(0.75), show(0.5)], { id: "t" })).toBe(0.5);
     expect(fadeOpacity([hide(0.5), show(0.25)], { id: "t" })).toBe(0.5);
   });
-  it("a hide after a show fades down from the show's opacity (the min)", () => {
+  it("a hide after a show takes the smaller opacity", () => {
     expect(fadeOpacity([show(0.5), hide(0.25)], { id: "t" })).toBe(0.5);
     expect(fadeOpacity([show(0.9), hide(0.5)], { id: "t" })).toBe(0.5);
   });
@@ -139,6 +140,7 @@ describe("Whiteboard", () => {
   const objects: BoardObject[] = [
     { kind: "matrix", id: "m", x: 100, y: 100, rows: [["1", "2"]] },
     { kind: "text", id: "t", x: 500, y: 500, text: "hi" },
+    { kind: "text", id: "h", x: 700, y: 500, text: "later", hidden: true },
   ];
   const mid = (action: Action): string => {
     const timed: TimedAction[] = [{ action, startMs: 0, durationMs: 400 }];
@@ -146,48 +148,81 @@ describe("Whiteboard", () => {
       <Whiteboard state={sceneAt(objects, timed, 200)} />,
     );
   };
-  /** `t`'s rendered opacity at each time, for a hide then a show of it. */
-  const showDuringHide = (
-    hide: [number, number],
-    show: [number, number],
+  /** An object's rendered opacity at each time, given [do, startMs, durationMs] fades of it. */
+  const opacities = (
+    id: string,
+    fades: ["show" | "hide", number, number][],
     times: number[],
   ) => {
-    const timed: TimedAction[] = [
-      {
-        action: { do: "hide", target: { id: "t" }, durationMs: hide[1] },
-        startMs: hide[0],
-        durationMs: hide[1],
-      },
-      {
-        action: { do: "show", target: { id: "t" }, durationMs: show[1] },
-        startMs: show[0],
-        durationMs: show[1],
-      },
-    ];
+    const timed: TimedAction[] = fades.map(([action, startMs, durationMs]) => ({
+      action: { do: action, target: { id }, durationMs },
+      startMs,
+      durationMs,
+    }));
+    const pattern = new RegExp(
+      `data-object-id="${id}"[^>]*data-opacity="([^"]+)"`,
+    );
     return times.map((tMs) =>
       Number(
         renderToStaticMarkup(
           <Whiteboard state={sceneAt(objects, timed, tMs)} />,
-        ).match(/data-object-id="t"[^>]*data-opacity="([^"]+)"/)?.[1],
+        ).match(pattern)?.[1],
       ),
     );
   };
-  it("a show during a hide fades back up from where the hide got to, with no jump", () => {
-    // Hide 0..400, show 200..600: down to 0.5, the hide carries on to 0.25,
-    // then the show takes over.
+  it("a show during a hide takes over with no jump: it fades in once it overtakes the hide", () => {
+    // Hide 0..400, show 200..600: the hide carries on down to 0.25, then the
+    // show's rising opacity overtakes it.
     expect(
-      showDuringHide([0, 400], [200, 400], [199, 200, 300, 399, 400, 600]),
+      opacities(
+        "t",
+        [
+          ["hide", 0, 400],
+          ["show", 200, 400],
+        ],
+        [199, 200, 300, 399, 400, 600],
+      ),
     ).toEqual([0.5, 0.5, 0.25, 0.5, 0.5, 1]);
   });
   it("a show that ends before the hide it interrupted leaves the object fully visible", () => {
     // Hide 0..1000, show 300..700: the hide no longer fades it after 700.
     expect(
-      showDuringHide(
-        [0, 1000],
-        [300, 400],
+      opacities(
+        "t",
+        [
+          ["hide", 0, 1000],
+          ["show", 300, 400],
+        ],
         [299, 300, 500, 699, 700, 999, 1000],
       ),
     ).toEqual([0.7, 0.7, 0.5, 1, 1, 1, 1]);
+  });
+  it("a hide during a show takes over with no jump: it fades out once it overtakes the show", () => {
+    // h starts hidden. Show 0..400, hide 200..600: the show carries on up to
+    // 0.75, then the hide's falling opacity overtakes it.
+    expect(
+      opacities(
+        "h",
+        [
+          ["show", 0, 400],
+          ["hide", 200, 400],
+        ],
+        [199, 200, 300, 399, 400, 600],
+      ),
+    ).toEqual([0.5, 0.5, 0.75, 0.5, 0.5, 0]);
+  });
+  it("a shorter hide during a longer one fades the object out by its own end, with no jump", () => {
+    // Hide 0..1000, hide 100..300: the shorter hide takes over (the min).
+    expect(
+      opacities(
+        "t",
+        [
+          ["hide", 0, 1000],
+          ["hide", 100, 200],
+        ],
+        [99, 200, 299, 300, 999],
+      ),
+    ).toEqual([0.9, 0.5, 0.01, 0, 0]);
   });
   it("a show of a visible object doesn't blink: it stays fully opaque", () => {
     const html = mid({ do: "show", target: { id: "t" }, durationMs: 400 });
