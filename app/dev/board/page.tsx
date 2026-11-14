@@ -5,12 +5,12 @@
 //   /dev/board?scene=m1&t=3400              demo-m1 at 3400 ms, via sceneAt
 //   /dev/board?scene=m1-late-highlight&t=…  demo-m1 with a highlight after the slide
 //
-// Production builds answer 404 unless FAKE_APIS=1 (how e2e and CI run the
-// production build), so it is never reachable in a real `npm start`.
+// Production builds answer 404 unless FAKE_APIS=1 (app/dev/devOnly.ts).
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Whiteboard } from "@/player/Whiteboard";
+import { devPagesEnabled } from "../devOnly";
 import { M1_CUE_TIMES, SCENES, isScene, sceneState } from "./scenes";
 
 export const metadata: Metadata = {
@@ -27,8 +27,7 @@ export default async function DevBoardPage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
-  if (process.env.NODE_ENV === "production" && process.env.FAKE_APIS !== "1")
-    notFound();
+  if (!devPagesEnabled()) notFound();
 
   const params = await searchParams;
   const sceneParam = first(params.scene) ?? "fixed";
