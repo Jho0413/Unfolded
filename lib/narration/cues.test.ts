@@ -194,9 +194,46 @@ describe("stripMarkers", () => {
   });
 });
 
+describe("cue names that collide with Object.prototype", () => {
+  it("A cue named like an Object.prototype key (constructor): it gets its own time, like any other cue", () => {
+    const narration = "Call the [[constructor]]constructor now";
+    const { text } = stripMarkers(narration);
+    const times = narrationCueTimes(narration, byCodePoint(text));
+    expect(times).toEqual({ constructor: at(9) });
+  });
+
+  it("a duplicate cue named constructor keeps the first time", () => {
+    const { text, cues } = stripMarkers(
+      "[[constructor]]one [[constructor]]two",
+    );
+    expect(cueTimes(text, cues, byCodePoint(text))).toEqual({ constructor: 0 });
+  });
+
+  it("cues named __proto__, toString and hasOwnProperty get own times", () => {
+    // The marker regex can't produce these names, but cueTimes takes any cue.
+    const text = "one two three";
+    const cues = [
+      { cue: "__proto__", offset: 0 },
+      { cue: "toString", offset: 4 },
+      { cue: "hasOwnProperty", offset: 8 },
+    ];
+    const times = cueTimes(text, cues, byCodePoint(text));
+    expect(Object.getPrototypeOf(times)).toBe(Object.prototype);
+    expect(Object.keys(times)).toEqual(cues.map((c) => c.cue));
+    expect(times.__proto__).toBe(at(0));
+    expect(times.toString).toBe(at(4));
+    expect(times.hasOwnProperty).toBe(at(8));
+  });
+});
+
 // ------------------------------------------------------------ properties
 
 const cueName = fc.stringMatching(/^[a-z][a-z0-9_]{0,31}$/);
+/** Cue names, often ones that Object.prototype already has (constructor, __proto__, ...). */
+const cueNameOrProtoKey = fc.oneof(
+  cueName,
+  fc.constantFrom(...Object.getOwnPropertyNames(Object.prototype)),
+);
 const glyph = fc.constantFrom(
   ..."abcxyzABC.,!?'0123456789-",
   "é",
@@ -347,6 +384,35 @@ describe("properties (fast-check)", () => {
           expect(times[c.cue]).toBe(want);
         }
       }),
+    );
+  });
+
+  it("renaming cues to names on Object.prototype changes no time", () => {
+    fc.assert(
+      fc.property(
+        textWithCues,
+        fc.uniqueArray(cueNameOrProtoKey, { minLength: 1, maxLength: 6 }),
+        ({ text, cues }, names) => {
+          // Cue i is named names[i % names.length]: duplicates included.
+          const safe = cues.map((c, i) => ({ ...c, cue: `c${i}` }));
+          const risky = cues.map((c, i) => ({
+            ...c,
+            cue: names[i % names.length],
+          }));
+          const alignment = byCodePoint(text);
+          const want = cueTimes(text, safe, alignment);
+          const times = cueTimes(text, risky, alignment);
+
+          const used = [...new Set(risky.map((c) => c.cue))];
+          expect(Object.getPrototypeOf(times)).toBe(Object.prototype);
+          expect(Object.keys(times).sort()).toEqual(used.sort());
+          for (const cue of used) {
+            const first = risky.findIndex((c) => c.cue === cue);
+            expect(Object.hasOwn(times, cue)).toBe(true);
+            expect(times[cue]).toBe(want[`c${first}`]);
+          }
+        },
+      ),
     );
   });
 });

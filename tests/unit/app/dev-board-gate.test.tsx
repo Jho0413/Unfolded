@@ -1,0 +1,93 @@
+// The dev-only /dev/board page (ARCHITECTURE.md sections 3 and 9) is not
+// reachable in a production server unless in fake mode (lib/env.ts:
+// FAKE_APIS=1 without REPLAY_RUN), which is how e2e and CI run it.
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import DevBoardPage from "@/app/dev/board/page";
+import { resetEnvForTests } from "@/lib/env";
+
+// connection() resolves once a request arrives. During `next build`'s
+// prerender it never does, so prerendering stops there.
+const { connection } = vi.hoisted(() => ({
+  connection: vi.fn(() => Promise.resolve()),
+}));
+vi.mock("next/server", () => ({ connection }));
+
+// Replay mode needs a saved run folder: point config.runsDir at a temp one.
+const { runsDir } = vi.hoisted(() => ({ runsDir: { path: "" } }));
+vi.mock("@/lib/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/config")>();
+  return {
+    ...actual,
+    config: {
+      ...actual.config,
+      get runsDir() {
+        return runsDir.path;
+      },
+    },
+  };
+});
+runsDir.path = mkdtempSync(path.join(tmpdir(), "dev-board-gate-"));
+mkdirSync(path.join(runsDir.path, "saved-run"));
+afterAll(() => rmSync(runsDir.path, { recursive: true, force: true }));
+
+const props = { searchParams: Promise.resolve({}) };
+
+/** A production server in real mode: keys set, no fakes (lib/env.ts). */
+function realMode() {
+  vi.stubEnv("NODE_ENV", "production");
+  vi.stubEnv("FAKE_APIS", undefined);
+  vi.stubEnv("NEXT_PUBLIC_FAKE_APIS", undefined);
+  vi.stubEnv("BUILT_WITH_BROWSER_FAKES", undefined);
+  vi.stubEnv("REPLAY_RUN", undefined);
+  vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+  vi.stubEnv("ELEVENLABS_API_KEY", "test-key");
+  vi.stubEnv("ELEVENLABS_VOICE_ID", "test-voice");
+}
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  resetEnvForTests();
+  connection.mockReset();
+});
+
+describe("/dev/board gate", () => {
+  it("404s in production without FAKE_APIS", async () => {
+    realMode();
+    await expect(DevBoardPage(props)).rejects.toThrow(
+      /NEXT_HTTP_ERROR_FALLBACK;404/,
+    );
+  });
+  it("renders in production with FAKE_APIS=1", async () => {
+    realMode();
+    vi.stubEnv("FAKE_APIS", "1");
+    vi.stubEnv("BUILT_WITH_BROWSER_FAKES", "1"); // as e2e and CI build it
+    await expect(DevBoardPage(props)).resolves.toBeTruthy();
+  });
+  it("404s in production when REPLAY_RUN wins over FAKE_APIS", async () => {
+    realMode();
+    vi.stubEnv("FAKE_APIS", "1");
+    vi.stubEnv("REPLAY_RUN", "saved-run");
+    await expect(DevBoardPage(props)).rejects.toThrow(
+      /NEXT_HTTP_ERROR_FALLBACK;404/,
+    );
+  });
+  it("renders outside production", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    await expect(DevBoardPage(props)).resolves.toBeTruthy();
+  });
+  it("is decided per request, not at build time: a prerender never reaches the gate", async () => {
+    realMode();
+    connection.mockImplementation(() => new Promise(() => {}));
+    let settled = false;
+    void DevBoardPage(props).then(
+      () => (settled = true),
+      () => (settled = true),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(connection).toHaveBeenCalled();
+    expect(settled).toBe(false);
+  });
+});

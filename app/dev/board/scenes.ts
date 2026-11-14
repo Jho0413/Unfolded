@@ -13,9 +13,10 @@ import { sceneAt, type TimedAction, timeline } from "@/player/sceneAt";
  * A fixed BoardState covering every matrix, text, latex and arrow feature:
  * row, column and cell highlights in both colours, a whole-matrix highlight,
  * text sizes, a highlighted text, a hidden object, a show and a hide in
- * progress, a copy of a row that carries its source cells' highlight, a
- * highlighted formula, tex KaTeX can't parse, tex that tries to link out, an
- * arrow into the moved row's copy, and a highlighted point-to-point arrow.
+ * progress, copies of a row and of a single cell that carry their source
+ * cells' highlight, a highlighted formula, tex KaTeX can't parse, tex that
+ * tries to link out, an arrow into the moved row's copy, and a highlighted
+ * point-to-point arrow.
  */
 export const FIXED: BoardState = {
   objects: [
@@ -183,7 +184,10 @@ export const FIXED: BoardState = {
       highlight: "warn",
     },
   ],
-  copies: [{ source: { id: "m", row: 1 }, x: 900, y: 560, visible: true }],
+  copies: [
+    { source: { id: "m", row: 1 }, x: 900, y: 560, visible: true },
+    { source: { id: "m", row: 2, col: 0 }, x: 1150, y: 560, visible: true },
+  ],
   active: [
     {
       action: { do: "hide", target: { id: "fading" }, durationMs: 400 },

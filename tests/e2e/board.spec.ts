@@ -107,6 +107,18 @@ test.describe("fixed BoardState", () => {
     expect(await numberAttr(row, "data-cy")).toBe(560);
   });
 
+  test("copy of a single cell carries its value and highlight", async ({
+    page,
+  }) => {
+    const one = copy(page, "m:r2c0");
+    await expect(one).toBeVisible();
+    await expect(one.locator("[data-cell]")).toHaveCount(1);
+    await expect(cell(one, 2, 0)).toHaveAttribute("data-value", "7");
+    await expect(cell(one, 2, 0)).toHaveAttribute("data-highlight", "warn");
+    expect(await numberAttr(one, "data-cx")).toBe(1150);
+    expect(await numberAttr(one, "data-cy")).toBe(560);
+  });
+
   test("latex: KaTeX formula centred on its x,y, with a highlight", async ({
     page,
   }) => {

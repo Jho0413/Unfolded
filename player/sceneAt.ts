@@ -54,6 +54,13 @@ interface Board {
   copyByKey: Map<string, PartCopy>;
 }
 
+/** The colour a highlight sets: its own, or accent by default. The renderer uses it too. */
+export function highlightColor(action: {
+  color?: HighlightColor;
+}): HighlightColor {
+  return action.color ?? "accent";
+}
+
 /** A part's key, "a:r0", "a:c1" or "a:r0c1"; the renderer uses it to name copies. */
 export function partKey(t: Target): string {
   return `${t.id}:${t.row !== undefined ? `r${t.row}` : ""}${
@@ -61,7 +68,8 @@ export function partKey(t: Target): string {
   }`;
 }
 
-function isPart(t: Target): boolean {
+/** Whether a target names a part of a matrix (a row, column or cell), not a whole object. */
+export function isPart(t: Target): boolean {
   return t.row !== undefined || t.col !== undefined;
 }
 
@@ -113,16 +121,22 @@ function matrixPart(
   return { state, matrix };
 }
 
-/** Cells (r, c) a target covers in its matrix: the whole matrix, a row, a column or one cell. */
+/**
+ * Whether a target covers cell (r, c) of its matrix: the whole matrix, the
+ * cell's row or column, or the cell itself. The renderer uses it too.
+ */
+export function coversCell(t: Target, r: number, c: number): boolean {
+  return (
+    (t.row === undefined || t.row === r) && (t.col === undefined || t.col === c)
+  );
+}
+
+/** Cells (r, c) a target covers in its matrix. */
 function cellsOf(matrix: MatrixObject, t: Target): [number, number][] {
   const out: [number, number][] = [];
   matrix.rows.forEach((row, r) =>
     row.forEach((_, c) => {
-      if (
-        (t.row === undefined || t.row === r) &&
-        (t.col === undefined || t.col === c)
-      )
-        out.push([r, c]);
+      if (coversCell(t, r, c)) out.push([r, c]);
     }),
   );
   return out;
@@ -299,7 +313,7 @@ function apply(
       }
       break;
     case "highlight":
-      setHighlight(board, t, action.color ?? "accent", undefined);
+      setHighlight(board, t, highlightColor(action), undefined);
       break;
     case "unhighlight":
       setHighlight(board, t, null, action.color);
@@ -358,28 +372,6 @@ function planMove(board: Board, action: Action): MovePlan | undefined {
   return from && to ? { from, to } : undefined;
 }
 
-/**
- * Whether an action names a real target (an object, or an in-range part of a
- * matrix), so it belongs in `active`. Ignored actions never do.
- */
-function targetsValid(
-  base: Board,
-  action: Action,
-  plan: MovePlan | undefined,
-): boolean {
-  const t = action.target;
-  if (!base.byId.has(t.id)) return false;
-  if (isPart(t) && !matrixPart(base, t)) return false;
-  if (action.do === "move") return plan !== undefined;
-  if (action.do === "show") return !isPart(t);
-  if (action.do === "write") {
-    const kind = base.byId.get(t.id)?.object.kind;
-    if (kind === "text") return !isPart(t);
-    return kind === "matrix" && t.row !== undefined && t.col !== undefined;
-  }
-  return true;
-}
-
 /** Applies `entries` (all started by `tMs`) to a copy of `base`, in order. */
 function run(
   base: Board,
@@ -393,6 +385,63 @@ function run(
 }
 
 /**
+ * Whether entry `i` is a hide that a later show of the same object has
+ * already finished undoing by `tMs`. The show applies after it, so the object
+ * ends visible: the hide no longer fades anything and leaves `active`.
+ */
+function undoneByShow(
+  started: readonly Entry[],
+  i: number,
+  tMs: number,
+): boolean {
+  const { action } = started[i];
+  if (action.do !== "hide") return false;
+  const key = partKey(action.target);
+  return started
+    .slice(i + 1)
+    .some(
+      (later) =>
+        later.action.do === "show" &&
+        !isPart(later.action.target) &&
+        partKey(later.action.target) === key &&
+        tMs >= later.startMs + later.durationMs,
+    );
+}
+
+/**
+ * When the earlier actions are taken to be, to judge whether an action
+ * changes the board. A hide takes effect when it ends, so it is judged
+ * against the board then: a shorter hide during a longer one still hides the
+ * object first, so it is active. Anything else is judged against every
+ * earlier action complete, so a show during a hide in progress is active.
+ */
+function beforeAt(e: Entry): number {
+  return e.action.do === "hide" ? e.startMs + e.durationMs : Infinity;
+}
+
+/** Board content only, for comparing two boards. */
+function snapshot(board: Board): string {
+  return JSON.stringify([board.states, board.copies]);
+}
+
+/**
+ * Whether an action, once complete, changes `before`. One that doesn't (a
+ * show of a visible object, a highlight in the colour its cells already have,
+ * a write of the same value, or any action on an unknown or invalid target)
+ * is left out of `active`, so the renderer doesn't fade in what is already
+ * there. See `beforeAt` for which board it is judged against.
+ */
+function changesBoard(
+  before: Board,
+  e: Entry,
+  plan: MovePlan | undefined,
+): boolean {
+  const after = cloneBoard(before);
+  apply(after, e, 1, plan);
+  return snapshot(after) !== snapshot(before);
+}
+
+/**
  * The board at `tMs`: `objects` as the step starts, with every action of
  * `timed` that has started by then applied. Actions apply in start order;
  * actions that start at the same time apply in their array order.
@@ -400,8 +449,8 @@ function run(
  * - `show`, `highlight`, `unhighlight` and `write` take effect when they
  *   start; `hide` when it ends. `move` slides linearly from where its target
  *   was when the move started to where its anchor was then.
- * - `active` lists the actions in progress (start <= t < start + duration),
- *   with how far along they are, 0..1.
+ * - `active` lists the actions in progress (start <= t < start + duration)
+ *   that change the board, with how far along they are, 0..1.
  * - Actions on unknown or invalid targets are ignored (validate.ts rejects
  *   them before they reach the player).
  */
@@ -440,7 +489,12 @@ export function sceneAt(
         (e, i) =>
           e.durationMs > 0 &&
           tMs < e.startMs + e.durationMs &&
-          targetsValid(base, e.action, plans[i]),
+          !undoneByShow(started, i, tMs) &&
+          changesBoard(
+            run(base, started.slice(0, i), plans, beforeAt(e)),
+            e,
+            plans[i],
+          ),
       )
       .map((e) => ({
         action: structuredClone(e.action),

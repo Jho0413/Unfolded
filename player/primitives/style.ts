@@ -7,6 +7,7 @@ import type {
   HighlightColor,
   Target,
 } from "@/shared/scene";
+import { coversCell, highlightColor, isPart, partKey } from "@/player/sceneAt";
 
 /** Light theme (ARCHITECTURE.md section 1). */
 export const INK = "#1f2937";
@@ -75,34 +76,34 @@ export function highlightAttr(color: HighlightColor | null | undefined) {
   return color ?? "none";
 }
 
-/** Whether an action target names exactly this part (or whole object). */
-export function sameTarget(a: Target, b: Target): boolean {
-  return a.id === b.id && a.row === b.row && a.col === b.col;
-}
-
-/** Whether a target covers cell (r, c) of matrix `id`. */
-export function coversCell(t: Target, id: string, r: number, c: number) {
-  return (
-    t.id === id &&
-    (t.row === undefined || t.row === r) &&
-    (t.col === undefined || t.col === c)
-  );
-}
-
 /**
  * Opacity of a whole object or a copy: a `show` in progress fades it in and a
  * `hide` in progress fades it out (sceneAt keeps it visible until the hide
- * ends). 1 when nothing is in progress.
+ * ends). 1 when nothing is in progress. A show of an object already visible
+ * never fades from 0: sceneAt leaves actions that change nothing out of
+ * `active`.
+ *
+ * `active` is in start order, so the later of a show and a hide takes over
+ * with no jump: a show during a hide takes the larger opacity (the object
+ * keeps fading out until the show overtakes), and a hide during a show the
+ * smaller (it keeps fading in until the hide overtakes).
  */
 export function fadeOpacity(
   active: readonly ActiveAction[],
   target: Target,
 ): number {
   let opacity = 1;
+  let hiding = false;
   for (const { action, progress } of active) {
-    if (!sameTarget(action.target, target)) continue;
-    if (action.do === "show") opacity = Math.min(opacity, progress);
-    if (action.do === "hide") opacity = Math.min(opacity, 1 - progress);
+    if (partKey(action.target) !== partKey(target)) continue;
+    if (action.do === "hide") {
+      opacity = Math.min(opacity, 1 - progress);
+      hiding = true;
+    }
+    if (action.do === "show")
+      opacity = hiding
+        ? Math.max(opacity, progress)
+        : Math.min(opacity, progress);
   }
   return opacity;
 }
@@ -114,7 +115,7 @@ export function fadeOpacity(
  * action whose result was since overwritten.
  */
 function setsCurrent(action: Action, current: string | null): boolean {
-  if (action.do === "highlight") return (action.color ?? "accent") === current;
+  if (action.do === "highlight") return highlightColor(action) === current;
   if (action.do === "write") return action.value === current;
   return false;
 }
@@ -137,7 +138,8 @@ export function cellProgress(
   for (const { action, progress } of active)
     if (
       action.do === kind &&
-      coversCell(action.target, id, r, c) &&
+      action.target.id === id &&
+      coversCell(action.target, r, c) &&
       setsCurrent(action, current)
     )
       p = progress;
@@ -156,8 +158,7 @@ export function objectProgress(
     if (
       action.do === kind &&
       action.target.id === id &&
-      action.target.row === undefined &&
-      action.target.col === undefined &&
+      !isPart(action.target) &&
       setsCurrent(action, current)
     )
       p = progress;
