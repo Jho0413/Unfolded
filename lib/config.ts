@@ -21,6 +21,18 @@ export const config = {
   } satisfies Record<string, Effort>,
   /** Narration cap after cue markers are stripped (`narration too long`, ARCHITECTURE.md section 4). */
   maxNarrationChars: 1500,
+  /** A step request (ARCHITECTURE.md sections 5.1 and 6.2). */
+  step: {
+    /** Output cap, thinking included. A cut-off fails the step. */
+    maxTokens: 32_000,
+    /**
+     * Deadline for one attempt, the SDK's own retries included, until the whole streamed
+     * answer is in (S3 may tune it). The SDK's `timeout` only covers waiting for headers.
+     */
+    timeoutMs: 180_000,
+    /** Served when FAKE_APIS=1, in the Messages API's response shape. */
+    fixture: "claude-step.message.json",
+  },
   /** Upload cap: our own choice, not Claude's limit (ARCHITECTURE.md section 5.1). */
   maxPdfMb: 32,
   /** How long the plan route waits for the fal cover before returning without it. */
@@ -39,8 +51,14 @@ export const config = {
     /** Served when FAKE_APIS=1, in ElevenLabs' response shape. */
     fixture: "elevenlabs-conversation-token.json",
   },
-  /** One folder per lesson: the store and the replay set (ARCHITECTURE.md section 5.5). */
-  runsDir: path.join(process.cwd(), "runs"),
+  /**
+   * One folder per lesson: the store and the replay set (ARCHITECTURE.md section 5.5).
+   * RUNS_DIR moves it (relative to the project), so e2e never touches the real runs/.
+   */
+  runsDir: path.resolve(
+    /* turbopackIgnore: true */ process.cwd(),
+    process.env.RUNS_DIR || "runs",
+  ),
   /** Recorded provider responses served when FAKE_APIS=1 (ARCHITECTURE.md section 10). */
   fixturesDir: path.join(process.cwd(), "lib", "fakes", "fixtures"),
 } as const;

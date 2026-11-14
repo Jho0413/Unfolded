@@ -1,7 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { CLIENT_TOOL_NAMES, CLIENT_TOOLS } from "@/shared/tools";
-import { z } from "zod";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { CELL, cellCentre, OBJECT_ID_RE, Sketch, Step } from "@/shared/scene";
 import { LessonPlan, LessonPlanOutput } from "@/shared/lesson";
 import { parseNarration } from "@/shared/validate";
@@ -101,9 +101,10 @@ describe("geometry", () => {
 });
 
 describe("schema details", () => {
+  // The schema the SDK sends as output_config.format, not z.toJSONSchema's own output (#27).
   it("the Step and Sketch JSON schemas use anyOf, never oneOf (structured output doesn't list oneOf)", () => {
     for (const schema of [Step, Sketch]) {
-      const json = JSON.stringify(z.toJSONSchema(schema, { io: "input" }));
+      const json = JSON.stringify(zodOutputFormat(schema).schema);
       expect(json).not.toContain('"oneOf"');
       expect(json).toContain('"anyOf"');
     }

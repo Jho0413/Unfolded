@@ -11,7 +11,8 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "e2e": "playwright test",
-    "spike:s3": "tsx --conditions=react-server scripts/s3-spike.ts"
+    "spike:s3": "tsx --conditions=react-server scripts/s3-spike.ts",
+    "agent:push": "sh -c \"set -a; . ./.env.local; set +a; cd agent && elevenlabs tools push && elevenlabs agents push\" && prettier --write agent"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",
@@ -24,6 +25,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@elevenlabs/cli": "1.11.0",
     "@playwright/test": "^1.65.1",
     "@types/node": "^22.20.5",
     "@types/react": "^19",

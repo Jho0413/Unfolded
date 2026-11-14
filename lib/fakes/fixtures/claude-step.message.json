@@ -1,0 +1,30 @@
+{
+  "id": "msg_fake_step",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-5-5",
+  "container": null,
+  "diagnostics": null,
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"title\":\"Multiplying two matrices\",\"narration\":\"To multiply A by B, take the first [[row]]row of A and the first [[col]]column of B. [[slide]]Slide them together. Now multiply the pairs: [[pair1]]one times five, and [[pair2]]two times seven. [[add]]Add them up, and the [[total]]total is nineteen. [[drop]]It drops into the first cell of the result. [[done]]That's one entry of the product done.\",\"objects\":[{\"kind\":\"matrix\",\"id\":\"a\",\"x\":160,\"y\":160,\"rows\":[[\"1\",\"2\"],[\"3\",\"4\"]],\"label\":\"A\"},{\"kind\":\"text\",\"id\":\"times\",\"x\":364,\"y\":208,\"text\":\"×\",\"size\":\"l\"},{\"kind\":\"matrix\",\"id\":\"b\",\"x\":440,\"y\":160,\"rows\":[[\"5\",\"6\"],[\"7\",\"8\"]],\"label\":\"B\"},{\"kind\":\"text\",\"id\":\"equals\",\"x\":1140,\"y\":208,\"text\":\"=\",\"size\":\"l\"},{\"kind\":\"matrix\",\"id\":\"c\",\"x\":1200,\"y\":160,\"rows\":[[\"\",\"\"],[\"\",\"\"]],\"label\":\"C\"},{\"kind\":\"text\",\"id\":\"p1\",\"x\":850,\"y\":330,\"text\":\"1·5\",\"hidden\":true},{\"kind\":\"text\",\"id\":\"p2\",\"x\":1000,\"y\":330,\"text\":\"2·7\",\"hidden\":true},{\"kind\":\"text\",\"id\":\"sum\",\"x\":925,\"y\":420,\"text\":\"1·5 + 2·7\",\"size\":\"l\",\"hidden\":true}],\"actions\":[{\"cue\":\"row\",\"do\":\"highlight\",\"target\":{\"id\":\"a\",\"row\":0},\"durationMs\":300},{\"cue\":\"col\",\"do\":\"highlight\",\"target\":{\"id\":\"b\",\"col\":0},\"durationMs\":300},{\"cue\":\"slide\",\"do\":\"move\",\"target\":{\"id\":\"a\",\"row\":0},\"to\":{\"x\":850,\"y\":184},\"durationMs\":800},{\"cue\":\"slide\",\"do\":\"move\",\"target\":{\"id\":\"b\",\"col\":0},\"to\":{\"x\":1000,\"y\":208},\"durationMs\":800},{\"cue\":\"pair1\",\"do\":\"show\",\"target\":{\"id\":\"p1\"},\"durationMs\":300},{\"cue\":\"pair2\",\"do\":\"show\",\"target\":{\"id\":\"p2\"},\"durationMs\":300},{\"cue\":\"add\",\"do\":\"show\",\"target\":{\"id\":\"sum\"},\"durationMs\":300},{\"cue\":\"total\",\"do\":\"write\",\"target\":{\"id\":\"sum\"},\"value\":\"19\",\"durationMs\":300},{\"cue\":\"drop\",\"do\":\"move\",\"target\":{\"id\":\"sum\"},\"to\":{\"id\":\"c\",\"row\":0,\"col\":0},\"durationMs\":600},{\"cue\":\"done\",\"do\":\"write\",\"target\":{\"id\":\"c\",\"row\":0,\"col\":0},\"value\":\"19\",\"durationMs\":0},{\"cue\":\"done\",\"do\":\"hide\",\"target\":{\"id\":\"sum\"},\"durationMs\":0},{\"cue\":\"done\",\"do\":\"hide\",\"target\":{\"id\":\"a\",\"row\":0},\"durationMs\":300},{\"cue\":\"done\",\"do\":\"hide\",\"target\":{\"id\":\"b\",\"col\":0},\"durationMs\":300}]}",
+      "citations": null
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+    "cache_creation": null,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "inference_geo": null,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "output_tokens_details": null,
+    "server_tool_use": null,
+    "service_tier": "standard",
+    "speed": null
+  }
+}

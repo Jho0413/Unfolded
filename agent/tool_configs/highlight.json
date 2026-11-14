@@ -1,0 +1,29 @@
+{
+  "type": "client",
+  "name": "highlight",
+  "description": "Highlight an object, or a row, column or cell of a matrix, on the current board.",
+  "expects_response": true,
+  "response_timeout_secs": 10,
+  "parameters": {
+    "type": "object",
+    "description": "What to highlight",
+    "required": ["target_id"],
+    "properties": {
+      "target_id": {
+        "type": "string",
+        "description": "Id of an object on the current board"
+      },
+      "row": {
+        "type": "integer",
+        "description": "0-based matrix row"
+      },
+      "col": {
+        "type": "integer",
+        "description": "0-based matrix column"
+      }
+    }
+  },
+  "dynamic_variables": {
+    "dynamic_variable_placeholders": {}
+  }
+}

@@ -85,7 +85,7 @@ shared/                             imported by server and browser (the contract
 lib/                                server-only (import "server-only")
   config.ts                         model ids, effort, limits, paths: one place
   env.ts                            reads and validates env vars once
-  pipeline/plan.ts, step.ts, sketch.ts, prompts/
+  pipeline/plan.ts, step.ts, sketch.ts, prompts/, outputFormat.ts (the step's structured-output schema)
   narration/cues.ts                 pure: strip markers, cue offsets -> times
   narration/tts.ts                  ElevenLabs TTS with timestamps
   agent/token.ts                    the Q&A agent's conversation token (fixture when FAKE_APIS=1)
@@ -179,7 +179,7 @@ type Sketch = {                               // what /api/sketch returns for a 
 | Input | Result |
 |---|---|
 | Every rule holds | valid |
-| The output fails the zod schema (the SDK throws a parse error) | rejected: the schema error |
+| The output isn't JSON, or fails the zod schema (`validateStep` parses it, section 5.1) | rejected: `the output is not valid JSON`, or the schema error |
 | A cue in `actions` doesn't appear in `narration` | rejected: `unknown cue "x"` |
 | A marker appears twice in `narration` | rejected: `duplicate cue "x"` |
 | A malformed marker (`[[Row 1]]`, a stray `[[` or `]]`) | rejected: `malformed marker "[[Row 1]]"` (otherwise it would be read aloud) |
@@ -203,7 +203,7 @@ type Sketch = {                               // what /api/sketch returns for a 
 
 For a sketch, the known ids are its own objects plus those of the board it draws on (section 8).
 
-When generation is rejected (a zod parse error or a `validate.ts` rejection), the generator retries **once**, with the error messages added to the prompt. If the retry also fails, the step fails (section 6.2).
+When generation is rejected (output that isn't JSON, a zod schema error or a `validate.ts` rejection), the generator retries **once**, with the error messages added to the prompt. If the retry also fails, the step fails (section 6.2).
 
 ## 5. Lesson mode
 
@@ -242,10 +242,11 @@ sequenceDiagram
   - The step system prompt must be byte-identical for every step.
   - The plan, goal, signals and (for a sketch) the current board go *after* the document block.
   - The plan and sketch requests use a different output format, so they build their own cache.
-- **Structured output.** Requests stream: `client.messages.stream({ output_config: { format: zodOutputFormat(Step) } })` (the helper is in `@anthropic-ai/sdk/helpers/zod`), then `(await stream.finalMessage()).parsed_output`.
-  - Today the API rejects the schema `zodOutputFormat(Step)` and `zodOutputFormat(Sketch)` build ("compiled grammar is too large"). S3 found the fix and proposes it in section 11.
-  - Constraints the API can't enforce (number ranges, item counts) are checked by the SDK with zod after the response arrives, and a failure *throws*. The generator catches it as a rejection.
+- **Structured output.** Requests stream: `client.messages.stream({ output_config: { format } })`, then `await stream.finalMessage()`. For a step, `format` is `lib/pipeline/outputFormat.ts`'s JSON schema (today `zodOutputFormat(Step).schema`, from `@anthropic-ai/sdk/helpers/zod`), kept in its own file so it can be swapped for a simpler one.
+  - The generator checks `stop_reason` first: `refusal`, `max_tokens` and `model_context_window_exceeded` fail the step (section 6.2). Each attempt has a total deadline (`config.step.timeoutMs`, an abort signal), since the SDK's own `timeout` stops counting once a stream's headers arrive. Otherwise it parses the text itself with `validateStep`, not the SDK's `parsed_output` (whose parser throws before a refusal can be seen). So a schema failure, including constraints the API can't enforce (number ranges, item counts), and a `validate.ts` rejection give the same error list for the one retry.
+  - The retry resends the first request, then Claude's rejected answer (unchanged, thinking included) and the errors, so it reuses the cached paper.
   - Effort per request type (plan, step, sketch) is set in `lib/config.ts`.
+  - The full `Step` schema is currently rejected with "The compiled grammar is too large" (found in S3 and G1); S3 is simplifying it. The rest of the step request (document by `file_id`, 1-hour cache, effort) was accepted on 2026-11-14.
 - **Prompts are generic.** No paper-specific logic, hard-coded concept lists or examples taken from the demo paper, in prompts or code. Paper-specific content lives only in fixtures and demo checks.
 - **Prompts** live in `lib/pipeline/prompts/`. A step prompt receives:
   - the plan and the step's goal
@@ -259,6 +260,8 @@ sequenceDiagram
   - The player fetches each step's audio as a blob and plays it from a `blob:` URL. That keeps seeking reliable without HTTP Range support in the route.
   - The route only serves names matching `^[a-z0-9][a-z0-9.-]{0,99}$` (so never `.` or `..`) with a known extension (`.json`, `.mp3`, `.png`, `.jpg`, `.jpeg`, `.webp`) from inside the run folder, and never a symlink or a folder. A bad `lessonId` or file name → 400; a file that isn't there → 404.
   - `lib/runs/store.ts` writes every file atomically (a temporary file, then a rename, or a hard link for step versions so they never replace a file), so a reader never sees half a file. A new step version is saved with `saveStepVersion`: its audio `step-<n>.v<k>.mp3` first (creating it claims version k; if k is taken, it tries the next version, and gives up with an error after 100 tries), then `step-<n>.v<k>.json`, so an older version is never overwritten and a listed version always has its audio.
+  - A step file holds `SavedStep` (`shared/lesson.ts`): `{ step, cueTimes }`. Its version and audio URL come from its name, so a saved step becomes a `StepResponse` without the step route. Writers (C1 `make:m1`, the step route) parse with `SavedStep` before `saveStepVersion`, and a run that's played on the lesson page also needs `plan.json` (`make:m1` writes it too).
+  - **The lesson page** (`app/lesson/[lessonId]/page.tsx`) reads `plan.json` and lists the saved step versions on the server (the browser can't list a run folder). The player then reads each step's latest saved version, `step-<n>.v<k>.json`, and its `.mp3` through this route. A bad `lessonId` or a lesson with no `plan.json` is a 404 page with "No such lesson or step." and a link back to upload; a step with no saved file fails in the player with "This step isn't in the saved run." Once the step route exists, it replaces the page's direct reads for steps not yet generated. Playing the step version recorded in `signals.json` waits for S1 (it plays the latest until then).
 
 ### 5.2 Cue markers become times (`lib/narration/cues.ts`, pure)
 
@@ -445,6 +448,7 @@ The developer gets the full error in the server log, tagged with the route, less
 | Player | Browser blocks autoplay | "Press play to start." | Play button |
 | Player | Audio fails to load or decode | "Couldn't play the audio. Retry?" | Retry |
 | Route | `lessonId` doesn't match `^[a-z0-9-]{1,40}$`, or `n` isn't a step in the plan | 400 "No such lesson or step." | Back to upload |
+| Lesson page | `/lesson/<lessonId>` with a bad `lessonId`, or a lesson with no saved or an invalid `plan.json` (logged) | A 404 page: "No such lesson or step." | "Back to upload" link |
 | Run file | `GET /api/runs/<lessonId>/<file>` with a bad `lessonId` or file name, an extension it doesn't serve, a symlink, a folder or another non-regular file | 400 "No such lesson or file." (a symlink, folder or other non-regular file is logged; a bad name isn't, as any URL can be typed) | The page shows its own error for the step or image |
 | Run file | The file isn't in the run folder | 404 `No saved file "<file>" in lesson "<lessonId>".` | As above |
 | Run file | Reading the file fails for another reason | 500 "Couldn't read this file." (the error is logged) | As above |
@@ -513,6 +517,7 @@ The developer gets the full error in the server log, tagged with the route, less
 | `FAKE_APIS` | `1` swaps all three providers for `lib/fakes/` (tests and CI), and lets a production server serve the dev-only `/dev/board` (unless `REPLAY_RUN` is set, which wins) |
 | `NEXT_PUBLIC_FAKE_APIS` | `1` swaps the browser's agent conversation for the scripted fake. It's inlined at build time, so CI builds with it set. |
 | `REPLAY_RUN` | serve a saved run from `runs/` |
+| `RUNS_DIR` | where run folders live, relative to the project (default `runs/`). Playwright sets `runs-e2e/`, so tests never write to, serve or delete a real run |
 
 **Required keys depend on how the app runs.** Each row gets a test:
 
@@ -527,7 +532,7 @@ The developer gets the full error in the server log, tagged with the route, less
 - The mode is picked in this order: `REPLAY_RUN` set → replay; else `FAKE_APIS=1` → fake; else real. An empty value (`KEY=`, as copied from `.env.example`) counts as unset.
 - A build made with `NEXT_PUBLIC_FAKE_APIS=1` (for example, left over from a local `npm run e2e`) refuses to start in real mode, since the browser would use the fake agent: run `npm run build` again first. `next.config.ts` bakes that build-time value in as `BUILT_WITH_BROWSER_FAKES`, so the check never depends on the shell `npm start` runs in. The reverse, `FAKE_APIS=1` on a normal build, starts with a warning.
 - Keys are only read in `lib/` and the API routes, which import `"server-only"`. The browser never sees a key.
-- All of these live in `lib/config.ts`: model ids, effort per request type, `maxNarrationChars`, `maxPdfMb`, `coverTimeoutMs`, `maxBoardObjects` (the cap on the board a sketch request sends, section 8), the image cap per lesson (E1), the agent token's URL, timeout and fixture (section 8), and the `runs/` path.
+- All of these live in `lib/config.ts`: model ids, effort per request type, `maxNarrationChars`, the step request's output cap, total deadline and fake-mode fixture, `maxPdfMb`, `coverTimeoutMs`, `maxBoardObjects` (the cap on the board a sketch request sends, section 8), the image cap per lesson (E1), the agent token's URL, timeout and fixture (section 8), and the `runs/` path.
 
 ## 10. Testing: how we prove it works
 
@@ -587,6 +592,35 @@ Each spike is time-boxed to 60 minutes, and its answer is written back into this
   - **For G1:** move the prompt from `scripts/s3-spike.ts` into `lib/pipeline/prompts/` unchanged. Use `output_config.format` with the schema the area-A owner settles on, and keep `max_tokens` well above the 4.7k high-effort peak.
 - **S4:** which fal image model to use for the cover (M3) and for in-scene images (E1, stretch), and its latency. Download the images into `runs/`, in case fal's URLs expire. Keep the generations few: the budget is about 25 US dollars per teammate.
 - **S5:** the ElevenLabs CLI commands that push the agent and its client tools from `agent/`, and how its tracking file records the agent id.
+
+### S5 findings: the ElevenLabs CLI (done 2026-11-14)
+
+- **CLI:** `@elevenlabs/cli` **1.11.0**, pinned exactly as a devDependency. It is a native binary behind a thin npm launcher (platform builds are `optionalDependencies`), and the bin is `elevenlabs`. v1 renamed some v0 commands: `agents list` and `agents delete` now call the API directly, so use `agents status` to see what is configured locally.
+- **Key:** the CLI reads `ELEVENLABS_API_KEY` from the environment, or from a `.env` in its working directory. It does **not** read `.env.local`, so `npm run agent:push` sources the repo's `.env.local` before `cd agent`. You don't need `auth login`. Set `ELEVENLABS_TELEMETRY=off` if you don't want the anonymous User-Agent tags.
+- **Layout** (`agent/`, scaffolded with `elevenlabs agents init agent`):
+  ```
+  agent/
+  ├── agents.json               # registry: config path, agent id, branch id, version id
+  ├── tools.json                # registry: type, config path, tool id
+  ├── tests.json                # unused (empty)
+  ├── agent_configs/tutor.json  # the agent: prompt, llm, tool_ids, tts.voice_id
+  ├── tool_configs/highlight.json
+  └── .gitignore                # ignores agent/.env (written by init)
+  ```
+- **Commands.** These are the one-off setup steps, already done:
+  - `cd agent && elevenlabs tools add highlight --type client --config-path tool_configs/highlight.json` creates the tool remotely with a template body and writes its id to `tools.json`. Then edit the config.
+  - `elevenlabs agents add --from-file agent_configs/tutor.json` creates the agent and writes its id to `agents.json`.
+
+  After that, every change goes through **`npm run agent:push`**, which runs `elevenlabs tools push && elevenlabs agents push` from `agent/`, then `prettier --write agent`. Tools go first, because the agent refers to them by id in `conversation_config.agent.prompt.tool_ids`.
+- **Push is idempotent by id.** Push 1, push 2 and push 3 all said `Updated agent … (ID: agent_8201m7dgdjy6eswr6zndc8yw19xa)`. Afterwards `elevenlabs agents list` showed one agent and `elevenlabs agents tools list` showed one tool, so no duplicates were made. The remote matched the config: the prompt edit, `tool_ids` and `voice_id` for the agent, and `expects_response: true`, the params and `required: ["target_id"]` for the tool. Push always does a "force override", with no diff: every push uploads and makes a new agent version, even when nothing changed.
+- **Tracking file:** the agent id is in `agent/agents.json` → `agents[0].id` (plus `branch_id` and `version_id`), and the tool id is in `agent/tools.json` → `tools[0].id`. Neither file holds anything secret, so **both are committed**, which keeps the team on one agent. `ELEVENLABS_AGENT_ID` in `.env.local` is copied from `agents.json`. If a registry entry is lost, `add` would create a **second** agent, so recover it with `elevenlabs agents pull --agent <id>` instead.
+- **Client tool config:** this is the API's `ClientToolConfig` written out flat: `type: "client"`, `name`, `description`, `expects_response`, `response_timeout_secs` (1–120), and `parameters` as `{ type: "object", required, properties: { x: { type, description } } }`. Optional params are simply left out of `required`. The JSON shape follows `shared/tools.ts` (`highlight`: `target_id` string, plus optional integer `row` and `col`). Q1 should generate or test the configs from `CLIENT_TOOLS`.
+- **Gotchas:**
+  1. `--dry-run` is **ignored** by `tools add` (and probably by the other workflow commands): it sent a real create request. Only that request's failed auth stopped it.
+  2. `agents add --from-file X` copies the config to `agent_configs/<Agent-Name>.json` (for this agent, `Paper-Tutor-Q&A.json`) and registers that copy. We moved it back to `tutor.json` and edited the `config` path in `agents.json`. Doing that by hand is fine.
+  3. The CLI writes 4-space JSON and rewrites `agents.json` on every push (a new `version_id`), so `prettier --check` would fail. `agent:push` runs `prettier --write agent` afterwards, and the push-made `version_id` change is committed with the config change.
+  4. The voice is still the template default, `cjVigY5qzO86Huf0OWal`, because S1 hasn't chosen yet. Q1 sets `tts.voice_id` to `ELEVENLABS_VOICE_ID`, and its unit test checks they're equal. The LLM is the template default, `gemini-2.5-flash`, until S2 picks one.
+- **Values:** `ELEVENLABS_AGENT_ID=agent_8201m7dgdjy6eswr6zndc8yw19xa`, and the `highlight` tool id is `tool_4101m7dgd21xe2e9kgnh3htc4gw5`.
 
 ## Sources
 

@@ -20,6 +20,7 @@ next-env.d.ts
 
 # app data: saved lesson runs and PR evidence (ARCHITECTURE §3)
 /runs/
+/runs-e2e/
 /evidence/
 
 # env files: secrets stay local; .env.example is committed (ARCHITECTURE §9)

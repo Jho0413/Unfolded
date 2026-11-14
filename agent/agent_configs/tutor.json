@@ -1,0 +1,24 @@
+{
+  "conversation_config": {
+    "agent": {
+      "first_message": "",
+      "language": "en",
+      "prompt": {
+        "llm": "gemini-2.5-flash",
+        "prompt": "You are a patient tutor answering a learner's questions about the lesson on screen. Placeholder prompt from spike S5 (push 2); Q1 writes the real one.",
+        "temperature": 0.0,
+        "tool_ids": ["tool_4101m7dgd21xe2e9kgnh3htc4gw5"]
+      }
+    },
+    "conversation": {
+      "text_only": false
+    },
+    "tts": {
+      "model_id": "eleven_v4_turbo",
+      "voice_id": "cjVigY5qzO86Huf0OWal"
+    }
+  },
+  "name": "Paper Tutor Q&A",
+  "platform_settings": {},
+  "tags": ["ai-hackathon"]
+}

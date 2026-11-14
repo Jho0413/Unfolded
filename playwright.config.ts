@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { E2E_RUNS_DIR_NAME } from "./tests/e2e/support/runsDir";
 
 const PORT = 3100;
 const isCI = Boolean(process.env.CI);
@@ -25,6 +26,11 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 180_000,
     // e2e never calls paid APIs (ARCHITECTURE §10), locally as in CI.
-    env: { FAKE_APIS: "1", NEXT_PUBLIC_FAKE_APIS: "1" },
+    // Saved runs go to their own folder, so a test never writes, serves or deletes a real run.
+    env: {
+      FAKE_APIS: "1",
+      NEXT_PUBLIC_FAKE_APIS: "1",
+      RUNS_DIR: E2E_RUNS_DIR_NAME,
+    },
   },
 });
