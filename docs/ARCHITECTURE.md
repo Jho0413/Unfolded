@@ -277,6 +277,17 @@ sceneAt(objects: BoardObject[], timed: { action; startMs; durationMs }[], tMs: n
 - `BoardState` (a zod schema in `shared/scene.ts`, since `/api/sketch` receives it) is every object with its visibility, highlight, position and value at `tMs`, plus the moved copies of matrix parts. For each action in progress, it also includes how far along it is (0..1).
 - **Lesson mode:** `timed` comes from `cueTimes`, and `tMs` is `audio.currentTime * 1000`.
 - **Q&A mode:** the lesson board stays at `pausedT`, with the Q&A drawing on top (section 8). `objects` is the step's objects plus each sketch's objects. `timed` is the step's actions that started by `pausedT`, plus each Q&A action at `pausedT` + the time since Ask opened when it arrived (+ `atMs` for a sketch). `tMs` is `pausedT` + the time since Ask opened. After a `fresh` sketch, the step and earlier sketches are left out.
+- **Timing rules** (what `sceneAt` does with each action):
+  - Actions apply in start order. Actions that start at the same time apply in their array order.
+  - `show`, `highlight`, `unhighlight` and `write` take effect when they start. `hide` takes effect when it ends, so the renderer can fade it out using progress.
+  - `move` slides in a straight line from where its target was when the move started to where its anchor was then. Its path doesn't change if the anchor moves later.
+  - An action is in `active` while `startMs <= tMs < startMs + durationMs`. A 0 ms action is complete at its start and never active.
+  - `unhighlight` with a `color` clears only that colour. Without one, it clears every colour.
+  - A whole-matrix highlight sets every cell in `cellHighlight`. A matrix's own `highlight` stays `null`.
+  - Actions on unknown or out-of-range targets are ignored and never listed in `active`. `validate.ts` rejects them first.
+  - When a `hide` on a moved part ends, its copy leaves `copies`. Anchors naming that part then resolve to the source cells, and a later `move` of it makes a fresh copy.
+  - A copy is independent of its matrix once made: hiding or moving the whole matrix leaves its copies where they are.
+  - `player/sceneAt.ts` also exports `timeline(actions, cueTimes)`, which builds `timed` in lesson mode, and `resolveAnchor(board, anchor)`, which gives the renderer arrow ends.
 - Back, Replay and scrubbing are just seeks on the audio element. There's no animation state to undo.
 - `Whiteboard.tsx` renders `BoardState` as SVG on each animation frame. It interpolates from each action's progress, and exposes state as `data-*` attributes for tests.
 - Motion is only used for UI chrome, such as panels and buttons, not for board objects, so the board always matches the clock.
