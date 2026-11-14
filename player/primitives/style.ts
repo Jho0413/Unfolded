@@ -7,7 +7,7 @@ import type {
   HighlightColor,
   Target,
 } from "@/shared/scene";
-import { coversCell, partKey } from "@/player/sceneAt";
+import { coversCell, isPart, partKey } from "@/player/sceneAt";
 
 /** Light theme (ARCHITECTURE.md section 1). */
 export const INK = "#1f2937";
@@ -102,7 +102,8 @@ export function objectProgress(
   for (const { action, progress } of active)
     if (
       action.do === kind &&
-      partKey(action.target) === partKey({ id }) &&
+      action.target.id === id &&
+      !isPart(action.target) &&
       setsCurrent(action, current)
     )
       p = progress;

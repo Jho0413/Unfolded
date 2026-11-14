@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { FIXED } from "@/app/dev/board/scenes";
 import { Whiteboard } from "@/player/Whiteboard";
-import { coversCell, sceneAt, type TimedAction } from "@/player/sceneAt";
+import { sceneAt, type TimedAction } from "@/player/sceneAt";
 import { cellProgress, fadeOpacity } from "@/player/primitives/style";
 import {
   type Action,
@@ -39,17 +39,7 @@ describe("fadeOpacity", () => {
   });
 });
 
-describe("coversCell and cellProgress", () => {
-  it("a row covers its cells only", () => {
-    expect(coversCell({ id: "m", row: 1 }, 1, 0)).toBe(true);
-    expect(coversCell({ id: "m", row: 1 }, 0, 0)).toBe(false);
-    expect(coversCell({ id: "m" }, 3, 2)).toBe(true);
-  });
-  it("a cell covers itself only", () => {
-    expect(coversCell({ id: "m", row: 0, col: 1 }, 0, 1)).toBe(true);
-    expect(coversCell({ id: "m", row: 0, col: 1 }, 0, 0)).toBe(false);
-    expect(coversCell({ id: "m", row: 0, col: 1 }, 1, 1)).toBe(false);
-  });
+describe("cellProgress", () => {
   it("a highlight in progress fades its cells in", () => {
     const hl: ActiveAction = {
       action: {
@@ -100,6 +90,27 @@ describe("Whiteboard", () => {
       <Whiteboard state={sceneAt(objects, timed, 200)} />,
     );
   };
+  it("a show during a hide in progress fades back in, never popping", () => {
+    const timed: TimedAction[] = [
+      {
+        action: { do: "hide", target: { id: "t" }, durationMs: 400 },
+        startMs: 0,
+        durationMs: 400,
+      },
+      {
+        action: { do: "show", target: { id: "t" }, durationMs: 400 },
+        startMs: 200,
+        durationMs: 400,
+      },
+    ];
+    const opacity = (tMs: number) =>
+      renderToStaticMarkup(
+        <Whiteboard state={sceneAt(objects, timed, tMs)} />,
+      ).match(/data-object-id="t"[^>]*data-opacity="([^"]+)"/)?.[1];
+    expect(opacity(399)).toBe("0"); // min(hide 0.0025 left, show 0.4975)
+    expect(opacity(400)).toBe("0.5"); // hide done; the show carries on
+    expect(opacity(600)).toBe("1");
+  });
   it("a show of a visible object doesn't blink: it stays fully opaque", () => {
     const html = mid({ do: "show", target: { id: "t" }, durationMs: 400 });
     expect(html).toMatch(/data-object-id="t"[^>]*data-opacity="1"/);

@@ -61,7 +61,8 @@ export function partKey(t: Target): string {
   }`;
 }
 
-function isPart(t: Target): boolean {
+/** Whether a target names a part of a matrix (a row, column or cell), not a whole object. */
+export function isPart(t: Target): boolean {
   return t.row !== undefined || t.col !== undefined;
 }
 
@@ -382,11 +383,12 @@ function snapshot(board: Board): string {
 }
 
 /**
- * Whether an action, once complete, changes `before` (the board as it
- * started). One that doesn't (a show of a visible object, a highlight in the
- * colour its cells already have, a write of the same value, or any action on
- * an unknown or invalid target) is left out of `active`, so the renderer never
- * fades in what is already there.
+ * Whether an action, once complete, changes `before` (the board with every
+ * earlier action complete). One that doesn't (a show of a visible object, a
+ * highlight in the colour its cells already have, a write of the same value,
+ * or any action on an unknown or invalid target) is left out of `active`, so
+ * the renderer doesn't fade in what is already there. Earlier actions count
+ * as complete so that a show during a hide in progress still fades back in.
  */
 function changesBoard(
   before: Board,
@@ -447,7 +449,7 @@ export function sceneAt(
           e.durationMs > 0 &&
           tMs < e.startMs + e.durationMs &&
           changesBoard(
-            run(base, started.slice(0, i), plans, e.startMs),
+            run(base, started.slice(0, i), plans, Infinity),
             e,
             plans[i],
           ),

@@ -11,6 +11,7 @@ import {
 } from "@/shared/scene";
 import { validateStep } from "@/shared/validate";
 import {
+  coversCell,
   resolveAnchor,
   sceneAt,
   type TimedAction,
@@ -291,6 +292,21 @@ describe("sceneAt: highlight", () => {
       [null, null],
       [null, null],
     ]);
+  });
+});
+
+describe("coversCell", () => {
+  it("a whole matrix covers every cell", () => {
+    expect(coversCell({ id: "m" }, 3, 2)).toBe(true);
+  });
+  it("a row covers its cells only", () => {
+    expect(coversCell({ id: "m", row: 1 }, 1, 0)).toBe(true);
+    expect(coversCell({ id: "m", row: 1 }, 0, 0)).toBe(false);
+  });
+  it("a cell covers itself only", () => {
+    expect(coversCell({ id: "m", row: 0, col: 1 }, 0, 1)).toBe(true);
+    expect(coversCell({ id: "m", row: 0, col: 1 }, 0, 0)).toBe(false);
+    expect(coversCell({ id: "m", row: 0, col: 1 }, 1, 1)).toBe(false);
   });
 });
 
@@ -644,6 +660,16 @@ describe("sceneAt: an action that changes nothing is never active", () => {
       200,
     );
     expect(s.active).toEqual([]);
+  });
+
+  it("a show during a hide in progress is active (the hide would leave it hidden)", () => {
+    const show = at(200, { do: "show", target: { id: "t" } });
+    const s = sceneAt(
+      board(),
+      [at(0, { do: "hide", target: { id: "t" } }), show],
+      300,
+    );
+    expect(s.active.map((a) => a.action)).toContainEqual(show.action);
   });
 
   it("a highlight that changes at least one cell is active", () => {

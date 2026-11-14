@@ -15,7 +15,6 @@ const props = { searchParams: Promise.resolve({}) };
 afterEach(() => {
   vi.unstubAllEnvs();
   connection.mockReset();
-  connection.mockImplementation(() => Promise.resolve());
 });
 
 describe("/dev/board gate", () => {
