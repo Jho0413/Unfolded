@@ -110,7 +110,7 @@ player/                             browser
   controls.ts                       pure: which controls are enabled, key and play() results -> events
   Player.tsx                        the whiteboard, controls, status and the ?debug=1 overlay
 qa/                                 browser
-  conversation.ts                   adapter over @elevenlabs/react useConversation; a scripted fake when NEXT_PUBLIC_FAKE_APIS=1
+  conversation.ts                   adapter over the ElevenLabs SDK (one conversation per start, qa/sdkSessions.ts); a scripted fake when NEXT_PUBLIC_FAKE_APIS=1
   fakeConversation.ts               the scripted fake: canned agent turns, calls tool handlers (window.__qaFake in fake builds, for Playwright)
   types.ts, callTool.ts             the adapter's types; a tool call checked against shared/tools.ts, then handled
   context.ts                        pure: the sendContextualUpdate() message, and the narration heard by time t
@@ -475,10 +475,11 @@ The developer gets the full error in the server log, tagged with the route, less
 | Run file | `GET /api/runs/<lessonId>/<file>` with a bad `lessonId` or file name, an extension it doesn't serve, a symlink, a folder or another non-regular file | 400 "No such lesson or file." (a symlink, folder or other non-regular file is logged; a bad name isn't, as any URL can be typed) | The page shows its own error for the step or image |
 | Run file | The file isn't in the run folder | 404 `No saved file "<file>" in lesson "<lessonId>".` | As above |
 | Run file | Reading the file fails for another reason | 500 "Couldn't read this file." (the error is logged) | As above |
-| Ask | Token route fails (or, on the websocket fallback, the signed-URL route), or the agent can't connect | "Questions are unavailable right now." | The lesson carries on; close the panel |
-| Ask | Session drops mid-question | "Q&A ended unexpectedly." | Ask again |
+| Ask | Token route fails (or, on the websocket fallback, the signed-URL route), or the agent can't connect over WebRTC and then over the websocket fallback (each failure is logged with `[qa]`) | "Questions are unavailable right now." | The lesson carries on; close the panel |
+| Ask | Session drops mid-question, or a typed question can't be sent (logged) | "Q&A ended unexpectedly." | Ask again |
 | Ask | Replay mode (`REPLAY_RUN`): the page tells the panel, which never asks for a token | "Q&A needs a connection." | Close the panel |
 | Ask | Microphone permission denied | "Mic is off. Type your question; the answer will appear as text." | Typed input (text-only session) |
+| Ask | **Use the mic** pressed, and the voice session can't connect over WebRTC or the websocket (logged) | "Voice couldn't connect. Keep typing; the answer will appear as text." | A text-only session again |
 | Tool | `draw_scene` sketch invalid, or the sketch request fails | The Ask panel shows "Couldn't draw that." The agent is told through `sendContextualUpdate()` (it doesn't wait for a result, section 8) | The agent answers in words |
 | Tool | `highlight` on an unknown id | Agent told `unknown object "x"` | None needed |
 | Tool | `highlight` or `go_to_step` arrives after Ask closed (tool calls are asynchronous) | Agent told "Ask is closed"; the board and the step don't change | None needed |
@@ -488,16 +489,23 @@ The developer gets the full error in the server log, tagged with the route, less
 
 - **Starting a session:** the learner presses **Ask**, or presses the `A` key (Space stays play/pause).
   1. The player moves to `asking` and pauses the narration. Ask also works while a step is loading (section 6.1).
-  2. The browser calls `GET /api/agent/token`, and the server gets a WebRTC conversation token with `ELEVENLABS_API_KEY` (ElevenLabs' `GET /v1/convai/conversation/token?agent_id=…`).
+  2. `qa/connector.ts` decides the session (issue #84). It fetches a token and asks for the mic **in parallel**, and the input works at once: a typed question never waits on the mic.
+     - Mic granted first: a voice session. Mic denied: text-only, with "Mic is off…". The learner focuses or types first (the browser's mic prompt still open): text-only at once. A text-only session the learner chose can switch to voice later with **Use the mic** (a click, when the browser may ask).
+     - A question sent before the session connects is queued, and sent right after the context update on connect.
+     - Every attempt has a generation. After each await, a stale one (Ask closed, failed, or moved on) stops, so a session never starts after the panel gave up, and a connect that lands late is ended at once.
+  3. The browser calls `GET /api/agent/token`, and the server gets a WebRTC conversation token with `ELEVENLABS_API_KEY` (ElevenLabs' `GET /v1/convai/conversation/token?agent_id=…`).
      - It answers `{ conversationToken }`, never cached. On failure it answers `{ error: "Questions are unavailable right now." }`: 503 when Q&A isn't set up (no `ELEVENLABS_AGENT_ID`, or a replay run), 502 when ElevenLabs fails or times out (`config.agentToken.timeoutMs`). Anything else is a 500. The reason goes to the server log, never the key.
      - **Websocket fallback:** when the WebRTC connection can't get through (some venue networks block it), the browser calls `GET /api/agent/signed-url` instead and starts the SDK's websocket session with the signed URL. The server asks ElevenLabs' `GET /v1/convai/conversation/get-signed-url?agent_id=…` with the same key. It answers `{ signedUrl }` (`AgentSignedUrlResponse`), never cached, and fails exactly like the token route (same statuses, words and timeout; fixture `config.agentSignedUrl.fixture` when `FAKE_APIS=1`).
-  3. `startSession({ conversationToken })` starts the session through `qa/conversation.ts`.
-     - That adapter is the only file that imports `@elevenlabs/react`, which also needs a `ConversationProvider` around the lesson page.
+  4. `Conversation.startSession({ conversationToken, connectionType: "webrtc" })` starts the session through `qa/conversation.ts`.
+     - That adapter is the only file that imports `@elevenlabs/react`. It passes `stripAudioTags: true`, and `qa/voiceTags.ts` strips any tag left.
+     - Each start is its own SDK conversation (`qa/sdkSessions.ts`), not the React `ConversationProvider`'s: that provider silently ignores a start while an earlier one is pending, and ending doesn't release it, so a hung WebRTC start would block the fallback. `Conversation.startSession` resolves once connected and rejects when the connection fails. A new start supersedes any earlier session without waiting; one that lands after being ended or superseded is ended at once, and its callbacks are dropped.
      - With `NEXT_PUBLIC_FAKE_APIS=1` the adapter is a scripted fake: it replays canned agent turns and calls the tool handlers directly, so Playwright can test Q&A without a network.
+  5. **WebRTC blocked (venue Wi-Fi).** If an attempt fails before connecting (no credentials, the start rejects, an error or a disconnect arrives, or it takes longer than `ATTEMPT_TIMEOUT_MS`, 8 s, credentials included), the same session is retried once on the other transport: over the websocket with `GET /api/agent/signed-url` (above) and `startSession({ signedUrl, connectionType: "websocket" })`, at once (step 4: nothing waits on the abandoned start). A transport that worked is tried first for later sessions on the page (and the fallback is then the other one). If both fail: "Questions are unavailable right now."
 - **The panel and the machine.** `AskPanel` takes `open` (the player is `asking`), `replay`, the context, the tool handlers (Q4) and three callbacks the page turns into machine events: `onAsk` (`ask`), `onClose` (`closeAsk`) and `onAgentDisconnected` (`agentDisconnected`, when the session drops with an error). The panel shows the Ask messages of section 7 itself, so the page doesn't show the machine's "Q&A ended unexpectedly." notice again. A session the agent ends normally closes Ask like `closeAsk`, with no message.
 - **Typed questions** go through `sendUserMessage(text)` to the same agent.
   - While the learner types, the mic is muted so venue noise doesn't start a turn, and `sendUserActivity()` keeps the agent from talking over them.
-  - If mic permission is denied, the session starts text-only and answers appear as text. Spike S2 confirms that text-only answers aren't spoken.
+  - In a text-only session (mic denied, or the learner typed before answering the mic prompt) answers appear as text. Spike S2 confirms that text-only answers aren't spoken.
+  - `sendUserMessage` throwing (no live session) isn't swallowed: it's logged, and the panel says "Q&A ended unexpectedly." (section 7).
 - **Context:** when the session connects, and on every step change, the browser calls `sendContextualUpdate()`. It sends:
   - the plan titles
   - the current step's narration up to the point where it was paused (or, while a step is loading, that step's goal from the plan)

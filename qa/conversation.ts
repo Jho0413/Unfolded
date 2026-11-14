@@ -3,10 +3,10 @@
 // imports @elevenlabs/react. With NEXT_PUBLIC_FAKE_APIS=1 (inlined at build
 // time) it's the scripted fake in qa/fakeConversation.ts instead, so Playwright
 // tests Q&A without a network. Either way the Ask panel gets a QaConversation.
-import {
-  ConversationProvider as ElevenLabsProvider,
-  useConversation,
-} from "@elevenlabs/react";
+//
+// Each start is its own SDK conversation (qa/sdkSessions.ts says why: the
+// React provider's start lock would block the websocket fallback).
+import { Conversation } from "@elevenlabs/react";
 import {
   createElement,
   Fragment,
@@ -19,12 +19,8 @@ import {
 import { CLIENT_TOOL_NAMES } from "@/shared/tools";
 import { callTool } from "./callTool";
 import { FakeConversation } from "./fakeConversation";
-import type {
-  ConversationCallbacks,
-  QaConversation,
-  QaTools,
-  StartOptions,
-} from "./types";
+import { type SdkStart, SdkSessions } from "./sdkSessions";
+import type { ConversationCallbacks, QaConversation, QaTools } from "./types";
 
 export const FAKE_CONVERSATION = process.env.NEXT_PUBLIC_FAKE_APIS === "1";
 
@@ -39,11 +35,12 @@ declare global {
   }
 }
 
-/** Wrap the lesson page (and the dev page) in this. */
+/**
+ * Wraps the lesson page (and the dev page). Sessions no longer need the SDK's
+ * provider (qa/sdkSessions.ts), so it only keeps the pages' structure stable.
+ */
 export function ConversationProvider({ children }: { children: ReactNode }) {
-  return FAKE_CONVERSATION
-    ? createElement(Fragment, null, children)
-    : createElement(ElevenLabsProvider, null, children);
+  return createElement(Fragment, null, children);
 }
 
 /** The conversation the Ask panel drives: real, or the fake in fake builds. */
@@ -67,24 +64,7 @@ function useRealConversation({
   ...callbacks
 }: UseQaConversationOptions): QaConversation {
   const latest = useLatest({ tools, callbacks });
-  const conversation = useConversation({
-    onConnect: () => latest.current.callbacks.onConnect?.(),
-    onDisconnect: (details) =>
-      latest.current.callbacks.onDisconnect?.(details.reason),
-    onMessage: ({ message, role }) =>
-      latest.current.callbacks.onMessage?.({ role, text: message }),
-    onError: (message) => latest.current.callbacks.onError?.(message),
-  });
-  const {
-    startSession,
-    endSession,
-    sendUserMessage,
-    sendUserActivity,
-    sendContextualUpdate,
-    setMuted,
-  } = conversation;
-
-  return useMemo(() => {
+  const [sessions] = useState(() => {
     // Every tool in shared/tools.ts, each calling the latest handler.
     const clientTools = Object.fromEntries(
       CLIENT_TOOL_NAMES.map((name) => [
@@ -92,40 +72,42 @@ function useRealConversation({
         (params: unknown) => callTool(latest.current.tools, name, params),
       ]),
     );
-    return {
-      start: ({ conversationToken, textOnly }: StartOptions) =>
-        startSession({
-          conversationToken,
-          connectionType: "webrtc",
-          textOnly,
-          clientTools,
-        }),
-      end: endSession,
-      // The SDK throws without an active session (e.g. a blur after a drop).
-      sendUserMessage: (text: string) => quietly(() => sendUserMessage(text)),
-      sendUserActivity: () => quietly(sendUserActivity),
-      sendContextualUpdate: (text: string) =>
-        quietly(() => sendContextualUpdate(text)),
-      setMicMuted: (muted: boolean) => quietly(() => setMuted(muted)),
-      requestMicrophone,
+    const startSdk: SdkStart = (options, sdkCallbacks) => {
+      const common = {
+        ...sdkCallbacks,
+        textOnly: options.textOnly,
+        clientTools,
+        stripAudioTags: true,
+      };
+      return options.transport === "webrtc"
+        ? Conversation.startSession({
+            ...common,
+            connectionType: "webrtc",
+            conversationToken: options.conversationToken,
+          })
+        : Conversation.startSession({
+            ...common,
+            connectionType: "websocket",
+            signedUrl: options.signedUrl,
+          });
     };
-  }, [
-    latest,
-    startSession,
-    endSession,
-    sendUserMessage,
-    sendUserActivity,
-    sendContextualUpdate,
-    setMuted,
-  ]);
-}
+    return new SdkSessions(startSdk, () => latest.current.callbacks, console);
+  });
+  // Leaving the page ends the session.
+  useLayoutEffect(() => () => sessions.end(), [sessions]);
 
-function quietly(call: () => void): void {
-  try {
-    call();
-  } catch (err) {
-    console.warn("[qa]", err);
-  }
+  return useMemo(
+    () => ({
+      start: (options) => sessions.start(options),
+      end: () => sessions.end(),
+      sendUserMessage: (text) => sessions.sendUserMessage(text),
+      sendUserActivity: () => sessions.sendUserActivity(),
+      sendContextualUpdate: (text) => sessions.sendContextualUpdate(text),
+      setMicMuted: (muted) => sessions.setMicMuted(muted),
+      requestMicrophone,
+    }),
+    [sessions],
+  );
 }
 
 async function requestMicrophone(): Promise<boolean> {
@@ -155,15 +137,22 @@ function useFakeConversation({
   }, [fake]);
   return useMemo(
     () => ({
-      start: (options) => void fake.start(options),
+      start: (options) => fake.start(options),
       end: () => fake.end(),
       sendUserMessage: (text) => void fake.sendUserMessage(text),
       sendUserActivity: () => fake.sendUserActivity(),
       sendContextualUpdate: (text) => fake.sendContextualUpdate(text),
       setMicMuted: (muted) => fake.setMicMuted(muted),
-      // Tests deny the mic by setting window.__qaFakeMicDenied before load.
-      requestMicrophone: async () =>
-        !(window as { __qaFakeMicDenied?: boolean }).__qaFakeMicDenied,
+      // Tests deny the mic by setting window.__qaFakeMicDenied before load, or leave the
+      // permission prompt unanswered with window.__qaFakeMicPending (it never settles).
+      requestMicrophone: () => {
+        const w = window as {
+          __qaFakeMicDenied?: boolean;
+          __qaFakeMicPending?: boolean;
+        };
+        if (w.__qaFakeMicPending) return new Promise<boolean>(() => {});
+        return Promise.resolve(!w.__qaFakeMicDenied);
+      },
     }),
     [fake],
   );

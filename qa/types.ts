@@ -26,9 +26,18 @@ export type ConversationCallbacks = {
   onError?: (message: string) => void;
 };
 
-export type StartOptions = {
-  conversationToken: string;
-  /** No mic: the agent's answers come as text (mic permission denied). */
+/**
+ * How a session reaches the agent: WebRTC with a conversation token (GET /api/agent/token),
+ * or, when WebRTC is blocked (venue Wi-Fi), a websocket with a signed URL
+ * (GET /api/agent/signed-url).
+ */
+export type Transport = "webrtc" | "websocket";
+
+export type StartOptions = (
+  | { transport: "webrtc"; conversationToken: string }
+  | { transport: "websocket"; signedUrl: string }
+) & {
+  /** No mic: the learner types and the agent's answers come as text. */
   textOnly: boolean;
 };
 
@@ -40,9 +49,13 @@ export type AskApi = {
   tellAgent: (text: string) => void;
 };
 
-/** What the Ask panel drives, real or fake. Every call is fire-and-forget. */
+/**
+ * What the Ask panel drives, real or fake. `start` rejects when the session can't start, and
+ * `sendUserMessage` throws when the question can't be sent: the panel shows the section 7
+ * message. The other calls are fire-and-forget (a failure is only logged).
+ */
 export type QaConversation = {
-  start: (options: StartOptions) => void;
+  start: (options: StartOptions) => Promise<void>;
   end: () => void;
   sendUserMessage: (text: string) => void;
   sendUserActivity: () => void;
