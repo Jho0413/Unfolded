@@ -60,6 +60,15 @@ describe("FakeConversation", () => {
     expect(fake.toolCalls.map((c) => c.result)).toEqual(["ok", "no step 9"]);
   });
 
+  it("highlights the first id the latest context offers", async () => {
+    const highlight = vi.fn(() => "ok");
+    const { fake } = setup({ highlight });
+    await fake.start({ conversationToken: "t", textOnly: false });
+    fake.sendContextualUpdate("Objects on the board (ids for highlight): a, b");
+    await fake.sendUserMessage("show me the first row");
+    expect(highlight).toHaveBeenCalledWith({ target_id: "a", row: 0 });
+  });
+
   it("tells the agent when a tool has no handler", async () => {
     const { fake } = setup();
     await fake.start({ conversationToken: "t", textOnly: false });

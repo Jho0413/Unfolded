@@ -113,7 +113,7 @@ export class FakeConversation {
     if (!turn) return;
     if (turn.tool) {
       const { name } = turn.tool;
-      const params = toolParams(turn, text);
+      const params = toolParams(turn, text, this.contextUpdates.at(-1));
       const result = await callTool(this.tools, name, params);
       this.toolCalls.push({ name, params, result });
     }
@@ -152,8 +152,24 @@ export class FakeConversation {
   }
 }
 
-/** `go_to_step` takes the step the question names; other tools use the script's params. */
-function toolParams(turn: FakeTurn, text: string): Record<string, unknown> {
+/**
+ * `go_to_step` takes the step the question names; `highlight` the first id
+ * the latest context offers (so it works on any board); other tools use the
+ * script's params.
+ */
+function toolParams(
+  turn: FakeTurn,
+  text: string,
+  context: string | undefined,
+): Record<string, unknown> {
+  if (turn.tool?.name === "highlight") {
+    const id = /ids for highlight\): ([a-z][a-z0-9_]*)/.exec(
+      context ?? "",
+    )?.[1];
+    return id
+      ? { ...turn.tool.params, target_id: id }
+      : { ...turn.tool.params };
+  }
   if (turn.tool?.name !== "go_to_step") return { ...turn.tool?.params };
   const n = Number(turn.match.exec(text)?.[1]);
   return Number.isInteger(n) ? { step: n } : { ...turn.tool.params };
