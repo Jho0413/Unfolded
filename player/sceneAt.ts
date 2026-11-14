@@ -550,7 +550,7 @@ export function sceneAt(
     return cells;
   };
   /** Cells entry `i` changed that no later started action has changed since. */
-  const cellsOf = (i: number): [number, number][] => {
+  const cellsStillSet = (i: number): [number, number][] => {
     const { action } = started[i];
     const field = cellField(action);
     const left = new Set(changedBy(i));
@@ -582,7 +582,7 @@ export function sceneAt(
         {
           action: structuredClone(e.action),
           progress: progressAt(e, tMs),
-          ...(onMatrix ? { cells: cellsOf(i) } : {}),
+          ...(onMatrix ? { cells: cellsStillSet(i) } : {}),
         },
       ];
     }),

@@ -797,6 +797,38 @@ describe("sceneAt: the cells a matrix action changed", () => {
     expect(cellsAt(timed, 200)).toEqual([[]]);
   });
 
+  it("an unhighlight lists the cells it cleared", () => {
+    const timed = [
+      at(0, { do: "highlight", target: { id: "m", row: 0 }, durationMs: 0 }),
+      at(100, { do: "unhighlight", target: { id: "m" } }),
+    ];
+    expect(cellsAt(timed, 200)).toEqual([
+      [
+        [0, 0],
+        [0, 1],
+      ],
+    ]);
+  });
+
+  it("an unhighlight then a re-highlight take the cells from an earlier highlight", () => {
+    // accent fading in on row 0; cell 0,0 is cleared, then accent again at
+    // once: it shows fully, so the first highlight keeps only 0,1.
+    const timed = [
+      at(0, { do: "highlight", target: { id: "m", row: 0 }, durationMs: 1000 }),
+      at(100, {
+        do: "unhighlight",
+        target: { id: "m", row: 0, col: 0 },
+        durationMs: 0,
+      }),
+      at(200, {
+        do: "highlight",
+        target: { id: "m", row: 0, col: 0 },
+        durationMs: 0,
+      }),
+    ];
+    expect(cellsAt(timed, 500)).toEqual([[[0, 1]]]);
+  });
+
   it("actions on other objects have no cells", () => {
     const timed = [at(0, { do: "highlight", target: { id: "t" } })];
     expect(sceneAt(board(), timed, 100).active[0]).not.toHaveProperty("cells");
