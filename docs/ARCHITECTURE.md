@@ -142,7 +142,7 @@ type Step = {                                 // what Claude writes for one less
 };
 
 type Sketch = {                               // what /api/sketch returns for a Q&A drawing
-  objects: BoardObject[];
+  objects: BoardObject[];                     // added to the current board, or to an empty one with fresh (section 8)
   actions: (Action & { atMs: number })[];     // fired at a time offset, no narration
 };
 ```
@@ -180,6 +180,10 @@ type Sketch = {                               // what /api/sketch returns for a 
 | An object, or an `{x, y}` point in an anchor, outside the 1600 × 900 canvas (for a matrix, its whole cell box; for `text` and `latex`, only their x,y) | rejected: `off canvas` |
 | Two objects with the same id | rejected: `duplicate id "x"` |
 | Narration longer than `config.maxNarrationChars` after the markers are stripped | rejected: `narration too long` |
+| A sketch action or anchor uses an id from the board the sketch draws on | valid. With `fresh: true` the board is empty, so it's `unknown object "x"` |
+| A sketch object reuses an id from the board it draws on | rejected: `duplicate id "x"` |
+
+For a sketch, the known ids are its own objects plus those of the board it draws on (section 8).
 
 When generation is rejected (a zod parse error or a `validate.ts` rejection), the generator retries **once**, with the error messages added to the prompt. If the retry also fails, the step fails (section 6.2).
 
@@ -217,7 +221,7 @@ sequenceDiagram
   - The upload size cap (`config.maxPdfMb`) is our own choice, not Claude's limit. We don't parse the PDF ourselves: when Claude rejects it (too many pages, encrypted, unreadable), we return the upload error in section 7.
 - **Caching.** The document block carries `cache_control`, so later step requests reuse the cached paper. For the cache to work:
   - The step system prompt must be byte-identical for every step.
-  - The plan, goal and signals go *after* the document block.
+  - The plan, goal, signals and (for a sketch) the current board go *after* the document block.
   - The plan and sketch requests use a different output format, so they build their own cache.
   - The cache expires after 5 minutes, so a long Q&A pause will miss it.
 - **Structured output.** Requests stream: `client.messages.stream({ output_config: { format: zodOutputFormat(Step) } })` (the helper is in `@anthropic-ai/sdk/helpers/zod`), then `(await stream.finalMessage()).parsed_output`.
@@ -261,7 +265,7 @@ sceneAt(objects: BoardObject[], timed: { action; startMs; durationMs }[], tMs: n
 
 - `BoardState` is every object with its visibility, highlight, position and value at `tMs`, plus the moved copies of matrix parts. For each action in progress, it also includes how far along it is (0..1).
 - **Lesson mode:** `timed` comes from `cueTimes`, and `tMs` is `audio.currentTime * 1000`.
-- **Q&A mode:** `timed` comes from the sketch's `atMs`, and `tMs` is the time since the sketch arrived.
+- **Q&A mode:** the lesson board stays at `pausedT`, with the Q&A drawing on top (section 8). `objects` is the step's objects plus each sketch's objects. `timed` is the step's actions that started by `pausedT`, plus each Q&A action at `pausedT` + the time since Ask opened when it arrived (+ `atMs` for a sketch). `tMs` is `pausedT` + the time since Ask opened. After a `fresh` sketch, the step and earlier sketches are left out.
 - Back, Replay and scrubbing are just seeks on the audio element. There's no animation state to undo.
 - `Whiteboard.tsx` renders `BoardState` as SVG on each animation frame. It interpolates from each action's progress, and exposes state as `data-*` attributes for tests.
 - Motion is only used for UI chrome, such as panels and buttons, not for board objects, so the board always matches the clock.
@@ -339,7 +343,7 @@ Every state × event pair has a defined result, and each cell gets a test:
 | playing | ignored (late reply) | → stepEnded | → paused, with "Press play to start" | → failed ("Couldn't play the audio. Retry?") | → paused | ignored | seek to 0, stays playing | → asking (narration paused) | can't happen | can't happen | ignored (Next only after the step ends) | → loading(prev), or seek to 0 on step 0 | → loading(n) | ignored |
 | paused | ignored (late reply) | can't happen (audio stopped) | can't happen | ignored | ignored | → playing | seek to 0 → playing | → asking | can't happen | can't happen | ignored | → loading(prev), or seek to 0 → playing on step 0 | → loading(n) | ignored |
 | stepEnded | ignored (late reply) | can't happen | can't happen | ignored | ignored | ignored | seek to 0 → playing | → asking | can't happen | can't happen | → loading(next), or → finished on the last step | → loading(prev), or seek to 0 → playing on step 0 | → loading(n) | ignored |
-| asking | ignored (late reply) | can't happen (narration paused) | can't happen | ignored | ignored | ignored | ignored | ignored | → the state Ask was opened from (playing becomes paused), or → loading(n, no autoplay) if the agent called goToStep(n) | same as closeAsk, plus "Q&A ended unexpectedly." | ignored | ignored | stays asking, remembers n (agent tool) | ignored |
+| asking | ignored (late reply) | can't happen (narration paused) | can't happen | ignored | ignored | ignored | ignored | ignored | → the state Ask was opened from (playing becomes paused), or → loading(n, no autoplay) if the agent called goToStep(n). The Q&A drawing is discarded and the board is `sceneAt(step, pausedT)` again | same as closeAsk, plus "Q&A ended unexpectedly." | ignored | ignored | stays asking, remembers n (agent tool) | ignored |
 | failed | ignored (late reply) | can't happen | can't happen | can't happen | ignored | ignored | ignored | rejected: nothing to ask about | can't happen | can't happen | ignored | → loading(prev), or ignored on step 0 | → loading(n) | → loading(same) |
 | finished | ignored (late reply) | can't happen | can't happen | ignored | ignored | ignored | seek to 0 → playing | → asking | can't happen | can't happen | ignored | → loading(last) | → loading(n) | ignored |
 
@@ -420,11 +424,15 @@ The developer gets the full error in the server log, tagged with the route, less
 |---|---|---|---|---|
 | `highlight` | `target_id`, `row?`, `col?` | yes | Highlights part of the current board | `"ok"`, or the validation error |
 | `go_to_step` | `step` (1-based, as spoken) | yes | `goToStep(step - 1)`, which loads once Ask closes | `"ok"`, or `"no step n"` |
-| `draw_scene` | `description` (plain words) | **no** | Browser → `POST /api/sketch` (low effort) → `Sketch` → validated → drawn on a fresh board when it arrives | nothing, so the agent keeps talking while the sketch is made |
+| `draw_scene` | `description` (plain words), `fresh?` (default false) | **no** | Browser → `POST /api/sketch` (low effort) with the current board → `Sketch` → validated → drawn on top of the current board when it arrives, or on an empty board with `fresh: true` | nothing, so the agent keeps talking while the sketch is made |
 | `simplify_upcoming` | `reason` | no | Posts a signal (section 5.4) | nothing |
 
 - `draw_scene` doesn't wait, because a Claude request can't finish inside a natural pause. The agent's prompt tells it to describe the sketch out loud while it appears. A failed sketch is logged and shows "Couldn't draw that". Spike S2 measures the sketch's latency.
 - `draw_scene` takes plain words, not scene JSON. The voice model only describes what to draw, and Claude writes the validated sketch, so the scene schema stays in one place and out of the agent's prompt.
+- **A sketch builds on the board the learner is looking at.** The request body is `{ description, fresh, board }`, where `board` is the current `BoardState`. The route checks the body with zod. Claude sees the board, so an answer to "why does the row go with the column?" can highlight and draw over the matrix on screen.
+  - The sketch's ids are checked against its own objects plus the board's (section 4). With `fresh: true` the sketch starts from an empty board, and so do later sketches in this Ask.
+  - The browser validates the sketch again against the board it has when the sketch arrives, since the board may have changed while Claude worked.
+- **The board during Ask.** Ask freezes the lesson board at `pausedT`: the audio time when Ask opened, the end of the step from `stepEnded` or `finished`, or an empty board from `loading`. `highlight` and sketches draw on top of it, each timed from when it arrives. **Closing Ask throws all of that away**: the board goes back to `sceneAt(step, pausedT)`, and the narration carries on from there.
 - **Agent config in the repo.** We use the official **ElevenLabs CLI** (`@elevenlabs/cli`) rather than writing our own sync script.
   - The agent and its client tools are config files in `agent/`, pushed with the CLI's agent and tool `push` commands.
   - The CLI tracks the agent's id. Its tracking file is committed, so the team shares **one** agent.
@@ -467,7 +475,7 @@ The developer gets the full error in the server log, tagged with the route, less
 | Unit | Vitest | Pure logic: `cues.ts`, `sceneAt.ts`, `machine.ts` (one test per cell of §6.1), `validate.ts` (one per row of §4), the step-generation rules (one per cell of §6.2), env modes (one per row of §9) | Never |
 | Property | fast-check (in Vitest) | Cue strip/reinsert round trip, cue times never decrease, alignment walk, `sceneAt` deterministic under seeking | Never |
 | Route | Vitest + `lib/fakes/` | Each API route with faked Claude/ElevenLabs/fal: success, every rejection in section 7, retry once, replay mode | Never |
-| End to end | Playwright, `FAKE_APIS=1` + `NEXT_PUBLIC_FAKE_APIS=1` | Upload → plan → step plays → highlight at its cue → Next → Ask (typed) → `draw_scene` → close Ask. Tests assert on `data-*` attributes, and check timing by seeking to the cue time, never by waiting | Never |
+| End to end | Playwright, `FAKE_APIS=1` + `NEXT_PUBLIC_FAKE_APIS=1` | Upload → plan → step plays → highlight at its cue → Next → Ask (typed) → `draw_scene` on the current board → close Ask, board restored. Tests assert on `data-*` attributes, and check timing by seeking to the cue time, never by waiting | Never |
 | Real run | Agent-driven browser, real APIs | The feature working for real in a browser on the laptop. The PR lists what was checked, with screenshots or a short recording. | Yes, by hand, never in CI |
 
 - **Fakes** return recorded fixtures from `lib/fakes/fixtures/`. These are real responses captured once, with secrets removed, so tests check against real response shapes without paying for them. A task that adds a provider call also commits its fixture.
