@@ -91,7 +91,8 @@ lib/                                server-only (import "server-only")
   narration/tts.ts                  ElevenLabs TTS with timestamps -> audio + cue times (S1 fixture when FAKE_APIS=1)
   narration/makeM1.ts               npm run make:m1: demo-m1.step.json -> runs/demo-m1/ (plan.json, step-0.v<k>.json + .mp3)
   agent/token.ts                    the Q&A agent's conversation token (fixture when FAKE_APIS=1)
-  media/fal.ts
+  media/fal.ts                      fal (S4's model): one image from a prompt, downloaded at once; none without FAL_KEY or in replay, the fake when FAKE_APIS=1
+  media/cover.ts                    the lesson cover (L4): one image per plan, saved as cover.jpg, under its own deadline
   runs/store.ts                     read/write runs/<lessonId>/
   fakes/                            fake Claude/ElevenLabs/fal for tests (FAKE_APIS=1)
 player/                             browser
@@ -261,9 +262,9 @@ sequenceDiagram
   - the plan and the step's goal
   - the previous step's narration if it has been generated, otherwise that step's goal from the plan (needed after a jump)
   - the learner signals (section 5.4)
-- **Cover illustration (fal).** The plan includes a `coverPrompt`. After the plan is saved, the server asks fal for **one** image and saves it in the run folder, recording its file name as `cover` in `plan.json` and in the plan response. The upload page's plan view shows it, and the lesson page shows it as a header.
+- **Cover illustration (fal).** The plan includes a `coverPrompt`. Once the plan is made, and before `plan.json` is saved, `lib/media/cover.ts` asks fal for **one** image (`config.fal.model`, S4), downloads it at once (fal's URLs expire) and saves it in the run folder as `cover.jpg` (`config.cover.file`). It records that name as `cover` in `plan.json` and in the plan response. The upload page's plan view shows it, and the lesson page shows it as a header. Both hide the image if it fails to load.
   - It sits outside the scene contract and `sceneAt`: it's page chrome, not a board object.
-  - The plan route waits for it up to `config.coverTimeoutMs`. If fal is slow, fails or has no `FAL_KEY`, the plan is returned and saved without `cover`, and the pages show no image. The timeout is kept to a few seconds, since step 0 is requested after the plan returns.
+  - The plan route waits for it up to `config.cover.timeoutMs` (6 s; S4 saw 4.4–4.6 s with the download). That deadline is the cover's own: a race against a timer around the fal call and the download, since `fal.subscribe`'s `timeout` doesn't cover the whole call. When it passes, the request is aborted and fal is asked to cancel it (fal can't cancel one already running, so a late image may still be charged). If fal is slow, fails, sends something other than a JPEG, or has no `FAL_KEY`, the plan is returned and saved without `cover`, the pages show no image, and the reason is logged. The timeout is kept to a few seconds, since step 0 is requested after the plan returns.
   - Budget: about 25 US dollars of fal credits per teammate. So it's one image per lesson plan, a saved cover is never regenerated, replay never calls fal, and tests use the fal fake.
 - **Files reach the browser through `GET /api/runs/<lessonId>/<file>`.** `runs/` is outside `public/`, and `next start` won't serve files added after the build.
   - The player fetches each step's audio as a blob and plays it from a `blob:` URL. That keeps seeking reliable without HTTP Range support in the route.
@@ -548,7 +549,7 @@ The developer gets the full error in the server log, tagged with the route, less
 - The mode is picked in this order: `REPLAY_RUN` set → replay; else `FAKE_APIS=1` → fake; else real. An empty value (`KEY=`, as copied from `.env.example`) counts as unset.
 - A build made with `NEXT_PUBLIC_FAKE_APIS=1` (for example, left over from a local `npm run e2e`) refuses to start in real mode, since the browser would use the fake agent: run `npm run build` again first. `next.config.ts` bakes that build-time value in as `BUILT_WITH_BROWSER_FAKES`, so the check never depends on the shell `npm start` runs in. The reverse, `FAKE_APIS=1` on a normal build, starts with a warning.
 - Keys are only read in `lib/` and the API routes, which import `"server-only"`. The browser never sees a key.
-- All of these live in `lib/config.ts`: model ids, effort per request type, `maxNarrationChars`, the step and sketch requests' output caps, total deadlines and fake-mode fixtures, `maxPdfMb`, `maxPdfPages`, the plan request's step minimum, output cap, deadline and fake-mode fixtures (the plan and the paper's upload), `coverTimeoutMs`, `maxBoardObjects` (the cap on the board a sketch request sends, section 8), the image cap per lesson (E1), the agent token's URL, timeout and fixture (section 8), TTS (`tts`: URL, model id, output format, timeout, fixture; section 11, S1), and the `runs/` path.
+- All of these live in `lib/config.ts`: model ids, effort per request type, `maxNarrationChars`, the step and sketch requests' output caps, total deadlines and fake-mode fixtures, `maxPdfMb`, `maxPdfPages`, the plan request's step minimum, output cap, deadline and fake-mode fixtures (the plan and the paper's upload), fal (`fal`: model, image size, fake-mode fixtures; section 11, S4), the cover (`cover`: timeout, file name), `maxBoardObjects` (the cap on the board a sketch request sends, section 8), the image cap per lesson (E1), the agent token's URL, timeout and fixture (section 8), TTS (`tts`: URL, model id, output format, timeout, fixture; section 11, S1), and the `runs/` path.
 
 ## 10. Testing: how we prove it works
 
