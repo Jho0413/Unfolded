@@ -1,148 +1,104 @@
-# Visual Explainer Platform
-## Project Brief
+# Project Brief: Visual-First AI Tutor
 
-### Vision
-A visual-first educational platform that transforms academic papers, lectures, and concepts into interactive, animated explanations. Students learn through synchronized narration, dynamic diagrams, and adaptive tutoring—like having a world-class tutor who sketches on a whiteboard and adapts to your questions in real-time.
+> Working name: **Whiteboard** (rename freely). Track 03: Voice, Vision & Generative Media.
 
----
+## One-liner
 
-## MVP: Academic Paper Explainer
+An AI tutor that teaches by drawing. Give it a paper and it breaks it into small concepts, then explains each one with a narrator voice and a live whiteboard where the animation follows the words. You control the pace, you can interrupt with a question at any time, and it changes the rest of the lesson based on what you asked.
 
-### What We're Building
-1. **Paper Input** → User uploads PDF or pastes text from an academic paper
-2. **Paper Breakdown** → System extracts key sections and concepts
-3. **Interactive Explanation** → For each section:
-   - Anam avatar acts as tutor/narrator
-   - FAL generates synchronized diagrams/animations
-   - Elevenlabs provides natural, conversational voiceover
-   - User controls pacing (click to advance)
-4. **Interactive Q&A** → Student asks questions anytime → system generates new visuals + explanation
-5. **Adaptive Content** → System adjusts difficulty/depth based on student questions
+Think 3Blue1Brown, generated on demand, and it can be interrupted.
 
-### Core Experience: Matrix Multiplication Example
-- **Voiceover starts:** "We take the first row of the left matrix..."
-- **At that moment:** FAL highlights the first row, animates it
-- **Voiceover continues:** "...and multiply it by the first column of the right matrix..."
-- **Visually:** Column highlights, dot product operation animates
-- **Result:** User sees the calculation unfold in real-time, perfectly synced
+## The core experience
 
----
+Example: explaining matrix multiplication.
 
-## Future Extensions (Out of MVP Scope)
-- Lecture videos → extract key concepts → generate explainers
-- Individual concept deep-dives (e.g., "explain neural networks")
-- Multi-language support
-- Quiz/comprehension checks
-- Student collaboration (shared whiteboard)
+1. Narrator: *"Take the first row of the left matrix..."* → that row lights up as the word "row" is spoken.
+2. Narrator: *"...and the first column of the right matrix."* → the column lights up.
+3. Narrator: *"Multiply pair by pair and add them up."* → the row and column slide together, the pairs multiply, the sum drops into cell (1,1) of the result.
+4. The step ends and the tutor **waits**. Nothing moves on until the learner clicks **Next**.
+5. Learner, at any moment: *"Why does the row go with the column?"* → the tutor stops, answers out loud, and draws a new sketch for the answer. Then it goes back to the lesson, and may add an extra step or simplify later ones.
 
----
+**Non-negotiables:** the visuals come first (the voice explains the drawing, not the other way round), the visuals are timed to individual words, the learner sets the pace, and the learner can interrupt at any time.
 
-## Technical Architecture
+## Scope
 
-### Core APIs
-- **Elevenlabs** — Conversational voice narration that adapts to student questions
-- **FAL** — Generate diagrams, animations, visualizations synced to narration
-- **Anam** — Avatar tutor with realistic gestures/expressions
+**MVP:** academic papers (PDF upload).
+**Designed to extend to:** lecture slides or transcripts, and single concepts ("explain backprop"). The lesson pipeline should not assume its input is a paper.
 
-### Key Features
-1. **Synchronized Explanation** — Voice pacing drives diagram animation (not the other way around)
-2. **Agentic Voice** — Elevenlabs agent responds to interruptions, clarifies concepts
-3. **Dynamic Visuals** — FAL generates explainer graphics on-demand (not pre-rendered)
-4. **User Control** — Step-by-step progression; user decides pacing
-5. **Adaptive Depth** — System tracks student comprehension and adjusts
+**Demo paper:** pick one with strong visual intuition, e.g. *Attention Is All You Need* (matrix multiplication → dot product attention → multi-head). Decide by hour 2 and tune the demo around it.
 
-### Workflow
+## How it works
+
 ```
-User uploads paper
-     ↓
-Extract sections + concepts
-     ↓
-For each section:
-  - Generate voiceover (Elevenlabs) 
-  - Generate diagram (FAL)
-  - Sync to Anam avatar narration
-     ↓
-User watches explanation
-  ↓ (can pause/ask questions)
-Student question → Generate new visual explanation
-     ↓
-Move to next section
+PDF ──► Lesson planner (LLM)
+          │  splits the paper into a concept graph of small steps
+          ▼
+        Step generator (LLM)  ──►  Scene script per step:
+          │                          narration text + visual commands, each tied to a word
+          ▼
+        ┌──────────────────────── Player (browser) ────────────────────────┐
+        │  Whiteboard renderer  ◄── visual commands fire when their word is spoken │
+        │  Narration audio      ◄── ElevenLabs TTS with word timestamps     │
+        │  Avatar tutor (Anam)  ◄── picture-in-picture, talks during Q&A    │
+        │  Controls: Next / Back / Replay / Ask (voice or text)             │
+        └───────────────────────────────────────────────────────────────────┘
+          ▲
+          │ learner interrupts ──► Q&A agent (tool calling) ──► draw_scene, highlight,
+          │                                                     add_step, simplify_upcoming
+          └─ learner model (what they asked or struggled with) feeds back into the planner
 ```
 
----
+### Key technical decisions
 
-## Bounties & Prizes
+1. **The whiteboard is drawn by code, not generated as pixels.** The LLM writes a small scene description: shapes, matrices, arrows, LaTeX, and actions like highlight, move, transform and fade. The browser renders it with SVG plus an animation library. This is what makes "highlight row 1 exactly when the word 'row' is spoken" possible. Image and video models can't do that reliably.
+2. **Syncing to words uses TTS timestamps.** ElevenLabs returns timing for each character or word. Each visual command is attached to a word in the narration, and the player fires it when that word is reached in the audio.
+3. **fal is used for rich media, not exact diagrams.** Examples: illustrative images ("a neuron", "a 1950s computer"), short intuition clips (image-to-video), and visual metaphors that sit next to the precise whiteboard. We must have a clear, visible fal moment in the demo, because it is a $1,000 bounty.
+4. **Anam is the tutor's face and drives Q&A through tool calls.** The bounty rewards "skills and tool calling", so the avatar's tools should actually change the whiteboard (`draw_scene`, `highlight`, `go_to_step`, `simplify_upcoming`).
+5. **The ElevenLabs bounty wants a real-time agent, not plain TTS.** The interruptible Q&A voice loop is our case for it: barge-in, tool calls that change visuals, and adaptation.
 
-### Track 03: Voice, Vision & Generative Media
-**Main Track Prize:** £500 (1st) / £200 (2nd)
+### Open questions (spike these in the first 1–2 hours)
 
-**Specific Bounties (target all 3):**
-1. **Best Elevenlabs Project** (Scale tier)
-   - Real-time conversational voice beyond TTS
-   - Our advantage: Adaptive tutor voice responding to questions
-   
-2. **Best use of FAL** ($1,000 + merch)
-   - Best generative media (image/video/audio)
-   - Our advantage: Sophisticated synchronized educational animations
-   
-3. **Best use of Anam** (1-year Growth plan)
-   - Avatar agents with skills and tool calling
-   - Our advantage: Realistic tutor avatar, multi-modal interaction
+- **Who speaks: Anam or ElevenLabs?** Can Anam lip-sync to ElevenLabs audio or voices, or does each run its own voice pipeline? The answer decides whether lesson narration and Q&A share one voice. Check the Anam docs or ask the sponsor booth. (Anam API access is "coming soon" in My Pass.)
+- **Scene description format:** start small (matrix, vector, arrow, text, LaTeX, group) and grow it only when the demo paper needs more.
+- **Latency:** generate the current step and the next one ahead of time, and generate only Q&A answers live.
 
-### Stretch: Extra Prizes (on top)
-- **Track 06 — Best-Designed AI Product** (Figma, £960 + merch)
-  - If UI/design is polished enough
+## Bounties we're targeting
 
----
+| Prize | Reward | Our angle |
+|---|---|---|
+| Track 03 main | £500 / £200 | The whole product |
+| Best ElevenLabs project | Scale tier | Interruptible voice tutor with tool calls that change the visuals. Judged on agentic depth, interaction design, integration and novelty |
+| Best use of fal | $1,000 + merch | Generated illustrations and intuition clips placed in the lesson |
+| Best use of Anam | 1-year Growth plan | Avatar tutor whose tool calls drive the whiteboard. Judged on creativity, realism and multi-modal interaction |
+| **Extra:** Best-Designed AI Product (Figma) | £960 + merch | Only if we design the UI in Figma or Figma Make and can show evidence in the pitch |
 
-## Success Criteria (MVP)
+## Milestones
 
-### Must Have
-- [ ] Paper upload/text input
-- [ ] Section extraction from paper
-- [ ] Synchronized voice + animation for ≥1 concept
-- [ ] Anam avatar narrating explanation
-- [ ] User pacing control (next button)
-- [ ] One complete example (e.g., matrix multiplication)
+**M1: one hard-coded perfect step.** Matrix multiplication scene, written by hand, with timed narration, the renderer and a Next button. This shows the sync works.
+**M2: generated steps.** LLM produces the scene script from a concept, and the same player renders it.
+**M3: paper → lesson.** PDF → concept graph → a sequence of generated steps.
+**M4: interrupt and ask.** Voice or text question → spoken answer plus a new sketch → back to the lesson.
+**M5: adapt.** Questions change upcoming steps (an extra step, a simpler explanation).
+**M6: polish.** Anam avatar, fal media, design pass, demo script.
 
-### Should Have
-- [ ] Q&A interaction (user asks question → system answers with visual)
-- [ ] Multiple example concepts
-- [ ] Demo-quality visuals
+If time runs short, a polished M1–M4 beats a shaky M1–M6.
 
-### Nice to Have
-- [ ] Adaptive difficulty based on questions
-- [ ] Lecture video input
-- [ ] Quiz/comprehension checks
+## Demo script (≈3 min)
 
----
+1. Upload the paper. The concept map appears.
+2. Play step 1: voice and whiteboard in sync, avatar in the corner. Click Next.
+3. Interrupt: "wait, why divide by √d?" The tutor answers and sketches it live.
+4. Show that the next step changed because of the question.
+5. Show a fal-generated visual moment. Close on the "extends to lectures and concepts" slide.
 
-## Demo Plan
-1. **Show paper input** — Upload a research PDF
-2. **Show breakdown** — System identifies key sections
-3. **Core demo** — One concept explained:
-   - Avatar on screen
-   - Voice narrating
-   - Diagrams animating in sync
-   - All three APIs working together
-4. **Interactive** — User asks a clarification question → system pivots with new visual
-5. **Pacing** — Show manual step control
+## Team & ownership
 
----
+Fill in `AGENTS.md § Who owns what` at kickoff. Suggested split:
 
-## Team Ownership
-_To be filled in AGENTS.md_
+| Area | Folder (proposed) |
+|---|---|
+| Player: whiteboard renderer + sync + controls | `web/` |
+| Lesson pipeline: PDF parse, planner, scene generation | `server/pipeline/` |
+| Real-time: Q&A agent, ElevenLabs, Anam, tool calls | `server/realtime/` + `web/realtime/` |
 
-- Frontend (React UI)
-- Backend (API orchestration)
-- FAL integration (diagram generation)
-- Elevenlabs integration (voice)
-- Anam integration (avatar)
-
----
-
-## Notes
-- **Visual-first design** is critical — diagrams/animations are primary, voice is secondary
-- **Synchronization** is hard — audio + visuals must align perfectly
-- **3Blue1Brown inspiration** — elegant, simple animations that teach
-- **Whiteboard feel** — user should feel like watching a real tutor sketch
+**Shared contract:** the scene script schema (`shared/scene.schema.json`). Agree on it early. Any change to it must be posted on the board.
