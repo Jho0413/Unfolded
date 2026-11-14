@@ -1,5 +1,5 @@
 // Saved lesson runs for the lesson page tests (ROADMAP P6): runs-e2e/<lessonId>/ (./runsDir.ts),
-// never the real runs/, written the way lib/runs/store.ts lays it out (plan.json, step-<n>.v<k>.json and step-<n>.v<k>.mp3), from
+// never the real runs/, written the way lib/runs/store.ts lays it out (plan.json, paper.json, step-<n>.v<k>.json and step-<n>.v<k>.mp3), from
 // the demo-m1 step fixture and the dev board's cue times, with a silent MP3 of known length.
 // No provider is called: this stands in for a run made by `npm run make:m1` (C1).
 import { mkdir, rm, writeFile } from "node:fs/promises";
@@ -9,6 +9,15 @@ import demoM1 from "@/lib/fakes/fixtures/demo-m1.step.json";
 import type { LessonPlan, SavedStep } from "@/shared/lesson";
 import { Step } from "@/shared/scene";
 import { RUNS_DIR } from "./runsDir";
+
+/** A lesson as the upload page leaves it, before any step is generated: plan.json and paper.json. */
+export function freshLesson(lessonId: string, steps = 2) {
+  return savedRun(lessonId, {
+    steps,
+    unsaved: Array.from({ length: steps }, (_, n) => n),
+    paper: true,
+  });
+}
 
 /** A 1x1 PNG, for a saved cover. */
 const PNG_1PX = Buffer.from(
@@ -51,6 +60,8 @@ export interface SavedRunOptions {
   versions?: number;
   /** The plan's cover file name, and whether that file is saved. */
   cover?: { name: string; saved: boolean };
+  /** Write paper.json too, so the step route can generate the unsaved steps (fakes only). */
+  paper?: boolean;
 }
 
 /** Writes runs/<lessonId>/ and returns a handle that removes it. */
@@ -58,7 +69,7 @@ export async function savedRun(
   lessonId: string,
   options: SavedRunOptions = {},
 ) {
-  const { steps = 2, unsaved = [], versions = 1, cover } = options;
+  const { steps = 2, unsaved = [], versions = 1, cover, paper } = options;
   const dir = path.join(RUNS_DIR, lessonId);
   // A folder left by an interrupted run must not change the results.
   await rm(dir, { recursive: true, force: true });
@@ -73,6 +84,12 @@ export async function savedRun(
       goal: "Multiply two matrices",
     })),
   };
+  // lib/runs/store.ts's PAPER_FILE, as lib/pipeline/plan.ts's SavedPaper (both server-only).
+  if (paper)
+    await writeFile(
+      path.join(dir, "paper.json"),
+      JSON.stringify({ fileId: "file_e2e_fake", filename: "paper.pdf" }),
+    );
   await writeFile(path.join(dir, "plan.json"), JSON.stringify(plan));
   const audio = silentMp3(SAVED_AUDIO_MS);
   for (let n = 0; n < steps; n++) {
@@ -93,6 +110,8 @@ export async function savedRun(
   }
   return {
     lessonId,
-    [Symbol.asyncDispose]: () => rm(dir, { recursive: true, force: true }),
+    // The server may still be saving a prefetched step into the folder: retry a busy rmdir.
+    [Symbol.asyncDispose]: () =>
+      rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }),
   };
 }
