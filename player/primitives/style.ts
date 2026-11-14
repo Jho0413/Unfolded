@@ -13,6 +13,9 @@ export const INK = "#1f2937";
 export const MUTED = "#64748b";
 export const BOARD_BG = "#ffffff";
 export const COPY_STROKE = "#cbd5e1";
+/** The page behind the board, and the board's frame. */
+export const PAGE_BG = "#f8fafc";
+export const FRAME_BORDER = "#e2e8f0";
 export const FONT =
   'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 

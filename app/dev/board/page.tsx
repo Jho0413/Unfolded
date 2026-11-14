@@ -9,18 +9,17 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { FRAME_BORDER } from "@/player/primitives/style";
 import { Whiteboard } from "@/player/Whiteboard";
-import { devPagesEnabled } from "../devOnly";
+import { CANVAS } from "@/shared/scene";
+import { DevShell } from "../DevShell";
+import { devPagesEnabled, first } from "../devOnly";
 import { M1_CUE_TIMES, SCENES, isScene, sceneState } from "./scenes";
 
 export const metadata: Metadata = {
   title: "Dev: board",
   robots: { index: false, follow: false },
 };
-
-function first(v: string | string[] | undefined): string | undefined {
-  return Array.isArray(v) ? v[0] : v;
-}
 
 export default async function DevBoardPage({
   searchParams,
@@ -38,33 +37,12 @@ export default async function DevBoardPage({
   const timed = scene !== "fixed";
 
   return (
-    <main
+    <DevShell
+      note="Dev only: renderer test page, not part of the product."
       data-testid="dev-board"
       data-scene={scene}
       data-t={timed ? tMs : undefined}
-      style={{
-        fontFamily: "system-ui, sans-serif",
-        background: "#f8fafc",
-        color: "#1f2937",
-        minHeight: "100vh",
-        padding: 16,
-        boxSizing: "border-box",
-      }}
     >
-      <p
-        role="note"
-        style={{
-          margin: "0 0 12px",
-          padding: "6px 12px",
-          background: "#fef3c7",
-          border: "1px solid #d97706",
-          borderRadius: 6,
-          display: "inline-block",
-          fontWeight: 600,
-        }}
-      >
-        Dev only: renderer test page, not part of the product.
-      </p>
       <nav
         style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 8 }}
       >
@@ -100,8 +78,8 @@ export default async function DevBoardPage({
       )}
       <div
         style={{
-          maxWidth: 1600,
-          border: "1px solid #e2e8f0",
+          maxWidth: CANVAS.w,
+          border: `1px solid ${FRAME_BORDER}`,
           borderRadius: 8,
           overflow: "hidden",
           boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
@@ -109,6 +87,6 @@ export default async function DevBoardPage({
       >
         <Whiteboard state={state} />
       </div>
-    </main>
+    </DevShell>
   );
 }

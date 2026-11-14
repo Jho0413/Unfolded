@@ -4,3 +4,8 @@
 export function devPagesEnabled(): boolean {
   return process.env.NODE_ENV !== "production" || process.env.FAKE_APIS === "1";
 }
+
+/** A query parameter's value: the first one when it is repeated. */
+export function first(v: string | string[] | undefined): string | undefined {
+  return Array.isArray(v) ? v[0] : v;
+}

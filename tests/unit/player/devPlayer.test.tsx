@@ -5,19 +5,19 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GET as audioRoute } from "@/app/dev/player/audio/route";
 import {
   FAKE_AUDIO_MS,
+  FAKE_SERVER_ERROR,
   type FakeOptions,
   fakeFetchStep,
   parseFakeOptions,
 } from "@/app/dev/player/fakeLesson";
 import DevPlayerPage from "@/app/dev/player/page";
 import { silentWav } from "@/app/dev/player/silentWav";
-import { MESSAGES } from "@/player/machine";
 import { StepResponse } from "@/shared/lesson";
 
 afterEach(() => vi.unstubAllEnvs());
 
 const DEFAULTS: FakeOptions = {
-  fail: false,
+  fail: "none",
   audio: "ok",
   delayMs: 0,
   debug: false,
@@ -30,8 +30,9 @@ describe("parseFakeOptions", () => {
     Partial<FakeOptions>,
   ][] = [
     ["no query → the defaults", {}, {}],
-    ["fail=1", { fail: "1" }, { fail: true }],
-    ["fail=yes is not 1", { fail: "yes" }, {}],
+    ["fail=server", { fail: "server" }, { fail: "server" }],
+    ["fail=network", { fail: "network" }, { fail: "network" }],
+    ["an unknown fail kind → none", { fail: "1" }, {}],
     ["audio=broken", { audio: "broken" }, { audio: "broken" }],
     ["audio=missing", { audio: "missing" }, { audio: "missing" }],
     ["an unknown audio kind → ok", { audio: "../etc" }, {}],
@@ -65,10 +66,15 @@ describe("fakeFetchStep", () => {
       ).toBe(true);
     }
   });
-  it("with fail, step 2's first request fails and the retry succeeds", async () => {
-    const fetchStep = fakeFetchStep({ ...DEFAULTS, fail: true });
+  it("fail=server: step 2's first request answers with the server's error, the retry succeeds", async () => {
+    const fetchStep = fakeFetchStep({ ...DEFAULTS, fail: "server" });
     expect(await fetchStep(0)).not.toHaveProperty("error");
-    expect(await fetchStep(1)).toEqual({ error: MESSAGES.stepFailed });
+    expect(await fetchStep(1)).toEqual({ error: FAKE_SERVER_ERROR });
+    expect(await fetchStep(1)).not.toHaveProperty("error");
+  });
+  it("fail=network: step 2's first request rejects, the retry succeeds", async () => {
+    const fetchStep = fakeFetchStep({ ...DEFAULTS, fail: "network" });
+    await expect(fetchStep(1)).rejects.toThrow("Failed to fetch");
     expect(await fetchStep(1)).not.toHaveProperty("error");
   });
 });
