@@ -348,22 +348,32 @@ describe("validate: ARCHITECTURE.md section 4 table", () => {
     expectValid(validateStep(s, limits));
   });
 
-  it('tex that KaTeX can\'t parse: rejected: invalid LaTeX in "x"', () => {
-    expectErrors(
+  describe('tex that KaTeX can\'t parse, or that uses a command trust: false refuses (\\href, \\url, \\includegraphics, \\htmlClass and the like): rejected: invalid LaTeX in "x"', () => {
+    const latex = (tex: string) =>
       validateStep(
         stepWith((s) =>
-          s.objects.push({
-            kind: "latex",
-            id: "x",
-            x: 10,
-            y: 10,
-            tex: "\\frac{a",
-          }),
+          s.objects.push({ kind: "latex", id: "x", x: 10, y: 10, tex }),
         ),
         limits,
-      ),
-      'invalid LaTeX in "x"',
-    );
+      );
+    it("tex KaTeX can't parse", () => {
+      expectErrors(latex("\\frac{a"), 'invalid LaTeX in "x"');
+    });
+    it.each([
+      "\\href{https://example.com}{a}",
+      "\\url{https://example.com}",
+      "\\htmlClass{a}{b}",
+      "\\htmlId{a}{b}",
+      "\\htmlStyle{color:red}{b}",
+      "\\htmlData{a=b}{c}",
+      "\\includegraphics{x.png}",
+      "x^2 + \\href{javascript:alert(1)}{y}",
+    ])("%s", (tex) => {
+      expectErrors(latex(tex), 'invalid LaTeX in "x"');
+    });
+    it("tex with no such command is still valid", () => {
+      expectValid(latex("\\textcolor{red}{x^2} + \\frac{1}{2}"));
+    });
   });
 
   describe('An object, or an {x, y} point in an anchor, outside the 1600 x 900 canvas: rejected: off canvas "x"', () => {
