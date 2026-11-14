@@ -118,7 +118,9 @@ test.describe("fixed BoardState", () => {
     const formula = eq.locator(".katex-html");
     await expect(formula).toBeVisible();
     await expect(eq.locator(".katex-error")).toHaveCount(0);
-    // The laid-out formula's centre is (330, 520) on the 1600 x 900 canvas.
+    // The one layout check in this file: KaTeX's size is only known after
+    // layout, so data-cx can't show the formula is centred. The laid-out
+    // formula's centre is (330, 520) on the 1600 x 900 canvas, to ~5 px.
     const board = await page.getByTestId("whiteboard").boundingBox();
     const box = await formula.boundingBox();
     const scale = board!.width / 1600;
@@ -146,7 +148,7 @@ test.describe("fixed BoardState", () => {
   }) => {
     const arrow = object(page, "to_copy");
     await expect(arrow).toHaveAttribute("data-kind", "arrow");
-    await expect(arrow).toHaveAttribute("data-label", "copy");
+    await expect(arrow).toHaveAttribute("data-label-text", "copy");
     await expect(arrow.locator("line")).toHaveCount(1);
     await expect(arrow.locator("polygon")).toHaveCount(1);
     await expect(arrow).toContainText("copy");
@@ -204,16 +206,26 @@ test.describe("arrows through sceneAt", () => {
     expect(await numberAttr(qa, "data-from-y")).toBeCloseTo(612);
     // The point end doesn't move.
     expect(await numberAttr(qa, "data-to-x")).toBe(900);
+    // No label, so no text.
+    await expect(qa.locator("text")).toHaveCount(0);
   });
 
-  test("latex: show fades in with progress", async ({ page }) => {
+  test("latex and arrow: hidden until a show, then fade in with progress", async ({
+    page,
+  }) => {
     await at(page, 2900);
-    await expect(object(page, "g")).toHaveAttribute("data-visible", "false");
-    await expect(object(page, "g")).toBeHidden();
+    for (const id of ["g", "ga"]) {
+      await expect(object(page, id)).toHaveAttribute("data-visible", "false");
+      await expect(object(page, id)).toBeHidden();
+    }
     // show at 3000, 400 ms.
     await at(page, 3200);
-    await expect(object(page, "g")).toHaveAttribute("data-visible", "true");
-    await expect(object(page, "g")).toHaveAttribute("data-opacity", "0.5");
+    for (const id of ["g", "ga"]) {
+      await expect(object(page, id)).toHaveAttribute("data-visible", "true");
+      await expect(object(page, id)).toHaveAttribute("data-opacity", "0.5");
+    }
+    await at(page, 3400);
+    await expect(object(page, "ga")).toHaveAttribute("data-opacity", "1");
   });
 
   test("arrow and latex highlights fade in with progress", async ({ page }) => {

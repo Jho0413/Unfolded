@@ -3,18 +3,18 @@
 // how model-written tex becomes HTML (KaTeX, with trust off).
 import fc from "fast-check";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { FIXED, sceneState } from "@/app/dev/board/scenes";
 import { Whiteboard } from "@/player/Whiteboard";
-import { latexHtml } from "@/player/primitives/Latex";
+import { estimateSize, renderLatex } from "@/player/primitives/katex";
 import { arrowGeometry, targetBox } from "@/player/primitives/arrowGeometry";
+import { ARROW, TEXT_SIZE, textBox } from "@/player/primitives/style";
 import {
-  ARROW,
-  LATEX_ARROW_BOX,
-  TEXT_SIZE,
-  textBox,
-} from "@/player/primitives/style";
-import { CELL } from "@/shared/scene";
+  type Anchor,
+  type BoardState,
+  CELL,
+  type ObjectState,
+} from "@/shared/scene";
 import { errors, validateStep } from "@/shared/validate";
 
 describe("arrowGeometry", () => {
@@ -54,13 +54,29 @@ describe("arrowGeometry", () => {
 
   it("the label sits above a horizontal line and left of a vertical one", () => {
     const h = arrowGeometry({ x: 0, y: 0 }, { x: 100, y: 0 })!;
-    expect(h.label).toEqual({ x: 50, y: -ARROW.labelOffset });
+    expect(h.label).toEqual({ x: 50, y: -ARROW.labelGap });
     const v = arrowGeometry({ x: 0, y: 0 }, { x: 0, y: 100 })!;
-    expect(v.label.x).toBeCloseTo(-ARROW.labelOffset);
+    expect(v.label.x).toBeCloseTo(-ARROW.labelGap);
     expect(v.label.y).toBeCloseTo(50);
   });
 
-  it("property: start, head base and tip run in order along from -> to, insets take at most half, the label is never below the line", () => {
+  it("the label's box clears the line: half its height above a horizontal line, half its width beside a vertical one", () => {
+    const label = { w: 80, h: 30 };
+    const right = { x: 100, y: 0 };
+    const down = { x: 0, y: 100 };
+    const h = arrowGeometry(
+      { x: 0, y: 0 },
+      right,
+      undefined,
+      undefined,
+      label,
+    )!;
+    expect(h.label.y).toBeCloseTo(-(ARROW.labelGap + 15));
+    const v = arrowGeometry({ x: 0, y: 0 }, down, undefined, undefined, label)!;
+    expect(v.label.x).toBeCloseTo(-(ARROW.labelGap + 40));
+  });
+
+  it("property: start, head base and tip run in order along from -> to, insets take at most half, the label is above the line and its box clears it", () => {
     const coord = fc.double({ min: 0, max: 1600, noNaN: true });
     const size = fc.option(
       fc.record({
@@ -72,15 +88,17 @@ describe("arrowGeometry", () => {
     const eps = 1e-6;
     fc.assert(
       fc.property(
-        coord,
-        coord,
-        coord,
-        coord,
-        size,
-        size,
-        (a, b, c, d, i, j) => {
+        fc.tuple(coord, coord, coord, coord),
+        fc.tuple(size, size, size),
+        ([a, b, c, d], [fromBox, toBox, labelBox]) => {
           const len = Math.hypot(c - a, d - b);
-          const g = arrowGeometry({ x: a, y: b }, { x: c, y: d }, i, j);
+          const g = arrowGeometry(
+            { x: a, y: b },
+            { x: c, y: d },
+            fromBox,
+            toBox,
+            labelBox,
+          );
           if (len < eps) return g === undefined;
           if (!g) return false;
           const [tx, ty] = g.head.split(" ")[0].split(",").map(Number);
@@ -89,16 +107,42 @@ describe("arrowGeometry", () => {
           const base = along(g.x2, g.y2);
           const tip = along(tx, ty);
           const midY = (g.y1 + ty) / 2;
+          // The label's distance from the line, against its box's half extent across it.
+          const nx = -(d - b) / len;
+          const ny = (c - a) / len;
+          const across = labelBox
+            ? (Math.abs(nx) * labelBox.w + Math.abs(ny) * labelBox.h) / 2
+            : 0;
+          const distance = Math.abs(
+            (g.label.x - a) * nx + (g.label.y - b) * ny,
+          );
           return (
             start <= base + eps &&
             base <= tip + eps &&
             tip <= len + eps &&
             start + (len - tip) <= len / 2 + eps &&
-            g.label.y <= midY + eps
+            g.label.y <= midY + eps &&
+            distance >= across + ARROW.labelGap - 1e-6
           );
         },
       ),
     );
+  });
+});
+
+describe("estimateSize", () => {
+  it("a taller formula is taller, a longer one wider", () => {
+    const one = renderLatex("x").size;
+    const frac = renderLatex("\\frac{a}{b}").size;
+    const long = renderLatex("x + y + z + w").size;
+    expect(frac.h).toBeGreaterThan(one.h);
+    expect(long.w).toBeGreaterThan(one.w);
+  });
+  it("counts only the visible formula, not the MathML copy", () => {
+    expect(estimateSize(renderLatex("ab").html!).w).toBeLessThan(
+      estimateSize(renderLatex("abcd").html!).w,
+    );
+    expect(estimateSize("plain")).toEqual(estimateSize("plaix"));
   });
 });
 
@@ -122,20 +166,42 @@ describe("targetBox", () => {
     expect(targetBox(FIXED, { id: "large" })).toEqual(
       textBox("large", TEXT_SIZE.l),
     );
-    expect(targetBox(FIXED, { id: "eq" })).toEqual(LATEX_ARROW_BOX);
+    expect(targetBox(FIXED, { id: "eq" })).toEqual(
+      renderLatex("\\frac{QK^\\top}{\\sqrt{d_k}}").size,
+    );
     expect(targetBox(FIXED, { id: "pt" })).toBe(undefined);
+    const withImage: BoardState = {
+      objects: [
+        {
+          object: {
+            kind: "image",
+            id: "img",
+            x: 0,
+            y: 0,
+            w: 300,
+            h: 200,
+            prompt: "p",
+          },
+          visible: true,
+          highlight: null,
+        },
+      ],
+      copies: [],
+      active: [],
+    };
+    expect(targetBox(withImage, { id: "img" })).toEqual({ w: 300, h: 200 });
   });
 });
 
-describe("latexHtml (model-written tex)", () => {
+describe("renderLatex (model-written tex)", () => {
   it("renders KaTeX markup for valid tex", () => {
-    const html = latexHtml("\\frac{a}{b}");
+    const html = renderLatex("\\frac{a}{b}").html!;
     expect(html).toContain('class="katex"');
     expect(html).not.toContain("katex-error");
   });
 
   it("tex that KaTeX can't parse: the renderer shows it as an error, never throws (throwOnError: false)", () => {
-    const html = latexHtml("\\frac{1}{");
+    const html = renderLatex("\\frac{1}{").html!;
     expect(html).toContain('class="katex-error"');
     expect(html).toContain("\\frac{1}{");
   });
@@ -146,7 +212,7 @@ describe("latexHtml (model-written tex)", () => {
       "\\url{https://example.com}",
       "\\htmlClass{evil}{x}",
     ]) {
-      const html = latexHtml(tex);
+      const html = renderLatex(tex).html!;
       expect(html).not.toMatch(/<a[\s>]/);
       expect(html).not.toContain("href=");
       expect(html).not.toContain('class="evil');
@@ -154,28 +220,65 @@ describe("latexHtml (model-written tex)", () => {
   });
 
   it("HTML in tex is escaped, never markup", () => {
-    const html = latexHtml('<img src=x onerror="alert(1)"><script>x</script>');
+    const html = renderLatex(
+      '<img src=x onerror="alert(1)"><script>x</script>',
+    ).html!;
     expect(html).not.toMatch(/<img|<script/);
   });
 
-  it("sizes are capped (maxSize) and macro loops stop (maxExpand)", () => {
-    expect(latexHtml("\\rule{1000em}{1000em}")).toContain('width="10em"');
-    expect(latexHtml("\\def\\a{\\a}\\a")).toContain("katex-error");
+  it("KaTeX failing outright (nesting that overflows the stack): no throw, the board shows the source as an error", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const tex = "{".repeat(20000) + "x" + "}".repeat(20000);
+    expect(renderLatex(tex).html).toBe(undefined);
+    expect(error).toHaveBeenCalledOnce();
+    const state: BoardState = {
+      objects: [
+        {
+          object: { kind: "latex", id: "deep", x: 800, y: 450, tex },
+          visible: true,
+          highlight: null,
+        },
+      ],
+      copies: [],
+      active: [],
+    };
+    const html = renderToStaticMarkup(<Whiteboard state={state} />);
+    expect(html).toMatch(/class="katex-error"[^>]*>\{\{\{/);
   });
 
-  it("the validator rejects what the renderer shows as an error", () => {
-    const step = {
-      title: "t",
-      narration: "n",
-      objects: [
-        { kind: "latex", id: "x", x: 10, y: 10, tex: "\\def\\a{\\a}\\a" },
-      ],
-      actions: [],
-    };
-    expect(validateStep(step, { maxNarrationChars: 100 })).toEqual({
-      ok: false,
-      errors: [errors.invalidLatex("x")],
-    });
+  it("sizes are capped (maxSize) and macro loops stop (maxExpand)", () => {
+    expect(renderLatex("\\rule{1000em}{1000em}").html!).toContain(
+      'width="10em"',
+    );
+    expect(renderLatex("\\def\\a{\\a}\\a").html!).toContain("katex-error");
+  });
+
+  it("property: tex the validator accepts renders with no error, and tex it rejects still renders, never throws (one KATEX_OPTIONS)", () => {
+    const token = fc.constantFrom(
+      ..."\\frac \\sqrt \\def \\a \\href \\url \\rule \\left( \\right) \\text x 1 em ^ _ { } ( ) & \\\\ \\undefinedcmd".split(
+        " ",
+      ),
+      " ",
+    );
+    const tex = fc.array(token, { maxLength: 12 }).map((t) => t.join(""));
+    fc.assert(
+      fc.property(tex, (t) => {
+        const step = {
+          title: "t",
+          narration: "n",
+          objects: [{ kind: "latex", id: "x", x: 10, y: 10, tex: t }],
+          actions: [],
+        };
+        const result = validateStep(step, { maxNarrationChars: 100 });
+        const rejected =
+          !result.ok && result.errors.includes(errors.invalidLatex("x"));
+        // Rejected tex shows as KaTeX's error text or a red unknown command.
+        const html = renderLatex(t).html!;
+        return rejected
+          ? html.includes('class="katex')
+          : !html.includes("katex-error");
+      }),
+    );
   });
 });
 
@@ -184,15 +287,51 @@ describe("Whiteboard: latex and arrows", () => {
 
   it("renders a latex object as KaTeX, centred on its x,y", () => {
     expect(html).toMatch(
-      /data-object-id="eq" data-kind="latex"[^>]*data-highlight="accent"[^>]*data-cx="330" data-cy="520"/,
+      /data-object-id="eq"[^>]*data-kind="latex"[^>]*data-highlight="accent"[^>]*data-cx="330"[^>]*data-cy="520"/,
     );
     expect(html).toContain('class="katex"');
   });
 
   it("an arrow end naming a moved part is that part's copy", () => {
     expect(html).toMatch(
-      /data-object-id="to_copy" data-kind="arrow"[^>]*data-from-x="330" data-from-y="520" data-to-x="900" data-to-y="560"/,
+      /data-object-id="to_copy"[^>]*data-kind="arrow"[^>]*data-from-x="330"[^>]*data-from-y="520"[^>]*data-to-x="900"[^>]*data-to-y="560"/,
     );
+  });
+
+  it("an arrow's drawn line stops outside its targets' boxes", () => {
+    // eq (latex) -> the copy of m's row 1 (3 cells wide).
+    const g = arrowGeometry(
+      { x: 330, y: 520 },
+      { x: 900, y: 560 },
+      renderLatex("\\frac{QK^\\top}{\\sqrt{d_k}}").size,
+      { w: 3 * CELL.w, h: CELL.h },
+    )!;
+    expect(html).toMatch(
+      new RegExp(
+        `data-object-id="to_copy"[^]*?<line x1="${g.x1}" y1="${g.y1}" x2="${g.x2}" y2="${g.y2}"`,
+      ),
+    );
+  });
+
+  it("an arrow with an unknown or coincident end draws nothing", () => {
+    const arrow = (id: string, from: Anchor, to: Anchor): ObjectState => ({
+      object: { kind: "arrow", id, from, to },
+      visible: true,
+      highlight: null,
+    });
+    const state: BoardState = {
+      objects: [
+        arrow("unknown", { id: "nope" }, { x: 10, y: 10 }),
+        arrow("same", { x: 5, y: 5 }, { x: 5, y: 5 }),
+      ],
+      copies: [],
+      active: [],
+    };
+    const out = renderToStaticMarkup(<Whiteboard state={state} />);
+    expect(out).toContain('data-object-id="unknown"');
+    expect(out).toContain('data-object-id="same"');
+    expect(out).not.toMatch(/<line|<polygon|<text/);
+    expect(out).not.toMatch(/data-object-id="unknown"[^>]*data-from-x/);
   });
 
   it("an arrow follows an object that moves", () => {
