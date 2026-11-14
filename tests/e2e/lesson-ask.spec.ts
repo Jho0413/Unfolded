@@ -57,11 +57,30 @@ test("typed question -> asking -> highlight and draw -> close -> back to paused,
     .click();
   await expect(player(page)).toHaveAttribute("data-state", "paused");
   // Back to t = 0 (no cue fired yet), so the board doesn't depend on when the pause landed.
-  await page
-    .getByTestId("player-audio")
-    .evaluate((audio: HTMLAudioElement) => (audio.currentTime = 0));
+  await page.getByTestId("player-audio").evaluate(
+    (audio: HTMLAudioElement) =>
+      new Promise<void>((resolve) => {
+        audio.addEventListener("seeked", () => resolve(), { once: true });
+        audio.currentTime = 0;
+      }),
+  );
+  await expect
+    .poll(() =>
+      page
+        .getByTestId("player-audio")
+        .evaluate((a: HTMLAudioElement) => a.currentTime),
+    )
+    .toBe(0);
   await expect(cell(page, "a", 0, 0)).toHaveAttribute("data-highlight", "none");
-  const before = await boardAttributes(page);
+  // The board has settled once two readings a moment apart agree.
+  let before = "";
+  await expect
+    .poll(async () => {
+      const prev = before;
+      before = await boardAttributes(page);
+      return before === prev;
+    })
+    .toBe(true);
 
   await page.getByRole("button", { name: "Ask", exact: true }).click();
   await expect(player(page)).toHaveAttribute("data-state", "asking");
@@ -70,8 +89,10 @@ test("typed question -> asking -> highlight and draw -> close -> back to paused,
     "connected",
   );
   // The context names the lesson's board, so the fake highlights a real id.
+  await expect
+    .poll(() => page.evaluate(() => window.__qaFake?.contextUpdates[0]))
+    .toContain("(ids for highlight): a,");
   const ctx = await page.evaluate(() => window.__qaFake?.contextUpdates[0]);
-  expect(ctx).toContain("(ids for highlight): a,");
   expect(ctx).toContain("(current step)");
 
   await typeQuestion(page, "show me the first row");

@@ -22,10 +22,15 @@ export function createAskSession(now: () => number = () => performance.now()) {
   let openedAt = 0;
   let askId = 0;
   let frozen: FrozenBoard = { objects: [], timed: [], pausedT: 0 };
+  let version = 0;
   const listeners = new Set<() => void>();
+  const changed = () => {
+    version++;
+    for (const fn of listeners) fn();
+  };
   const setLayer = (next: AskLayer) => {
     layer = next;
-    for (const fn of listeners) fn();
+    changed();
   };
   const sinceOpen = () => now() - openedAt;
 
@@ -34,7 +39,8 @@ export function createAskSession(now: () => number = () => performance.now()) {
       listeners.add(fn);
       return () => void listeners.delete(fn);
     },
-    /** Changes whenever the drawing does (for useSyncExternalStore). */
+    /** Changes on every open, close and drawing (for useSyncExternalStore). */
+    version: () => version,
     layer: () => layer,
     open(): void {
       if (asking) return;
@@ -51,9 +57,12 @@ export function createAskSession(now: () => number = () => performance.now()) {
     },
     isAsking: () => asking,
     askId: () => askId,
-    /** The lesson board Ask draws on: the step at `pausedT`. */
+    /**
+     * The lesson board Ask draws on: the step at `pausedT`. Frozen while
+     * asking: a step that arrives during Ask shows only after it closes.
+     */
     setFrozen(next: FrozenBoard): void {
-      frozen = next;
+      if (!asking) frozen = next;
     },
     addAction(action: Action): void {
       if (asking) setLayer(addAction(layer, action, sinceOpen()));

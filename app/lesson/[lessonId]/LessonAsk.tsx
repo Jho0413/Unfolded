@@ -9,9 +9,7 @@
 //   sketches on top, redrawn every frame; otherwise the player's board.
 //
 // Both share one AskSession (qa/askSession.ts), created by LessonView.
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSyncExternalStore } from "react";
-import { timeline } from "@/player/sceneAt";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import type { Player } from "@/player/usePlayer";
 import { Whiteboard } from "@/player/Whiteboard";
 import { AskPanel } from "@/qa/AskPanel";
@@ -23,11 +21,7 @@ import type { LessonPlan } from "@/shared/lesson";
 
 /** Keeps the session's frozen board and open/closed state in step with the player. */
 function useSessionSync(player: Player, session: AskSession) {
-  const loaded = player.loaded;
-  const timed = useMemo(
-    () => (loaded ? timeline(loaded.step.actions, loaded.cueTimes) : []),
-    [loaded],
-  );
+  const { loaded, timed } = player;
   const asking = player.state.kind === "asking";
   const { tMs } = player;
   useEffect(() => {
@@ -35,6 +29,8 @@ function useSessionSync(player: Player, session: AskSession) {
       frozenBoard(loaded ? { objects: loaded.step.objects, timed } : null, tMs),
     );
   }, [session, loaded, timed, tMs]);
+  // The callbacks below open and close the session at once; this catches
+  // any other way in or out of `asking`.
   useEffect(() => {
     if (asking) session.open();
     else session.close();
@@ -69,17 +65,25 @@ export function LessonAsk({
     [session, send],
   );
 
-  const onAsk = useCallback(() => send({ type: "ask" }), [send]);
-  const onClose = useCallback(() => send({ type: "closeAsk" }), [send]);
-  const onDropped = useCallback(
-    () => send({ type: "agentDisconnected" }),
-    [send],
-  );
+  // Open and close the session with the machine, not an effect later, so a
+  // tool call can never act on a closed Ask (e.g. a late go_to_step).
+  const onAsk = useCallback(() => {
+    if (send({ type: "ask" }).outcome === "changed") session.open();
+  }, [send, session]);
+  const onClose = useCallback(() => {
+    session.close();
+    send({ type: "closeAsk" });
+  }, [send, session]);
+  const onDropped = useCallback(() => {
+    session.close();
+    send({ type: "agentDisconnected" });
+  }, [send, session]);
+  const asking = state.kind === "asking";
 
   const goTo = state.kind === "asking" ? state.goTo : undefined;
   return (
     <AskPanel
-      open={state.kind === "asking"}
+      open={asking}
       replay={replay}
       context={{
         planTitles: plan.steps.map((s) => s.title),
@@ -89,7 +93,8 @@ export function LessonAsk({
           ? narrationUpTo(loaded.step.narration, loaded.cueTimes, tMs)
           : null,
         stepGoal: plan.steps[step]?.goal,
-        boardIds: player.board.objects
+        // While asking, the frozen board (the drawing's ids come with it).
+        boardIds: (asking ? session.board() : player.board).objects
           .filter((s) => s.visible)
           .map((s) => s.object.id),
       }}
@@ -109,7 +114,7 @@ export function LessonBoard({
   player: Player;
   session: AskSession;
 }) {
-  useSyncExternalStore(session.subscribe, session.layer, session.layer);
+  useSyncExternalStore(session.subscribe, session.version, session.version);
   const asking = player.state.kind === "asking" && session.isAsking();
   // Redraw every frame while asking, so sketch actions play from arrival.
   const [, setFrame] = useState(0);

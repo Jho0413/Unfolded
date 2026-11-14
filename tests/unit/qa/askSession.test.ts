@@ -64,6 +64,26 @@ describe("createAskSession", () => {
     expect(listener).toHaveBeenCalledTimes(3); // open, sketch, close
   });
 
+  it("every open and close changes the version, even with nothing drawn", () => {
+    const { session } = setup();
+    const v0 = session.version();
+    session.open();
+    const v1 = session.version();
+    session.close();
+    expect(v1).not.toBe(v0);
+    expect(session.version()).not.toBe(v1);
+  });
+
+  it("keeps the frozen board while asking (a step arriving shows after close)", () => {
+    const { session } = setup();
+    session.open();
+    session.setFrozen(frozenBoard({ objects: [note], timed: [] }, 0));
+    expect(session.board().objects.map((s) => s.object.id)).toEqual(["q"]);
+    session.close();
+    session.setFrozen(frozenBoard({ objects: [note], timed: [] }, 0));
+    expect(session.board().objects.map((s) => s.object.id)).toEqual(["note"]);
+  });
+
   it("ignores drawings while not asking", () => {
     const { session } = setup();
     session.addAction({ do: "highlight", target: { id: "q" }, durationMs: 0 });
