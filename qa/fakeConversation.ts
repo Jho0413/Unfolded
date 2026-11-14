@@ -2,6 +2,7 @@
 // the build has NEXT_PUBLIC_FAKE_APIS=1. It replays canned agent turns and
 // calls the client tool handlers directly, so Playwright can test Q&A without
 // a network. Plain TypeScript, no React: qa/conversation.ts wraps it in a hook.
+import { OBJECT_ID_RE } from "@/shared/scene";
 import type { ClientToolName } from "@/shared/tools";
 import { callTool } from "./callTool";
 import type {
@@ -113,7 +114,7 @@ export class FakeConversation {
     if (!turn) return;
     if (turn.tool) {
       const { name } = turn.tool;
-      const params = toolParams(turn, text);
+      const params = toolParams(turn, text, this.contextUpdates.at(-1));
       const result = await callTool(this.tools, name, params);
       this.toolCalls.push({ name, params, result });
     }
@@ -152,12 +153,31 @@ export class FakeConversation {
   }
 }
 
-/** `go_to_step` takes the step the question names; other tools use the script's params. */
-function toolParams(turn: FakeTurn, text: string): Record<string, unknown> {
+/**
+ * `go_to_step` takes the step the question names; `highlight` the first id
+ * the latest context offers (so it works on any board); other tools use the
+ * script's params.
+ */
+function toolParams(
+  turn: FakeTurn,
+  text: string,
+  context: string | undefined,
+): Record<string, unknown> {
+  if (turn.tool?.name === "highlight") {
+    const id = CONTEXT_FIRST_ID.exec(context ?? "")?.[1];
+    return id
+      ? { ...turn.tool.params, target_id: id }
+      : { ...turn.tool.params };
+  }
   if (turn.tool?.name !== "go_to_step") return { ...turn.tool?.params };
   const n = Number(turn.match.exec(text)?.[1]);
   return Number.isInteger(n) ? { step: n } : { ...turn.tool.params };
 }
+
+/** The first id in a context's "ids for highlight" list (OBJECT_ID_RE without its anchors). */
+const CONTEXT_FIRST_ID = new RegExp(
+  `ids for highlight\\): (${OBJECT_ID_RE.source.replace(/^\^|\$$/g, "")})`,
+);
 
 function tick(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));

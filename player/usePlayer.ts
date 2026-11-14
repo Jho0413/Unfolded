@@ -39,7 +39,7 @@ import {
   transition,
   type TransitionResult,
 } from "./machine";
-import { sceneAt } from "./sceneAt";
+import { sceneAt, type TimedAction } from "./sceneAt";
 import {
   createStepLoader,
   type FetchStep,
@@ -54,6 +54,7 @@ interface Clock {
 }
 
 const EMPTY_BOARD: BoardState = { objects: [], copies: [], active: [] };
+const NO_TIMED: readonly TimedAction[] = [];
 
 export interface Player {
   state: PlayerState;
@@ -62,6 +63,8 @@ export interface Player {
   stepCount: number;
   /** The loaded step on screen, once it has arrived. */
   loaded: StepResponse | null;
+  /** The loaded step's timeline (empty until it arrives). */
+  timed: readonly TimedAction[];
   board: BoardState;
   /** Audio time of the step on screen, in ms. */
   tMs: number;
@@ -145,7 +148,8 @@ export function usePlayer({
             if (audioRef.current) audioRef.current.currentTime = 0;
             break;
           case "restoreBoard":
-            // Nothing to restore yet: the Q&A drawing arrives with Q3.
+            // The board is sceneAt(step, tMs) again by itself (the clock
+            // stayed at pausedT); the page drops its Ask layer when Ask closes.
             break;
           case "notice":
             break; // shown through `view.notice` in send
@@ -264,6 +268,7 @@ export function usePlayer({
     step,
     stepCount,
     loaded: onScreen?.response ?? null,
+    timed: onScreen?.timed ?? NO_TIMED,
     board,
     tMs,
     lastCue:

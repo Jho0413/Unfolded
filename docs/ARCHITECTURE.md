@@ -65,6 +65,7 @@ app/
   page.tsx, UploadForm.tsx          upload page: PDF in, the plan as a list of step titles, then Start the lesson
   upload.ts                         the upload form field and the section 7 upload and plan messages (page and route)
   lesson/[lessonId]/page.tsx        player page
+  lesson/[lessonId]/LessonAsk.tsx   the Ask panel and the Ask board, mounted through the Player's renderAsk / renderBoard
   api/lessons/route.ts              POST: PDF -> lesson plan, saved as runs/<id>/plan.json and paper.json
   api/lessons/[lessonId]/steps/[n]/route.ts   POST: generate step n (script + audio + cue times), or return it if it's ready; after a failure, a new POST tries again (section 6.2)
   api/sketch/route.ts               POST: Q&A drawing request -> sketch
@@ -112,6 +113,7 @@ qa/                                 browser
   types.ts, callTool.ts             the adapter's types; a tool call checked against shared/tools.ts, then handled
   context.ts                        pure: the sendContextualUpdate() message, and the narration heard by time t
   askBoard.ts                       pure: the board during Ask (frozen lesson board + highlights and sketches timed from arrival, fresh resets)
+  askSession.ts                     one lesson's Ask state outside React: the Ask layer, when Ask opened, the session id
   drawScene.ts                      the draw_scene request: POST /api/sketch, validate on arrival, draw or "Couldn't draw that."
   AskPanel.tsx                      voice + typed input, through conversation.ts; shows the Ask messages of section 7
   tools.ts                          client tool handlers, typed by shared/tools.ts
@@ -512,6 +514,7 @@ The developer gets the full error in the server log, tagged with the route, less
 
 - `draw_scene` doesn't wait, because a Claude request can't finish inside a natural pause. The agent's prompt tells it to describe the sketch out loud while it appears. A failed sketch is logged, the Ask panel shows "Couldn't draw that", and the browser tells the agent through `sendContextualUpdate()` so it answers in words (section 7). Spike S2 measures the sketch's latency.
 - In the browser (`qa/drawScene.ts`), the request times out after `SKETCH_FETCH_TIMEOUT_MS` (45 s, longer than the route's two attempts), and the board sent is capped at `MAX_BOARD_OBJECTS`, which mirrors `config.maxBoardObjects` (hidden objects are left out first; a board still over the cap fails without a request). `lib/config.ts` is server-only, so a unit test keeps both constants in line with it. A sketch or failure that arrives after Ask closed is dropped. The panel's `tools` prop can be a function of an `AskApi` (`showNotice`, `tellAgent`), which is how the handler shows "Couldn't draw that." and tells the agent.
+- **On the lesson page,** `LessonView` mounts the panel through the Player's `renderAsk` and draws the board through its `renderBoard`: while asking, `qa/askBoard.ts` on the step's frozen board (the player's clock stays at `pausedT`), redrawn every frame; otherwise the player's own board. One `AskSession` (`qa/askSession.ts`) holds the Ask layer, opened and closed together with the machine's `ask` and `closeAsk` / `agentDisconnected` (so a late tool call never acts on a closed Ask), and its frozen board doesn't change while asking (a step that arrives during Ask shows after it closes). Closing Ask restores `sceneAt(step, pausedT)` by dropping the layer. The context's narration is `narrationUpTo(narration, cueTimes, tMs)`.
 - `draw_scene` takes plain words, not scene JSON. The voice model only describes what to draw, and Claude writes the validated sketch, so the scene schema stays in one place and out of the agent's prompt.
 - **A sketch builds on the board the learner is looking at.** The request body is `{ description, fresh, board }`, where `board` is the current `BoardState`. The route checks the body with zod, including a cap on the board's size (`config.maxBoardObjects`). Claude sees the board, so an answer to "why does the row go with the column?" can highlight and draw over the matrix on screen.
   - The sketch's ids are checked against its own objects plus the board's (section 4). With `fresh: true` the sketch starts from an empty board, and later sketches in this Ask build on that new board, not the lesson board.
