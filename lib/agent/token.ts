@@ -1,6 +1,7 @@
-// The Q&A agent's WebRTC conversation token (ARCHITECTURE.md section 8, step 2): the browser
-// passes it to startSession({ conversationToken }), so the API key never leaves the server.
-// With FAKE_APIS=1 it's the recorded fixture; in replay mode Q&A is off, so there is none.
+// The Q&A agent's session credentials (ARCHITECTURE.md section 8, step 2): a WebRTC conversation
+// token, or a signed URL for the SDK's websocket fallback. The browser passes either to
+// startSession(), so the API key never leaves the server. With FAKE_APIS=1 they're the recorded
+// fixtures; in replay mode Q&A is off, so there are none.
 import "server-only";
 import { z } from "zod";
 import { config } from "@/lib/config";
@@ -9,10 +10,13 @@ import { readFixture } from "@/lib/fakes";
 
 /** ElevenLabs' GET /v1/convai/conversation/token body, checked here where it enters. */
 const TokenBody = z.object({ token: z.string().min(1) });
+/** ElevenLabs' GET /v1/convai/conversation/get-signed-url body, checked here where it enters. */
+const SignedUrlBody = z.object({ signed_url: z.string().min(1) });
 
 /**
- * Why there's no token. `unavailable`: Q&A isn't set up in this mode (no agent id, or a
- * replay run). `provider`: ElevenLabs failed. The message is for the server log, never the key.
+ * Why there's no token or signed URL. `unavailable`: Q&A isn't set up in this mode (no agent
+ * id, or a replay run). `provider`: ElevenLabs failed. The message is for the server log, never
+ * the key.
  */
 export class AgentTokenError extends Error {
   override name = "AgentTokenError";
@@ -34,23 +38,50 @@ export function tokenErrorStatus(err: unknown): number {
 export async function getConversationToken(
   env: Env = getEnv(),
 ): Promise<string> {
+  const body = await agentRequest(env, "token", config.agentToken, TokenBody);
+  return body.token;
+}
+
+/** A fresh websocket signed URL for the agent in ELEVENLABS_AGENT_ID. Throws AgentTokenError. */
+export async function getSignedUrl(env: Env = getEnv()): Promise<string> {
+  const body = await agentRequest(
+    env,
+    "signed URL",
+    config.agentSignedUrl,
+    SignedUrlBody,
+  );
+  return body.signed_url;
+}
+
+/** Where one credential comes from: its ElevenLabs endpoint and its FAKE_APIS fixture. */
+type AgentEndpoint = { url: string; fixture: string };
+
+/** The fixture (fake mode) or ElevenLabs' reply (real mode), checked against `schema`. */
+async function agentRequest<T>(
+  env: Env,
+  what: string,
+  endpoint: AgentEndpoint,
+  schema: z.ZodType<T>,
+): Promise<T> {
   if (env.mode === "replay")
     throw new AgentTokenError("unavailable", "replay mode: Q&A is off");
   const body =
     env.mode === "fake"
-      ? await readFixture(config.agentToken.fixture)
-      : await requestToken(env);
-  const parsed = TokenBody.safeParse(body);
+      ? await readFixture(endpoint.fixture)
+      : await requestAgent(env, what, endpoint.url);
+  const parsed = schema.safeParse(body);
   if (!parsed.success)
     throw new AgentTokenError(
       "provider",
-      "ElevenLabs token response has no token",
+      `ElevenLabs ${what} response has no ${what}`,
     );
-  return parsed.data.token;
+  return parsed.data;
 }
 
-async function requestToken(
+async function requestAgent(
   env: Extract<Env, { mode: "real" }>,
+  what: string,
+  endpointUrl: string,
 ): Promise<unknown> {
   const agentId = env.ELEVENLABS_AGENT_ID;
   if (agentId === undefined)
@@ -66,7 +97,7 @@ async function requestToken(
         : String(err),
     );
 
-  const url = new URL(config.agentToken.url);
+  const url = new URL(endpointUrl);
   url.searchParams.set("agent_id", agentId);
   let res: Response;
   try {
@@ -78,14 +109,14 @@ async function requestToken(
   } catch (err) {
     throw new AgentTokenError(
       "provider",
-      `ElevenLabs token request failed: ${describe(err)}`,
+      `ElevenLabs ${what} request failed: ${describe(err)}`,
     );
   }
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new AgentTokenError(
       "provider",
-      `ElevenLabs token request returned ${res.status}: ${redact(detail).slice(0, config.agentToken.maxLoggedErrorChars)}`,
+      `ElevenLabs ${what} request returned ${res.status}: ${redact(detail).slice(0, config.agentToken.maxLoggedErrorChars)}`,
     );
   }
   try {
@@ -94,7 +125,7 @@ async function requestToken(
     // Also a body that stalls past the timeout.
     throw new AgentTokenError(
       "provider",
-      `ElevenLabs token response unreadable: ${describe(err)}`,
+      `ElevenLabs ${what} response unreadable: ${describe(err)}`,
     );
   }
 }

@@ -30,7 +30,7 @@ flowchart LR
     U[Upload page] --> P[Player]
     P -->|audio clock t| S["sceneAt(board, timedActions, t)"]
     S --> W[Whiteboard SVG]
-    Q["Ask panel: voice + text"] <-->|WebRTC| EA[(ElevenLabs agent)]
+    Q["Ask panel: voice + text"] <-->|WebRTC, or websocket fallback| EA[(ElevenLabs agent)]
     EA -->|client tools| T[Tool handlers]
     T --> P
   end
@@ -42,6 +42,7 @@ flowchart LR
     ST --> F[(fal)]
     SK["/api/sketch"] --> C
     TK["/api/agent/token"] --> EA
+    SU["/api/agent/signed-url"] --> EA
     ST --> R[("runs/ folder")]
     L --> R
   end
@@ -72,6 +73,7 @@ app/
   api/lessons/[lessonId]/signals/route.ts     POST: record a learner signal or "step n started" (section 5.4)
   api/runs/[lessonId]/[file]/route.ts         GET: serve step JSON, audio and media from runs/ (no path traversal)
   api/agent/token/route.ts          GET: ElevenLabs conversation token
+  api/agent/signed-url/route.ts     GET: ElevenLabs websocket signed URL (the Ask fallback when WebRTC can't connect)
   dev/board/page.tsx                dev only: renders a fixed BoardState, or demo-m1 at ?t= via sceneAt (renderer tests); 404 in production unless in fake mode (FAKE_APIS=1, no REPLAY_RUN)
   dev/board/scenes.ts               the dev page's fixed BoardState and demo-m1 scenes
   dev/player/page.tsx               dev only: the player with a fake two-step lesson (player tests); same gate (dev/devOnly.ts)
@@ -94,7 +96,7 @@ lib/                                server-only (import "server-only")
   narration/cues.ts                 pure: strip markers, cue offsets -> times
   narration/tts.ts                  ElevenLabs TTS with timestamps -> audio + cue times (S1 fixture when FAKE_APIS=1)
   narration/makeM1.ts               npm run make:m1: demo-m1.step.json -> runs/demo-m1/ (plan.json, step-0.v<k>.json + .mp3)
-  agent/token.ts                    the Q&A agent's conversation token (fixture when FAKE_APIS=1)
+  agent/token.ts                    the Q&A agent's conversation token and signed URL (fixtures when FAKE_APIS=1)
   media/fal.ts                      fal (S4's model): one image from a prompt, downloaded at once; none without FAL_KEY or in replay, the fake when FAKE_APIS=1
   media/cover.ts                    the lesson cover (L4): one image per plan, saved as cover.jpg, under its own deadline
   runs/store.ts                     read/write runs/<lessonId>/
@@ -473,7 +475,7 @@ The developer gets the full error in the server log, tagged with the route, less
 | Run file | `GET /api/runs/<lessonId>/<file>` with a bad `lessonId` or file name, an extension it doesn't serve, a symlink, a folder or another non-regular file | 400 "No such lesson or file." (a symlink, folder or other non-regular file is logged; a bad name isn't, as any URL can be typed) | The page shows its own error for the step or image |
 | Run file | The file isn't in the run folder | 404 `No saved file "<file>" in lesson "<lessonId>".` | As above |
 | Run file | Reading the file fails for another reason | 500 "Couldn't read this file." (the error is logged) | As above |
-| Ask | Token route fails, or the agent can't connect | "Questions are unavailable right now." | The lesson carries on; close the panel |
+| Ask | Token route fails (or, on the websocket fallback, the signed-URL route), or the agent can't connect | "Questions are unavailable right now." | The lesson carries on; close the panel |
 | Ask | Session drops mid-question | "Q&A ended unexpectedly." | Ask again |
 | Ask | Replay mode (`REPLAY_RUN`): the page tells the panel, which never asks for a token | "Q&A needs a connection." | Close the panel |
 | Ask | Microphone permission denied | "Mic is off. Type your question; the answer will appear as text." | Typed input (text-only session) |
@@ -488,6 +490,7 @@ The developer gets the full error in the server log, tagged with the route, less
   1. The player moves to `asking` and pauses the narration. Ask also works while a step is loading (section 6.1).
   2. The browser calls `GET /api/agent/token`, and the server gets a WebRTC conversation token with `ELEVENLABS_API_KEY` (ElevenLabs' `GET /v1/convai/conversation/token?agent_id=…`).
      - It answers `{ conversationToken }`, never cached. On failure it answers `{ error: "Questions are unavailable right now." }`: 503 when Q&A isn't set up (no `ELEVENLABS_AGENT_ID`, or a replay run), 502 when ElevenLabs fails or times out (`config.agentToken.timeoutMs`). Anything else is a 500. The reason goes to the server log, never the key.
+     - **Websocket fallback:** when the WebRTC connection can't get through (some venue networks block it), the browser calls `GET /api/agent/signed-url` instead and starts the SDK's websocket session with the signed URL. The server asks ElevenLabs' `GET /v1/convai/conversation/get-signed-url?agent_id=…` with the same key. It answers `{ signedUrl }` (`AgentSignedUrlResponse`), never cached, and fails exactly like the token route (same statuses, words and timeout; fixture `config.agentSignedUrl.fixture` when `FAKE_APIS=1`).
   3. `startSession({ conversationToken })` starts the session through `qa/conversation.ts`.
      - That adapter is the only file that imports `@elevenlabs/react`, which also needs a `ConversationProvider` around the lesson page.
      - With `NEXT_PUBLIC_FAKE_APIS=1` the adapter is a scripted fake: it replays canned agent turns and calls the tool handlers directly, so Playwright can test Q&A without a network.
