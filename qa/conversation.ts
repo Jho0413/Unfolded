@@ -71,11 +71,8 @@ function useRealConversation({
     onConnect: () => latest.current.callbacks.onConnect?.(),
     onDisconnect: (details) =>
       latest.current.callbacks.onDisconnect?.(details.reason),
-    onMessage: ({ message, source }) =>
-      latest.current.callbacks.onMessage?.({
-        role: source === "user" ? "user" : "agent",
-        text: message,
-      }),
+    onMessage: ({ message, role }) =>
+      latest.current.callbacks.onMessage?.({ role, text: message }),
     onError: (message) => latest.current.callbacks.onError?.(message),
   });
   const {
@@ -104,10 +101,12 @@ function useRealConversation({
           clientTools,
         }),
       end: endSession,
-      sendUserMessage,
-      sendUserActivity,
-      sendContextualUpdate: (text: string) => sendContextualUpdate(text),
-      setMicMuted: setMuted,
+      // The SDK throws without an active session (e.g. a blur after a drop).
+      sendUserMessage: (text: string) => quietly(() => sendUserMessage(text)),
+      sendUserActivity: () => quietly(sendUserActivity),
+      sendContextualUpdate: (text: string) =>
+        quietly(() => sendContextualUpdate(text)),
+      setMicMuted: (muted: boolean) => quietly(() => setMuted(muted)),
       requestMicrophone,
     };
   }, [
@@ -119,6 +118,14 @@ function useRealConversation({
     sendContextualUpdate,
     setMuted,
   ]);
+}
+
+function quietly(call: () => void): void {
+  try {
+    call();
+  } catch (err) {
+    console.warn("[qa]", err);
+  }
 }
 
 async function requestMicrophone(): Promise<boolean> {

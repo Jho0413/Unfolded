@@ -109,3 +109,14 @@ describe("FakeConversation", () => {
     expect(messages.at(-1)).toEqual({ role: "user", text: "Why?" });
   });
 });
+
+describe("FakeConversation end during connect", () => {
+  it("doesn't connect when ended before the connect lands", async () => {
+    const { fake, cb } = setup();
+    const pending = fake.start({ conversationToken: "t", textOnly: false });
+    fake.end();
+    await pending;
+    expect(cb.onConnect).not.toHaveBeenCalled();
+    expect(fake.status).toBe("disconnected");
+  });
+});

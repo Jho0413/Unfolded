@@ -55,6 +55,8 @@ export class FakeConversation {
   readonly transcript: QaMessage[] = [];
   readonly toolCalls: FakeToolCall[] = [];
   userActivity = 0;
+  /** Bumped by end(), so a start still in flight doesn't connect. */
+  private session = 0;
 
   constructor(
     private callbacks: ConversationCallbacks,
@@ -70,7 +72,9 @@ export class FakeConversation {
 
   async start({ conversationToken, textOnly }: StartOptions): Promise<void> {
     if (this.status === "connected") return;
+    const session = ++this.session;
     await tick();
+    if (session !== this.session) return;
     if (conversationToken === FAKE_CONNECT_FAIL_TOKEN) {
       this.callbacks.onError?.("Could not connect to the agent");
       this.callbacks.onDisconnect?.("error");
@@ -84,6 +88,7 @@ export class FakeConversation {
   }
 
   end(): void {
+    this.session++;
     this.close("user");
   }
 

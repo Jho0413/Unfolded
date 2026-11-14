@@ -43,6 +43,9 @@ export type AskPanelProps = {
 };
 
 /** "connecting" lives only in phaseRef; the render derives it from `open`. */
+/** How long a session may take to connect before Ask says it's unavailable. */
+const CONNECT_TIMEOUT_MS = 15_000;
+
 type Phase = "idle" | "connecting" | "connected" | "failed";
 
 export function AskPanel({
@@ -72,9 +75,18 @@ export function AskPanel({
     setPhase(p);
   }, []);
 
+  // Typed questions sent but not yet echoed back by the conversation.
+  const typedEcho = useRef<string[]>([]);
+  const addMessage = useCallback((m: QaMessage) => {
+    setMessages((ms) => [...ms, m]);
+    if (m.role === "user") setQuestions((qs) => [...qs, m.text]);
+  }, []);
+
   const conversation = useQaConversation({
     tools,
     onConnect: () => {
+      // A connect that lands after Ask closed (or timed out) is ended at once.
+      if (phaseRef.current !== "connecting") return conversation.end();
       go("connected");
       const { context: c, questions: q } = contextRef.current;
       conversation.sendContextualUpdate(
@@ -95,8 +107,12 @@ export function AskPanel({
       }
     },
     onMessage: (m) => {
-      setMessages((ms) => [...ms, m]);
-      if (m.role === "user") setQuestions((qs) => [...qs, m.text]);
+      // Typed questions are added in submit(); skip the SDK's echo, if any.
+      if (m.role === "user" && typedEcho.current.includes(m.text)) {
+        typedEcho.current.splice(typedEcho.current.indexOf(m.text), 1);
+        return;
+      }
+      addMessage(m);
     },
     onError: (message) => {
       console.error("[qa]", message);
@@ -115,6 +131,15 @@ export function AskPanel({
     if (!open || replay) return;
     let cancelled = false;
     phaseRef.current = "connecting";
+    typedEcho.current = [];
+    // A connect that never settles (e.g. reopened while the last one was
+    // still ending) must not leave the panel connecting forever.
+    const timeout = setTimeout(() => {
+      if (!cancelled && phaseRef.current === "connecting") {
+        fail();
+        conversation.end();
+      }
+    }, CONNECT_TIMEOUT_MS);
     void (async () => {
       const token = await fetchToken();
       if (cancelled) return;
@@ -129,6 +154,7 @@ export function AskPanel({
     })();
     return () => {
       cancelled = true;
+      clearTimeout(timeout);
       go("idle"); // so the "user" disconnect below is not reported
       conversation.end();
       setMessages([]);
@@ -167,8 +193,8 @@ export function AskPanel({
   // `A` opens Ask (Space stays play/pause); Escape closes it.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return;
-      if (!open && (e.key === "a" || e.key === "A")) {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (!open && (e.key === "a" || e.key === "A") && !isTyping(e.target)) {
         e.preventDefault();
         ask();
       } else if (open && e.key === "Escape") {
@@ -184,6 +210,8 @@ export function AskPanel({
     e.preventDefault();
     const text = draft.trim();
     if (!text || phase !== "connected") return;
+    typedEcho.current.push(text);
+    addMessage({ role: "user", text });
     conversation.sendUserMessage(text);
     setDraft("");
   }

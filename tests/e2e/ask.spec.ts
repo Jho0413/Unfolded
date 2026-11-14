@@ -79,13 +79,12 @@ test.describe("Ask with the fake conversation", () => {
     await expect(state(page)).toHaveAttribute("data-state", "stepEnded");
   });
 
-  test("the A key opens Ask, Escape closes it, and A while typing doesn't", async ({
+  test("the A key opens Ask, A while typing doesn't, and Escape closes it", async ({
     page,
   }) => {
     await open(page);
     await toPlaying(page);
-    await page.keyboard.press("Space");
-    await expect(state(page)).toHaveAttribute("data-state", "playing");
+    await page.locator("body").click({ position: { x: 5, y: 5 } });
     await page.keyboard.press("a");
     await expect(state(page)).toHaveAttribute("data-state", "asking");
     await expect(page.getByTestId("ask-panel")).toHaveAttribute(
