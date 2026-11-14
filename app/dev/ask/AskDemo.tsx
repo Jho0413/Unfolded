@@ -21,7 +21,8 @@ import {
   askScene,
   EMPTY_LAYER,
 } from "@/qa/askBoard";
-import { SKETCH_FAILED, sketchFailedUpdate } from "@/qa/drawScene";
+import { sketchFailedUpdate } from "@/qa/drawScene";
+import { SKETCH_FAILED } from "@/shared/lesson";
 import { createClientTools, type HighlightAction } from "@/qa/tools";
 import { Whiteboard } from "@/player/Whiteboard";
 

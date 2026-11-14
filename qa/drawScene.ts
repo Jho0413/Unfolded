@@ -9,9 +9,6 @@ import { SketchResponse } from "@/shared/lesson";
 import type { BoardState, Sketch } from "@/shared/scene";
 import { validateSketch } from "@/shared/validate";
 
-// TODO(#63): import SKETCH_FAILED from shared/lesson.ts once SK1 is merged.
-export const SKETCH_FAILED = "Couldn't draw that.";
-
 /**
  * Mirrors config.maxBoardObjects (lib/config.ts is server-only); a unit test
  * keeps them equal.
@@ -36,7 +33,7 @@ export type DrawSceneDeps = {
   askId: () => number;
   /** Draws a validated sketch on top of the board, or on an empty one. */
   drawSketch: (sketch: Sketch, fresh: boolean) => void;
-  /** Shows SKETCH_FAILED and tells the agent (the Ask panel does both). */
+  /** Shows SKETCH_FAILED (shared/lesson.ts) and tells the agent (the Ask panel does both). */
   sketchFailed: (description: string, reason: string) => void;
   /** Injected in tests. */
   fetch?: typeof fetch;

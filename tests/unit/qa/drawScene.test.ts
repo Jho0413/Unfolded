@@ -1,6 +1,7 @@
 // The draw_scene tool (ARCHITECTURE.md sections 7 and 8, ROADMAP Q5).
 import { describe, expect, it, vi } from "vitest";
 import { config } from "@/lib/config";
+import { SKETCH_FAILED } from "@/shared/lesson";
 import {
   boardToSend,
   drawScene,
@@ -112,9 +113,7 @@ describe("drawScene", () => {
   });
 
   it("an { error } response fails: Couldn't draw that", async () => {
-    const { deps } = setup(async () =>
-      json({ error: "Couldn't draw that." }, 502),
-    );
+    const { deps } = setup(async () => json({ error: SKETCH_FAILED }, 502));
     await drawScene(deps, "x", false);
     expect(deps.sketchFailed).toHaveBeenCalledWith("x", "HTTP 502");
     expect(deps.drawSketch).not.toHaveBeenCalled();
@@ -171,7 +170,7 @@ describe("drawScene", () => {
     const ok = setup(async () => json({ sketch: onBoard }));
     ok.deps.isAsking.mockReturnValue(false);
     await drawScene(ok.deps, "x", false);
-    const bad = setup(async () => json({ error: "Couldn't draw that." }, 502));
+    const bad = setup(async () => json({ error: SKETCH_FAILED }, 502));
     bad.deps.isAsking.mockReturnValue(false);
     await drawScene(bad.deps, "x", false);
     for (const d of [ok.deps, bad.deps]) {
@@ -183,7 +182,7 @@ describe("drawScene", () => {
   it("drops a sketch, or a failure, from an earlier Ask session after Ask reopened", async () => {
     for (const reply of [
       async () => json({ sketch: onBoard }),
-      async () => json({ error: "Couldn't draw that." }, 502),
+      async () => json({ error: SKETCH_FAILED }, 502),
     ]) {
       let session = 1;
       const { deps } = setup(async () => {
@@ -240,10 +239,8 @@ describe("browser constants match the server config", () => {
   });
 
   it("the fetch timeout is longer than SK1's two attempts", () => {
-    // config.sketch arrives with SK1 (#63); 20 s per attempt until then.
-    const perAttempt =
-      (config as { sketch?: { timeoutMs?: number } }).sketch?.timeoutMs ??
-      20_000;
-    expect(SKETCH_FETCH_TIMEOUT_MS).toBeGreaterThan(2 * perAttempt);
+    expect(SKETCH_FETCH_TIMEOUT_MS).toBeGreaterThan(
+      2 * config.sketch.timeoutMs,
+    );
   });
 });
