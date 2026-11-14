@@ -11,7 +11,6 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { getEnv } from "@/lib/env";
-import { INK, PAGE_BG } from "@/player/primitives/style";
 import { LessonView } from "./LessonView";
 import { loadLesson } from "./loadLesson";
 
@@ -28,22 +27,11 @@ export default async function LessonPage({
   if (lesson.kind === "missing") notFound();
   const { debug } = await searchParams;
   return (
-    <main style={PAGE}>
-      <LessonView
-        lessonId={lesson.lessonId}
-        plan={lesson.plan}
-        replay={getEnv().mode === "replay"}
-        debug={debug === "1"}
-      />
-    </main>
+    <LessonView
+      lessonId={lesson.lessonId}
+      plan={lesson.plan}
+      replay={getEnv().mode === "replay"}
+      debug={debug === "1"}
+    />
   );
 }
-
-const PAGE = {
-  fontFamily: "system-ui, sans-serif",
-  background: PAGE_BG,
-  color: INK,
-  minHeight: "100vh",
-  padding: 24,
-  boxSizing: "border-box",
-} as const;

@@ -4,8 +4,13 @@
 // already count as a user activation, so the page gets that policy
 // emulated instead. play() rejects with the browser's NotAllowedError until
 // the first real (trusted) click or key press.
+//
+// The notice is the tutor card's start state (ARCHITECTURE.md section 5.6): the intro, and
+// "Start with “<title>” →" as the recovery.
 import { expect, test } from "@playwright/test";
+import { CARD_STATUS } from "@/player/cardView";
 import { MESSAGES } from "@/player/machine";
+import { card, start } from "./support/tutor";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -29,27 +34,27 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("playing + playBlocked: → paused, with Press play to start", async ({
+test("playing + playBlocked: → paused, with the start card", async ({
   page,
 }) => {
   await page.goto("/dev/player");
   const player = page.getByTestId("player");
   await expect(player).toHaveAttribute("data-state", "paused");
   await expect(player).toHaveAttribute("data-step", "0");
-  await expect(page.getByTestId("player-notice")).toHaveText(
-    MESSAGES.pressPlay,
+  await expect(page.getByTestId("card-status")).toHaveText(CARD_STATUS.ready);
+  await expect(page.getByTestId("card-said")).toHaveText(
+    "2 ideas. I'll draw as I explain. Interrupt me any time.",
   );
 
-  // Recovery (section 7): the Play button.
-  await page
-    .getByRole("toolbar", { name: "Player controls" })
-    .getByRole("button", { name: "Play", exact: true })
-    .click();
+  // Recovery (section 7): Start with the first idea.
+  await expect(start(page)).toHaveText("Start with “Idea 1” →");
+  await start(page).click();
   await expect(player).toHaveAttribute("data-state", "playing");
-  await expect(page.getByTestId("player-notice")).toHaveCount(0);
+  await expect(start(page)).toHaveCount(0);
+  await expect(card(page)).not.toContainText("Interrupt me any time.");
 });
 
-test("paused + audioError: ignored, then Play → failed (Couldn't play the audio. Retry?)", async ({
+test("paused + audioError: ignored, then Start → failed (Couldn't play the audio. Retry?)", async ({
   page,
 }) => {
   await page.goto("/dev/player?audio=broken");
@@ -67,10 +72,7 @@ test("paused + audioError: ignored, then Play → failed (Couldn't play the audi
     );
   await expect(player).toHaveAttribute("data-state", "paused");
 
-  await page
-    .getByRole("toolbar", { name: "Player controls" })
-    .getByRole("button", { name: "Play", exact: true })
-    .click();
+  await start(page).click();
   await expect(player).toHaveAttribute("data-state", "failed");
   await expect(page.getByTestId("player-error")).toHaveText(
     MESSAGES.audioFailed,

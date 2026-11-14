@@ -3,6 +3,7 @@
 // so the page's conversation is qa/fakeConversation.ts, exposed as
 // window.__qaFake for these tests.
 import { expect, type Page, test } from "@playwright/test";
+import { answer, askByVoice, askInput, carryOn } from "./support/tutor";
 
 const ASK = {
   unavailable: "Questions are unavailable right now.",
@@ -29,7 +30,7 @@ async function toPlaying(page: Page) {
 }
 
 async function askAndConnect(page: Page) {
-  await page.getByRole("button", { name: "Ask", exact: true }).click();
+  await askByVoice(page).click();
   await expect(page.getByTestId("dev-ask")).toHaveAttribute(
     "data-state",
     "asking",
@@ -41,11 +42,9 @@ async function askAndConnect(page: Page) {
 }
 
 async function typeQuestion(page: Page, text: string) {
-  await page.getByLabel("Type your question").fill(text);
-  await page.getByRole("button", { name: "Send" }).click();
-  await expect(
-    page.getByTestId("ask-transcript").locator('[data-role="user"]').last(),
-  ).toContainText(text);
+  await askInput(page).fill(text);
+  await askInput(page).press("Enter");
+  await expect(page.getByTestId("ask-question")).toContainText(text);
 }
 
 const notice = (page: Page) => page.getByTestId("ask-notice");
@@ -59,10 +58,8 @@ test.describe("Ask with the fake conversation", () => {
     await toPlaying(page);
     await askAndConnect(page);
     await typeQuestion(page, "What is this?");
-    await expect(
-      page.getByTestId("ask-transcript").locator('[data-role="agent"]').last(),
-    ).toContainText("row times a column");
-    await page.getByRole("button", { name: "Close" }).click();
+    await expect(answer(page)).toContainText("row times a column");
+    await carryOn(page).click();
     await expect(state(page)).toHaveAttribute("data-state", "paused");
     await expect(page.getByTestId("ask-panel")).toHaveAttribute(
       "data-phase",
@@ -76,7 +73,7 @@ test.describe("Ask with the fake conversation", () => {
     await toPlaying(page);
     await page.getByRole("button", { name: "audioEnded" }).click();
     await askAndConnect(page);
-    await page.getByRole("button", { name: "Close" }).click();
+    await carryOn(page).click();
     await expect(state(page)).toHaveAttribute("data-state", "stepEnded");
   });
 
@@ -139,7 +136,7 @@ test.describe("Ask with the fake conversation", () => {
     expect(last).toContain("3. Attention (next, after this question)");
     expect(last).toContain("Objects on the board (ids for highlight): q, a");
     expect(last).toContain("- go to step 3");
-    await page.getByRole("button", { name: "Close" }).click();
+    await carryOn(page).click();
     await expect(state(page)).toHaveAttribute("data-state", "loading");
     await expect(state(page)).toHaveAttribute("data-step", "2");
     await page.getByRole("button", { name: "stepReady" }).click();
@@ -164,7 +161,7 @@ test.describe("client tools on /dev/ask (ROADMAP Q4)", () => {
         .getByTestId("highlights")
         .locator(`[data-target='${JSON.stringify({ id: "q", row: 0 })}']`),
     ).toHaveCount(1);
-    await page.getByRole("button", { name: "Close" }).click();
+    await carryOn(page).click();
     await expect(page.getByTestId("highlights").locator("li")).toHaveCount(0);
   });
 
@@ -179,7 +176,7 @@ test.describe("client tools on /dev/ask (ROADMAP Q4)", () => {
       'go_to_step {"step":9} -> no step 9',
     );
     await expect(state(page)).toHaveAttribute("data-state", "asking");
-    await page.getByRole("button", { name: "Close" }).click();
+    await carryOn(page).click();
     await expect(state(page)).toHaveAttribute("data-state", "paused");
     await expect(state(page)).toHaveAttribute("data-step", "0");
   });
@@ -230,9 +227,7 @@ test.describe("draw_scene on /dev/ask (ROADMAP Q5)", () => {
     expect(body.fresh).toBe(false);
     expect(body.board.objects.map((o) => o.object.id)).toEqual(["q", "a"]);
     // The agent answers at once: draw_scene doesn't wait for the sketch.
-    await expect(
-      page.getByTestId("ask-transcript").locator('[data-role="agent"]').last(),
-    ).toContainText("Let me sketch that");
+    await expect(answer(page)).toContainText("Let me sketch that");
     await expect(page.getByTestId("tool-log")).toContainText(
       'draw_scene {"description":"Circle the first row of q","fresh":false} -> (no result)',
     );
@@ -249,7 +244,7 @@ test.describe("draw_scene on /dev/ask (ROADMAP Q5)", () => {
     await expect(page.getByTestId("ask-tool-notice")).toHaveCount(0);
     // Closing Ask throws the drawing away: the board's data-* attributes
     // match those from before Ask.
-    await page.getByRole("button", { name: "Close" }).click();
+    await carryOn(page).click();
     await expect(note).toHaveCount(0);
     await expect.poll(() => boardAttributes(page)).toBe(before);
   });
@@ -329,13 +324,13 @@ test.describe("Ask messages (ARCHITECTURE.md section 7)", () => {
     );
     await open(page);
     await toPlaying(page);
-    await page.getByRole("button", { name: "Ask", exact: true }).click();
+    await askByVoice(page).click();
     await expect(notice(page)).toHaveText(ASK.unavailable);
     await expect(page.getByTestId("ask-panel")).toHaveAttribute(
       "data-phase",
       "failed",
     );
-    await page.getByRole("button", { name: "Close" }).click();
+    await carryOn(page).click();
     await expect(state(page)).toHaveAttribute("data-state", "paused");
     await expect(notice(page)).toHaveCount(0);
   });
@@ -351,7 +346,7 @@ test.describe("Ask messages (ARCHITECTURE.md section 7)", () => {
     );
     await open(page);
     await toPlaying(page);
-    await page.getByRole("button", { name: "Ask", exact: true }).click();
+    await askByVoice(page).click();
     await expect(notice(page)).toHaveText(ASK.unavailable);
     await expect(state(page)).toHaveAttribute("data-state", "asking");
   });
@@ -370,9 +365,7 @@ test.describe("Ask messages (ARCHITECTURE.md section 7)", () => {
     );
     expect(await page.evaluate(() => window.__qaFake?.textOnly)).toBe(true);
     await typeQuestion(page, "What is this?");
-    await expect(
-      page.getByTestId("ask-transcript").locator('[data-role="agent"]').last(),
-    ).toContainText("row times a column");
+    await expect(answer(page)).toContainText("row times a column");
   });
 
   test("a failed sketch in a text-only session keeps the mic message", async ({
@@ -401,9 +394,9 @@ test.describe("Ask messages (ARCHITECTURE.md section 7)", () => {
     });
     await open(page, "?replay=1");
     await toPlaying(page);
-    await page.getByRole("button", { name: "Ask", exact: true }).click();
+    await askByVoice(page).click();
     await expect(notice(page)).toHaveText(ASK.needsConnection);
-    await page.getByRole("button", { name: "Close" }).click();
+    await carryOn(page).click();
     await expect(state(page)).toHaveAttribute("data-state", "paused");
     expect(tokenRequests).toBe(0);
   });
@@ -411,8 +404,7 @@ test.describe("Ask messages (ARCHITECTURE.md section 7)", () => {
 
 // Issue #84: Ask must work on a real Mac browser and on venue Wi-Fi.
 test.describe("Ask robustness (issue #84)", () => {
-  const transcriptAgent = (page: Page) =>
-    page.getByTestId("ask-transcript").locator('[data-role="agent"]').last();
+  const transcriptAgent = answer;
 
   test("the mic prompt is never answered: the input works at once, and typing starts a text-only session", async ({
     page,
@@ -422,17 +414,20 @@ test.describe("Ask robustness (issue #84)", () => {
     });
     await open(page);
     await toPlaying(page);
-    await page.getByRole("button", { name: "Ask", exact: true }).click();
+    await askByVoice(page).click();
     const panel = page.getByTestId("ask-panel");
     await expect(panel).toHaveAttribute("data-phase", "waiting");
     await expect(page.getByTestId("ask-hint")).toBeVisible();
     const input = page.getByLabel("Type your question");
     await expect(input).toBeEnabled();
-    await expect(input).toHaveAttribute("placeholder", "Type your question");
+    await expect(input).toHaveAttribute(
+      "placeholder",
+      "Ask anything, or just press the mic and talk",
+    );
     expect(await page.evaluate(() => window.__qaFake?.starts.length)).toBe(0);
     // Typed and sent before any session exists: queued, then answered.
     await input.fill("What is this?");
-    await page.getByRole("button", { name: "Send" }).click();
+    await input.press("Enter");
     await expect(panel).toHaveAttribute("data-phase", "connected");
     await expect(panel).toHaveAttribute("data-text-only", "true");
     await expect(transcriptAgent(page)).toContainText("row times a column");
@@ -452,12 +447,12 @@ test.describe("Ask robustness (issue #84)", () => {
     });
     await open(page);
     await toPlaying(page);
-    await page.getByRole("button", { name: "Ask", exact: true }).click();
+    await askByVoice(page).click();
     await expect(page.getByTestId("ask-panel")).toHaveAttribute(
       "data-phase",
       "waiting",
     );
-    await page.getByRole("button", { name: "Close" }).click();
+    await carryOn(page).click();
     await expect(state(page)).toHaveAttribute("data-state", "paused");
     await page.waitForTimeout(300);
     expect(await page.evaluate(() => window.__qaFake?.starts.length)).toBe(0);
@@ -470,8 +465,8 @@ test.describe("Ask robustness (issue #84)", () => {
     await page.evaluate(() => {
       if (window.__qaFake) window.__qaFake.failNextSend = true;
     });
-    await page.getByLabel("Type your question").fill("Why?");
-    await page.getByRole("button", { name: "Send" }).click();
+    await askInput(page).fill("Why?");
+    await askInput(page).press("Enter");
     await expect(notice(page)).toHaveText(ASK.ended);
     await expect(state(page)).toHaveAttribute("data-state", "paused");
   });
@@ -487,7 +482,7 @@ test.describe("Ask robustness (issue #84)", () => {
     );
     await open(page);
     await toPlaying(page);
-    await page.getByRole("button", { name: "Ask", exact: true }).click();
+    await askByVoice(page).click();
     await expect(notice(page)).toHaveText(ASK.unavailable);
     await expect(page.getByTestId("ask-panel")).toHaveAttribute(
       "data-phase",
@@ -508,7 +503,7 @@ test.describe("Ask robustness (issue #84)", () => {
     );
     await open(page);
     await toPlaying(page);
-    await page.getByRole("button", { name: "Ask", exact: true }).click();
+    await askByVoice(page).click();
     const panel = page.getByTestId("ask-panel");
     await expect(panel).toHaveAttribute("data-phase", "connected", {
       timeout: 15_000,
@@ -564,7 +559,7 @@ test.describe("Ask robustness (issue #84)", () => {
     await expect(transcriptAgent(page)).toContainText("row times a column");
     await expect(notice(page)).toHaveCount(0);
     // The next Ask on this page goes straight to the websocket.
-    await page.getByRole("button", { name: "Close" }).click();
+    await carryOn(page).click();
     await askAndConnect(page);
     expect(await page.evaluate(() => window.__qaFake?.starts.at(-1))).toBe(
       "websocket",

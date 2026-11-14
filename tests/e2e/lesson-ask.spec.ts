@@ -4,6 +4,13 @@
 // The panel's own cases (every Ask message, keys, mic) are in ask.spec.ts.
 import { expect, type Page, test } from "@playwright/test";
 import { savedRun, savedStepTitle } from "./support/savedRun";
+import {
+  answer,
+  askByVoice,
+  askQuestion,
+  carryOn,
+  holdOn,
+} from "./support/tutor";
 
 test.use({
   launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
@@ -27,10 +34,7 @@ function boardAttributes(page: Page): Promise<string> {
   );
 }
 
-async function typeQuestion(page: Page, text: string) {
-  await page.getByLabel("Type your question").fill(text);
-  await page.getByRole("button", { name: "Send" }).click();
-}
+const typeQuestion = askQuestion;
 
 const SKETCH = {
   objects: [
@@ -39,7 +43,7 @@ const SKETCH = {
   actions: [{ do: "highlight", target: { id: "b", col: 1 }, atMs: 0 }],
 };
 
-test("typed question -> asking -> highlight and draw -> close -> back to paused, board restored", async ({
+test("typed question -> asking -> highlight and draw -> carry on -> the lesson goes on, board restored", async ({
   page,
 }) => {
   await using run = await savedRun("e2e-lesson-ask");
@@ -51,10 +55,7 @@ test("typed question -> asking -> highlight and draw -> close -> back to paused,
   });
   await page.goto(`/lesson/${run.lessonId}`);
   await expect(player(page)).toHaveAttribute("data-state", "playing");
-  await page
-    .getByRole("toolbar", { name: "Player controls" })
-    .getByRole("button", { name: "Pause" })
-    .click();
+  await holdOn(page).click();
   await expect(player(page)).toHaveAttribute("data-state", "paused");
   // Back to t = 0 (no cue fired yet), so the board doesn't depend on when the pause landed.
   await page.getByTestId("player-audio").evaluate(
@@ -82,7 +83,7 @@ test("typed question -> asking -> highlight and draw -> close -> back to paused,
     })
     .toBe(true);
 
-  await page.getByRole("button", { name: "Ask", exact: true }).click();
+  await askByVoice(page).click();
   await expect(player(page)).toHaveAttribute("data-state", "asking");
   await expect(page.getByTestId("ask-panel")).toHaveAttribute(
     "data-phase",
@@ -110,9 +111,7 @@ test("typed question -> asking -> highlight and draw -> close -> back to paused,
   };
   expect(body.fresh).toBe(false);
   expect(body.board.objects.map((o) => o.object.id)).toContain("a");
-  await expect(
-    page.getByTestId("ask-transcript").locator('[data-role="agent"]').last(),
-  ).toContainText("Let me sketch that");
+  await expect(answer(page)).toContainText("Let me sketch that");
   const note = board(page).locator('[data-object-id="note"]');
   await expect(note).toHaveCount(0);
   release();
@@ -122,13 +121,17 @@ test("typed question -> asking -> highlight and draw -> close -> back to paused,
     "accent",
   );
 
-  await page.getByRole("button", { name: "Close" }).click();
-  await expect(player(page)).toHaveAttribute("data-state", "paused");
+  // Carry on: Ask closes (paused), then the lesson resumes; the drawing is thrown away.
+  await carryOn(page).click();
+  await expect(player(page)).toHaveAttribute("data-state", "playing");
   await expect(note).toHaveCount(0);
+  // Held at t = 0 again, the board is the one from before Ask.
+  await holdOn(page).click();
+  await seek(page, 0);
   await expect.poll(() => boardAttributes(page)).toBe(before);
 });
 
-test("go_to_step while asking loads that step paused after close", async ({
+test("go_to_step while asking loads that step paused after carry on", async ({
   page,
 }) => {
   await using run = await savedRun("e2e-lesson-ask-goto");
@@ -140,16 +143,15 @@ test("go_to_step while asking loads that step paused after close", async ({
     "connected",
   );
   await typeQuestion(page, "go to step 2");
-  await expect(
-    page.getByTestId("ask-transcript").locator('[data-role="agent"]').last(),
-  ).toContainText("once you close this");
+  await expect(answer(page)).toContainText("once you close this");
   await expect(player(page)).toHaveAttribute("data-state", "asking");
   // The board stays on step 1 while asking; the agent is told step 2 is next.
   await expect(player(page)).toHaveAttribute("data-step", "0");
   await expect
     .poll(() => page.evaluate(() => window.__qaFake?.contextUpdates.at(-1)))
     .toContain("(next, after this question)");
-  await page.getByRole("button", { name: "Close" }).click();
+  // The jumped-to step loads paused (the narration never talks over the agent).
+  await carryOn(page).click();
   await expect(player(page)).toHaveAttribute("data-state", "paused");
   await expect(player(page)).toHaveAttribute("data-step", "1");
 });
@@ -172,23 +174,20 @@ test("Ask opened mid-fade: the fade completes with nothing drawn", async ({
   await using run = await savedRun("e2e-lesson-ask-fade");
   await page.goto(`/lesson/${run.lessonId}`);
   await expect(player(page)).toHaveAttribute("data-state", "playing");
-  await page
-    .getByRole("toolbar", { name: "Player controls" })
-    .getByRole("button", { name: "Pause" })
-    .click();
+  await holdOn(page).click();
   await expect(player(page)).toHaveAttribute("data-state", "paused");
   // 1.1 s: 100 ms into the 300 ms highlight of row 0 of a (cue "row" at 1 s).
   await seek(page, 1.1);
   const opacity = () =>
     cell(page, "a", 0, 0).getAttribute("data-highlight-opacity");
   await expect.poll(async () => Number(await opacity())).toBeLessThan(1);
-  await page.getByRole("button", { name: "Ask", exact: true }).click();
+  await askByVoice(page).click();
   await expect(player(page)).toHaveAttribute("data-state", "asking");
   // Q&A time is pausedT + the time since Ask opened (ARCH 5.3).
   await expect.poll(opacity).toBe("1");
 });
 
-test("Ask while loading: the board stays empty when the step arrives, then shows at 0 after Close", async ({
+test("Ask while loading: the board stays empty when the step arrives, then plays from 0 after carry on", async ({
   page,
 }) => {
   await using run = await savedRun("e2e-lesson-ask-loading");
@@ -201,7 +200,7 @@ test("Ask while loading: the board stays empty when the step arrives, then shows
   });
   await page.goto(`/lesson/${run.lessonId}`);
   await expect(player(page)).toHaveAttribute("data-state", "loading");
-  await page.getByRole("button", { name: "Ask", exact: true }).click();
+  await askByVoice(page).click();
   await expect(player(page)).toHaveAttribute("data-state", "asking");
   await expect(page.getByTestId("ask-panel")).toHaveAttribute(
     "data-phase",
@@ -219,8 +218,8 @@ test("Ask while loading: the board stays empty when the step arrives, then shows
   );
   await expect(player(page)).toHaveAttribute("data-state", "asking");
   await expect(a).toHaveCount(0);
-  await page.getByRole("button", { name: "Close" }).click();
-  await expect(player(page)).toHaveAttribute("data-state", "paused");
+  await carryOn(page).click();
+  await expect(player(page)).toHaveAttribute("data-state", "playing");
+  await expect(player(page)).toHaveAttribute("data-step", "0");
   await expect(a).toHaveCount(1);
-  await expect(cell(page, "a", 0, 0)).toHaveAttribute("data-highlight", "none");
 });

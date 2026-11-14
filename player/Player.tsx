@@ -1,111 +1,187 @@
 "use client";
-// The lesson player (ROADMAP P5): the whiteboard, the controls and the one
-// audio element, driven by usePlayer. `data-state` and `data-step` expose the
-// machine for tests. `debug` adds an overlay with the clock and the last cue
-// (pages turn it on with `?debug=1`). `renderAsk` is the Ask panel's mount
-// point: it gets the player (state and send), so the panel can open and close
-// Ask through the machine. `renderBoard` replaces the board (the Ask panel
-// draws its highlights and sketches on top of the frozen board, section 8).
-import type { CSSProperties, ReactNode } from "react";
-import { CANVAS } from "@/shared/scene";
-import { playPauseEvent, statusFor } from "./controls";
-import { FRAME_BORDER, MUTED, PAGE_BG } from "./primitives/style";
+// The lesson player (ROADMAP P5, ARCHITECTURE.md section 5.6): a tutor you can interrupt, not
+// a video. The board is the stage, with the tutor card floating at its bottom: what the card
+// says and offers comes from player/cardView.ts, every button is an existing machine event,
+// and there is no transport (no play button, scrubber or timecode). `data-state` and
+// `data-step` expose the machine for tests.
+//
+// - `Player` owns its usePlayer (the dev player). The lesson page runs usePlayer itself, to
+//   share it with its outline, and renders `PlayerStage`.
+// - `renderAsk` is the Ask panel's mount point under the card; while asking, the panel shows
+//   its own card. `renderBoard` replaces the board (Ask draws on the frozen board, section 8).
+// - Keys: Space holds on and goes on (usePlayer), → next idea, ← back, R say that again
+//   (controls.ts `shortcutEvent`), A asks (the Ask panel).
+import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { captionFrom, prepareNarration } from "./captions";
+import { shortcutEvent } from "./controls";
+import { lessonCard } from "./cardView";
+import { TutorCard } from "./TutorCard";
 import type { FetchStep } from "./stepLoader";
 import { type Player as PlayerApi, usePlayer } from "./usePlayer";
 import { Whiteboard } from "./Whiteboard";
+import styles from "./Player.module.css";
 
 export function Player({
   stepCount,
   fetchStep,
   onStepReady,
-  debug = false,
-  renderAsk,
-  renderBoard,
+  ...stage
 }: {
   stepCount: number;
   fetchStep: FetchStep;
   /** The player took step n (script and audio arrived): the lesson page prefetches n + 1. */
   onStepReady?: (n: number) => void;
+} & Omit<PlayerStageProps, "player">) {
+  const player = usePlayer({ stepCount, fetchStep, onStepReady });
+  return (
+    <div className={styles.standalone}>
+      <PlayerStage player={player} {...stage} />
+    </div>
+  );
+}
+
+export type PlayerStageProps = {
+  player: PlayerApi;
+  /** The plan's step titles (the card names the next idea); "Idea n" without them. */
+  titles?: readonly string[];
+  /** The lesson's title, for the card's intro. */
+  lessonTitle?: string;
+  /** Show what the tutor says as text (the Captions toggle). */
+  captions?: boolean;
+  /** At the end of the top bar (the lesson page's toggles). */
+  barEnd?: ReactNode;
   debug?: boolean;
-  /** The Ask panel, rendered under the controls (ROADMAP Q3). */
+  /** The Ask panel, under the card (ROADMAP Q3). */
   renderAsk?: (player: PlayerApi) => ReactNode;
   /** The board; the default is `<Whiteboard state={player.board} />`. */
   renderBoard?: (player: PlayerApi) => ReactNode;
-}) {
-  const player = usePlayer({ stepCount, fetchStep, onStepReady });
-  const { state } = player;
+};
+
+const NO_TITLES: readonly string[] = [];
+
+export function PlayerStage({
+  player,
+  titles = NO_TITLES,
+  lessonTitle,
+  captions = true,
+  barEnd,
+  debug = false,
+  renderAsk,
+  renderBoard,
+}: PlayerStageProps) {
+  const { state, send, loaded, tMs } = player;
+  useShortcuts(send);
+  // The audio's duration, the captions' last anchor, for the audio it was read from: a new
+  // step's audio has none until its metadata loads.
+  const [duration, setDuration] = useState<{ src: string; ms: number } | null>(
+    null,
+  );
+  const src =
+    typeof player.audioProps.src === "string"
+      ? player.audioProps.src
+      : undefined;
+  const durationMs =
+    duration !== null && duration.src === src ? duration.ms : null;
+  const card = lessonCard({
+    state,
+    notice: player.notice,
+    titles,
+    stepCount: player.stepCount,
+    lessonTitle: lessonTitle ?? null,
+    captions,
+  });
+  const narration = loaded?.step.narration;
+  const cueTimes = loaded?.cueTimes;
+  // Stripping and splitting the narration happens once per step, not on every frame.
+  const prepared = useMemo(
+    () => (narration === undefined ? null : prepareNarration(narration)),
+    [narration],
+  );
+  const caption =
+    prepared === null || cueTimes === undefined
+      ? null
+      : captionFrom(prepared, cueTimes, durationMs, tMs);
+  const title = loaded?.step.title ?? titles[player.step] ?? "";
   return (
     <section
       data-testid="player"
       data-state={state.kind}
       data-step={player.step}
       aria-label="Lesson player"
-      style={{ display: "grid", gap: 12 }}
+      className={styles.stage}
     >
-      <header style={{ display: "flex", gap: 12, alignItems: "baseline" }}>
-        <span style={{ color: MUTED }}>
-          Step {player.step + 1} of {player.stepCount}
-        </span>
-        <h2 style={{ margin: 0, fontSize: 20 }}>{player.loaded?.step.title}</h2>
+      <header className={styles.bar}>
+        <div className={styles.heading}>
+          <span className={styles.idea} data-testid="idea-count">
+            Idea {player.step + 1} of {player.stepCount}
+          </span>
+          <h2 className={styles.title}>{title}</h2>
+        </div>
+        <span className={styles.spacer} />
+        {barEnd}
       </header>
-      <div style={BOARD_FRAME}>
-        {renderBoard ? (
-          renderBoard(player)
-        ) : (
-          <Whiteboard state={player.board} />
+      <div className={styles.board}>
+        <div className={styles.drawing}>
+          <div className={styles.fit}>
+            {renderBoard ? (
+              renderBoard(player)
+            ) : (
+              <Whiteboard state={player.board} />
+            )}
+          </div>
+        </div>
+        {state.kind === "loading" && (
+          <div className={styles.preparing} data-testid="board-preparing">
+            <div>
+              Preparing the next idea<b>{title}</b>
+            </div>
+          </div>
         )}
-        {debug && <DebugOverlay tMs={player.tMs} lastCue={player.lastCue} />}
+        {debug && <DebugOverlay tMs={tMs} lastCue={player.lastCue} />}
+        <div className={styles.dock}>
+          {card !== null && (
+            <TutorCard
+              view={card}
+              caption={caption}
+              onAction={send}
+              holdShortcut="Space"
+            />
+          )}
+          {renderAsk?.(player)}
+        </div>
       </div>
-      <Status player={player} />
-      <Controls player={player} />
-      {renderAsk?.(player)}
-      <audio {...player.audioProps} data-testid="player-audio" />
+      <audio
+        {...player.audioProps}
+        onDurationChange={(e) => {
+          if (src !== undefined)
+            setDuration({ src, ms: e.currentTarget.duration * 1000 });
+        }}
+        data-testid="player-audio"
+      />
     </section>
   );
 }
 
-const STATUS_TEST_ID = {
-  error: "player-error",
-  notice: "player-notice",
-  info: "player-status",
-} as const;
-
-function Status({ player }: { player: PlayerApi }) {
-  const status = statusFor(player.state, player.notice);
-  if (status === null) return null;
-  return (
-    <p
-      role={status.tone === "error" ? "alert" : "status"}
-      data-testid={STATUS_TEST_ID[status.tone]}
-      style={STATUS}
-    >
-      {status.text}
-    </p>
-  );
-}
-
-function Controls({ player }: { player: PlayerApi }) {
-  const { state, can, send } = player;
-  const playPause = playPauseEvent(state);
-  const button = (label: string, event: Parameters<typeof send>[0]) => (
-    <button
-      type="button"
-      onClick={() => send(event)}
-      disabled={!can(event)}
-      aria-keyshortcuts={event === playPause ? "Space" : undefined}
-    >
-      {label}
-    </button>
-  );
-  return (
-    <div role="toolbar" aria-label="Player controls" style={TOOLBAR}>
-      {button("Back", { type: "back" })}
-      {button("Replay", { type: "replay" })}
-      {button(playPause.type === "pause" ? "Pause" : "Play", playPause)}
-      {button("Next", { type: "next" })}
-      {state.kind === "failed" && button("Retry", { type: "retry" })}
-    </div>
-  );
+/** → next idea, ← back, R say that again (Space is usePlayer's, A the Ask panel's). */
+function useShortcuts(send: PlayerApi["send"]) {
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.defaultPrevented) return;
+      const target = e.target instanceof HTMLElement ? e.target : null;
+      const modified = e.shiftKey || e.ctrlKey || e.altKey || e.metaKey;
+      const event = shortcutEvent({
+        key: e.key,
+        repeat: e.repeat,
+        modified,
+        target,
+      });
+      if (event === null) return;
+      e.preventDefault();
+      send(event);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [send]);
 }
 
 /** `?debug=1`: the audio clock and the last cue that fired. */
@@ -122,34 +198,10 @@ function DebugOverlay({
       data-testid="player-debug"
       data-current-time={seconds}
       data-last-cue={lastCue ?? ""}
-      style={DEBUG}
+      className={styles.debug}
     >
       <div>currentTime {seconds} s</div>
       <div>last cue {lastCue ?? "none"}</div>
     </div>
   );
 }
-
-const BOARD_FRAME: CSSProperties = {
-  position: "relative",
-  maxWidth: CANVAS.w,
-  border: `1px solid ${FRAME_BORDER}`,
-  borderRadius: 8,
-  overflow: "hidden",
-};
-
-const STATUS: CSSProperties = { margin: 0, minHeight: "1.5em" };
-
-const TOOLBAR: CSSProperties = { display: "flex", gap: 8 };
-
-const DEBUG: CSSProperties = {
-  position: "absolute",
-  top: 8,
-  right: 8,
-  padding: "6px 10px",
-  background: "rgba(15, 23, 42, 0.8)",
-  color: PAGE_BG,
-  font: "13px ui-monospace, monospace",
-  borderRadius: 6,
-  pointerEvents: "none",
-};

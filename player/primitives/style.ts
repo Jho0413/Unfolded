@@ -9,23 +9,28 @@ import type {
 } from "@/shared/scene";
 import { coversCell, highlightColor, isPart, partKey } from "@/player/sceneAt";
 
-/** Light theme (ARCHITECTURE.md section 1). */
-export const INK = "#1f2937";
-export const MUTED = "#64748b";
-export const BOARD_BG = "#ffffff";
-export const COPY_STROKE = "#cbd5e1";
+/**
+ * The board's colours and font, as CSS custom properties: both themes' values are in
+ * player/theme.css (ARCHITECTURE.md section 1), so the board follows the theme, and a sketch
+ * layer (Whiteboard.tsx) re-points them at the answer blue.
+ */
+export const INK = "var(--wb-ink)";
+export const MUTED = "var(--wb-muted)";
+export const BOARD_BG = "var(--wb-board)";
+export const COPY_STROKE = "var(--wb-copy-stroke)";
 /** The page behind the board, and the board's frame. */
-export const PAGE_BG = "#f8fafc";
-export const FRAME_BORDER = "#e2e8f0";
-export const FONT =
-  'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+export const PAGE_BG = "var(--wb-page)";
+export const FRAME_BORDER = "var(--wb-frame)";
+/** STIX Two Text (next/font, app/layout.tsx): the board's numerals and maths. */
+export const FONT = "var(--wb-font)";
 
+/** `accent` is the lesson's yellow; inside a sketch layer it becomes the answer blue. */
 export const HIGHLIGHT: Record<
   HighlightColor,
   { fill: string; stroke: string }
 > = {
-  accent: { fill: "#dbeafe", stroke: "#2563eb" },
-  warn: { fill: "#fef3c7", stroke: "#d97706" },
+  accent: { fill: "var(--wb-accent-fill)", stroke: "var(--wb-accent)" },
+  warn: { fill: "var(--wb-warn-fill)", stroke: "var(--wb-warn)" },
 };
 
 export const TEXT_SIZE = { s: 24, m: 32, l: 48 } as const;

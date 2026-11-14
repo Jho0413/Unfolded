@@ -47,6 +47,8 @@ export type AskApi = {
   showNotice: (message: string | null) => void;
   /** Tells the agent something through sendContextualUpdate(). */
   tellAgent: (text: string) => void;
+  /** A draw_scene sketch was drawn: the card tags the answer "Drawing on the board". */
+  sketchDrawn: () => void;
 };
 
 /**

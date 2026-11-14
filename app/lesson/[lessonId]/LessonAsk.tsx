@@ -9,7 +9,14 @@
 //   sketches on top, redrawn every frame; otherwise the player's board.
 //
 // Both share one AskSession (qa/askSession.ts), created by LessonView.
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { type AskClose, afterAskEvent } from "@/player/controls";
 import type { Player } from "@/player/usePlayer";
 import { Whiteboard } from "@/player/Whiteboard";
 import { AskPanel } from "@/qa/AskPanel";
@@ -42,11 +49,13 @@ export function LessonAsk({
   session,
   plan,
   replay,
+  captions,
 }: {
   player: Player;
   session: AskSession;
   plan: LessonPlan;
   replay: boolean;
+  captions: boolean;
 }) {
   useSessionSync(player, session);
   const { send, state, loaded, step, tMs } = player;
@@ -57,7 +66,11 @@ export function LessonAsk({
         ...ask,
         board: session.board,
         highlight: session.addAction,
-        drawSketch: session.addSketch,
+        // A sketch that reaches the board tags its answer "Drawing on the board".
+        drawSketch: (sketch, fresh) => {
+          session.addSketch(sketch, fresh);
+          ask.sketchDrawn();
+        },
         send,
         isAsking: session.isAsking,
         askId: session.askId,
@@ -70,10 +83,24 @@ export function LessonAsk({
   const onAsk = useCallback(() => {
     if (send({ type: "ask" }).outcome === "changed") session.open();
   }, [send, session]);
-  const onClose = useCallback(() => {
-    session.close();
-    send({ type: "closeAsk" });
-  }, [send, session]);
+  // What Ask was opened from, read when it closes (outside render).
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  });
+  // Closing Ask (ARCHITECTURE.md section 5.6): "Got it, carry on" resumes a lesson stopped
+  // mid-step; Escape or the agent ending goes back to how it was before Ask.
+  const onClose = useCallback(
+    (how: AskClose) => {
+      const before = stateRef.current;
+      session.close();
+      const closed = send({ type: "closeAsk" });
+      if (closed.outcome !== "changed" || before.kind !== "asking") return;
+      const next = afterAskEvent(how, before.from, closed.state);
+      if (next !== null) send(next);
+    },
+    [send, session],
+  );
   const onDropped = useCallback(() => {
     session.close();
     send({ type: "agentDisconnected" });
@@ -102,6 +129,8 @@ export function LessonAsk({
       onAsk={onAsk}
       onClose={onClose}
       onAgentDisconnected={onDropped}
+      canAsk={player.can({ type: "ask" })}
+      captions={captions}
     />
   );
 }
@@ -116,6 +145,10 @@ export function LessonBoard({
 }) {
   useSyncExternalStore(session.subscribe, session.version, session.version);
   const asking = player.state.kind === "asking" && session.isAsking();
+  // A sketch's own objects: drawn in the answer blue, the lesson dimmed under them.
+  const sketchIds = asking
+    ? new Set(session.layer().objects.map((o) => o.id))
+    : undefined;
   // Redraw every frame while asking, so sketch actions play from arrival.
   const [, setFrame] = useState(0);
   useEffect(() => {
@@ -126,5 +159,10 @@ export function LessonBoard({
     });
     return () => cancelAnimationFrame(id);
   }, [asking]);
-  return <Whiteboard state={asking ? session.board() : player.board} />;
+  return (
+    <Whiteboard
+      state={asking ? session.board() : player.board}
+      sketchIds={sketchIds}
+    />
+  );
 }

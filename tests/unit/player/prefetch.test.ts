@@ -125,3 +125,96 @@ describe("createPrefetcher", () => {
     expect(await p).toEqual({ error: STEP_ROUTE_ERRORS.failed });
   });
 });
+
+// The outline's step status (ARCHITECTURE.md section 5.1): one test per status change.
+describe("createPrefetcher statuses", () => {
+  it("every step starts not started", () => {
+    const steps = createPrefetcher(fakeRoute().fetchStep, 3, log);
+    expect(steps.statuses()).toEqual([
+      "notStarted",
+      "notStarted",
+      "notStarted",
+    ]);
+  });
+
+  it("a prefetch in flight is generating, then ready when the step arrives", async () => {
+    const route = fakeRoute();
+    const steps = createPrefetcher(route.fetchStep, 3, log);
+    steps.prefetch(1);
+    expect(steps.statuses()[1]).toBe("generating");
+    await route.settle(1, stepAt(1));
+    expect(steps.statuses()[1]).toBe("ready");
+  });
+
+  it("the player's own request is tracked too", async () => {
+    const route = fakeRoute();
+    const steps = createPrefetcher(route.fetchStep, 3, log);
+    const p = steps.fetchStep(0);
+    expect(steps.statuses()[0]).toBe("generating");
+    await route.settle(0, stepAt(0));
+    await p;
+    expect(steps.statuses()[0]).toBe("ready");
+  });
+
+  it("an error reply or a rejection is failed", async () => {
+    const route = fakeRoute();
+    const steps = createPrefetcher(route.fetchStep, 3, log);
+    steps.prefetch(1);
+    steps.prefetch(2);
+    await route.settle(1, { error: STEP_ROUTE_ERRORS.failed });
+    await route.settle(2, new Error("offline"));
+    expect(steps.statuses()).toEqual(["notStarted", "failed", "failed"]);
+  });
+
+  it("a retry after a failure is generating again, and its answer wins", async () => {
+    const route = fakeRoute();
+    const steps = createPrefetcher(route.fetchStep, 3, log);
+    void steps.fetchStep(0).catch(() => {});
+    await route.settle(0, new Error("offline"));
+    expect(steps.statuses()[0]).toBe("failed");
+    const retry = steps.fetchStep(0);
+    expect(steps.statuses()[0]).toBe("generating");
+    await route.settle(0, stepAt(0));
+    await retry;
+    expect(steps.statuses()[0]).toBe("ready");
+  });
+
+  it("only the latest request for a step sets its status", async () => {
+    const route = fakeRoute();
+    const steps = createPrefetcher(route.fetchStep, 3, log);
+    const first = steps.fetchStep(0);
+    const second = steps.fetchStep(0);
+    await route.settle(0, stepAt(0)); // the first answers after the second was sent
+    await first;
+    expect(steps.statuses()[0]).toBe("generating");
+    await route.settle(0, { error: STEP_ROUTE_ERRORS.failed });
+    await second;
+    expect(steps.statuses()[0]).toBe("failed");
+  });
+
+  it("subscribers hear each change; the array stays the same object until one", async () => {
+    const route = fakeRoute();
+    const steps = createPrefetcher(route.fetchStep, 2, log);
+    const heard = vi.fn();
+    const unsubscribe = steps.subscribe(heard);
+    const before = steps.statuses();
+    expect(steps.statuses()).toBe(before);
+    steps.prefetch(1);
+    expect(heard).toHaveBeenCalledTimes(1);
+    expect(steps.statuses()).not.toBe(before);
+    unsubscribe();
+    await route.settle(1, stepAt(1));
+    expect(heard).toHaveBeenCalledTimes(1);
+    expect(steps.statuses()[1]).toBe("ready");
+  });
+
+  it("handing over a prefetched reply makes no new request and keeps it ready", async () => {
+    const route = fakeRoute();
+    const steps = createPrefetcher(route.fetchStep, 2, log);
+    steps.prefetch(1);
+    await route.settle(1, stepAt(1));
+    await steps.fetchStep(1);
+    expect(route.requested()).toEqual([1]);
+    expect(steps.statuses()[1]).toBe("ready");
+  });
+});

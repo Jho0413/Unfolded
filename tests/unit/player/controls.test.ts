@@ -4,14 +4,17 @@
 import { describe, expect, it } from "vitest";
 import {
   canSend,
+  afterAskEvent,
+  type AskClose,
+  isTextEntry,
   isPlayPauseKey,
   lastFiredCue,
   playPauseEvent,
   playRejectionEvent,
-  statusFor,
+  shortcutEvent,
   stepOnScreen,
 } from "@/player/controls";
-import { MESSAGES, type PlayerState } from "@/player/machine";
+import type { AskOrigin, PlayerState } from "@/player/machine";
 import type { CuedAction } from "@/shared/scene";
 
 const ctx = { stepCount: 2 };
@@ -217,36 +220,185 @@ describe("lastFiredCue", () => {
   });
 });
 
-describe("statusFor (the line under the board)", () => {
-  it("failed → the failure message, as an error", () => {
-    expect(
-      statusFor({ kind: "failed", step: 0, message: "server words" }, null),
-    ).toEqual({ tone: "error", text: "server words" });
+describe("shortcutEvent (→ next, ← back, R again)", () => {
+  const on = (tagName: string, isContentEditable = false) => ({
+    tagName,
+    isContentEditable,
   });
-  it("a notice (Press play to start) → the notice", () => {
-    expect(statusFor({ kind: "paused", step: 0 }, MESSAGES.pressPlay)).toEqual({
-      tone: "notice",
-      text: MESSAGES.pressPlay,
-    });
+  const key = (k: string, target = on("BODY"), extra = {}) => ({
+    key: k,
+    repeat: false,
+    modified: false,
+    target,
+    ...extra,
   });
-  it("a failure wins over a notice", () => {
-    expect(
-      statusFor({ kind: "failed", step: 0, message: "x" }, "notice")?.tone,
-    ).toBe("error");
+  const cases: [string, Parameters<typeof shortcutEvent>[0], unknown][] = [
+    ["→ on the page: next", key("ArrowRight"), { type: "next" }],
+    ["← on the page: back", key("ArrowLeft"), { type: "back" }],
+    ["r: replay", key("r"), { type: "replay" }],
+    ["R (caps): replay", key("R"), { type: "replay" }],
+    [
+      "no target: still a shortcut",
+      key("ArrowRight", null as never),
+      { type: "next" },
+    ],
+    [
+      "on a focused button (the outline): still a shortcut",
+      key("ArrowLeft", on("BUTTON")),
+      { type: "back" },
+    ],
+    ["typing in the Ask box: none", key("r", on("INPUT")), null],
+    ["in a textarea: none", key("ArrowLeft", on("textarea")), null],
+    ["in a select: none", key("ArrowRight", on("SELECT")), null],
+    ["on contentEditable: none", key("r", on("DIV", true)), null],
+    [
+      "with a modifier (Cmd+←, Shift+R): none",
+      key("ArrowLeft", on("BODY"), { modified: true }),
+      null,
+    ],
+    [
+      "a held key (repeat): none",
+      key("ArrowRight", on("BODY"), { repeat: true }),
+      null,
+    ],
+    ["Space is not one of these (usePlayer has it)", key(" "), null],
+    ["A is not one of these (the Ask panel has it)", key("a"), null],
+  ];
+  it.each(cases)("%s", (_, input, expected) => {
+    expect(shortcutEvent(input)).toEqual(expected);
   });
-  it("loading → which step is loading (1-based)", () => {
-    expect(
-      statusFor({ kind: "loading", step: 1, autoplay: true }, null),
-    ).toEqual({ tone: "info", text: "Loading step 2…" });
+});
+
+describe("isTextEntry (where keys are typing, not shortcuts)", () => {
+  const cases: [string, Parameters<typeof isTextEntry>[0], boolean][] = [
+    ["an input", { tagName: "INPUT", isContentEditable: false }, true],
+    [
+      "a textarea (any case)",
+      { tagName: "textarea", isContentEditable: false },
+      true,
+    ],
+    ["a select", { tagName: "SELECT", isContentEditable: false }, true],
+    ["contentEditable", { tagName: "DIV", isContentEditable: true }, true],
+    ["a button", { tagName: "BUTTON", isContentEditable: false }, false],
+    ["the page", { tagName: "BODY", isContentEditable: false }, false],
+    ["no target", null, false],
+  ];
+  it.each(cases)("%s → %s", (_, target, expected) => {
+    expect(isTextEntry(target)).toBe(expected);
   });
-  it("finished → the end of the lesson", () => {
-    expect(statusFor({ kind: "finished", step: 1 }, null)).toEqual({
-      tone: "info",
-      text: MESSAGES.finished,
-    });
-  });
-  it("playing, paused or stepEnded with no notice → nothing", () => {
-    for (const kind of ["playing", "paused", "stepEnded"] as const)
-      expect(statusFor({ kind, step: 0 }, null)).toBeNull();
+});
+
+// ARCHITECTURE.md section 5.6, closing Ask: one test per row.
+describe("afterAskEvent (what closing Ask goes on with)", () => {
+  const resume = { type: "resume" };
+  const paused = (step = 0): PlayerState => ({ kind: "paused", step });
+  type Row = [string, AskClose, AskOrigin, PlayerState, unknown];
+  const rows: Row[] = [
+    [
+      "Got it, carry on, after explaining: resume",
+      "carryOn",
+      { kind: "playing", step: 0 },
+      paused(),
+      resume,
+    ],
+    [
+      "Got it, carry on, after Hold on: resume",
+      "carryOn",
+      { kind: "paused", step: 0 },
+      paused(),
+      resume,
+    ],
+    [
+      "Got it, carry on, opened while loading, the step arrived: resume",
+      "carryOn",
+      { kind: "loading", step: 0, autoplay: true, arrived: { ok: true } },
+      paused(),
+      resume,
+    ],
+    [
+      "Got it, carry on, after the step ended: stay on its Next prompt",
+      "carryOn",
+      { kind: "stepEnded", step: 0 },
+      { kind: "stepEnded", step: 0 },
+      null,
+    ],
+    [
+      "Got it, carry on, after the lesson finished: stay",
+      "carryOn",
+      { kind: "finished", step: 1 },
+      { kind: "finished", step: 1 },
+      null,
+    ],
+    [
+      "Got it, carry on, after a go_to_step jump: it loads paused, nothing more",
+      "carryOn",
+      { kind: "playing", step: 0 },
+      { kind: "loading", step: 1, autoplay: false },
+      null,
+    ],
+    [
+      "Got it, carry on, the step still loading: nothing more",
+      "carryOn",
+      { kind: "loading", step: 0, autoplay: true },
+      { kind: "loading", step: 0, autoplay: true },
+      null,
+    ],
+    [
+      "Got it, carry on, the step failed meanwhile: nothing more",
+      "carryOn",
+      {
+        kind: "loading",
+        step: 0,
+        autoplay: true,
+        arrived: { ok: false, message: "x" },
+      },
+      { kind: "failed", step: 0, message: "x" },
+      null,
+    ],
+    [
+      "dismissed (Escape, agent ended) after explaining: resume",
+      "dismiss",
+      { kind: "playing", step: 0 },
+      paused(),
+      resume,
+    ],
+    [
+      "dismissed after Hold on: stay held",
+      "dismiss",
+      { kind: "paused", step: 0 },
+      paused(),
+      null,
+    ],
+    [
+      "dismissed after the step ended: stay on its Next prompt",
+      "dismiss",
+      { kind: "stepEnded", step: 0 },
+      { kind: "stepEnded", step: 0 },
+      null,
+    ],
+    [
+      "dismissed, opened while loading to autoplay, the step arrived: play it",
+      "dismiss",
+      { kind: "loading", step: 0, autoplay: true, arrived: { ok: true } },
+      paused(),
+      resume,
+    ],
+    [
+      "dismissed, opened while loading a jump (no autoplay), the step arrived: stay",
+      "dismiss",
+      { kind: "loading", step: 1, autoplay: false, arrived: { ok: true } },
+      paused(1),
+      null,
+    ],
+    [
+      "dismissed after a go_to_step jump: it loads paused",
+      "dismiss",
+      { kind: "playing", step: 0 },
+      { kind: "loading", step: 1, autoplay: false },
+      null,
+    ],
+  ];
+  it.each(rows)("%s", (_, how, origin, afterClose, expected) => {
+    expect(afterAskEvent(how, origin, afterClose)).toEqual(expected);
   });
 });

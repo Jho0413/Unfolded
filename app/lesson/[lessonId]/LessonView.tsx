@@ -1,20 +1,24 @@
 "use client";
-// The lesson page's browser side (ROADMAP P6, L2, L3): the plan's title and cover, and the
-// player fed by the step route (./stepRoute.ts), with step n + 1 prefetched once step n is on
-// screen (player/prefetch.ts). A step that fails shows the route's message, and Retry asks again.
+// The lesson page's browser side (ROADMAP P6, L2, L3, ARCHITECTURE.md section 5.6): the
+// outline on the left, and the stage (player/Player.tsx PlayerStage) fed by the step route
+// (./stepRoute.ts), with step n + 1 prefetched once step n is on screen (player/prefetch.ts),
+// whose per-step status the outline shows. A step that fails shows the route's message, and
+// Retry asks again.
 //
-// The Ask panel (./LessonAsk.tsx) is mounted through the Player's `renderAsk` and
+// The Ask panel (./LessonAsk.tsx) is mounted through the stage's `renderAsk` and
 // `renderBoard`, sharing one AskSession; `replay` makes it say "Q&A needs a connection".
-import { type CSSProperties, useState } from "react";
-import { Player } from "@/player/Player";
-import { MUTED } from "@/player/primitives/style";
-import { CANVAS } from "@/shared/scene";
+import { useState, useSyncExternalStore } from "react";
+import { PlayerStage } from "@/player/Player";
+import { usePlayer } from "@/player/usePlayer";
 import type { LessonPlan } from "@/shared/lesson";
 import { ConversationProvider } from "@/qa/conversation";
 import { createAskSession } from "@/qa/askSession";
 import { createPrefetcher } from "@/player/prefetch";
 import { LessonAsk, LessonBoard } from "./LessonAsk";
+import { Outline } from "./Outline";
 import { stepRouteFetcher } from "./stepRoute";
+import { CaptionsToggle, ThemeToggle } from "./Toggles";
+import styles from "./lesson.module.css";
 
 export interface LessonViewProps {
   lessonId: string;
@@ -31,77 +35,63 @@ export function LessonView({ lessonId, plan, replay, debug }: LessonViewProps) {
     createPrefetcher(stepRouteFetcher(lessonId), plan.steps.length),
   );
   const [askSession] = useState(() => createAskSession());
+  const [captions, setCaptions] = useState(true);
+  const player = usePlayer({
+    stepCount: plan.steps.length,
+    fetchStep: steps.fetchStep,
+    onStepReady: (n) => steps.prefetch(n + 1),
+  });
+  const statuses = useSyncExternalStore(
+    steps.subscribe,
+    steps.statuses,
+    steps.statuses,
+  );
+  const titles = plan.steps.map((s) => s.title);
   return (
-    <div data-testid="lesson" data-replay={replay ? "1" : "0"} style={LAYOUT}>
-      <header style={HEADER}>
-        {plan.cover !== undefined && (
-          <Cover src={`/api/runs/${lessonId}/${plan.cover}`} />
-        )}
-        <div>
-          <p style={{ margin: 0, color: MUTED }}>Lesson</p>
-          <h1 style={{ margin: 0, fontSize: 28 }}>{plan.title}</h1>
-        </div>
-      </header>
-      <ConversationProvider>
-        <Player
-          stepCount={plan.steps.length}
-          fetchStep={steps.fetchStep}
-          onStepReady={(n) => steps.prefetch(n + 1)}
-          debug={debug}
-          renderBoard={(player) => (
-            <LessonBoard player={player} session={askSession} />
-          )}
-          renderAsk={(player) => (
-            <LessonAsk
-              player={player}
-              session={askSession}
-              plan={plan}
-              replay={replay}
-            />
-          )}
-        />
-      </ConversationProvider>
+    <div
+      data-testid="lesson"
+      data-replay={replay ? "1" : "0"}
+      className={styles.lesson}
+    >
+      <Outline
+        plan={plan}
+        coverSrc={
+          plan.cover === undefined
+            ? null
+            : `/api/runs/${lessonId}/${plan.cover}`
+        }
+        current={player.step}
+        state={player.state}
+        statuses={statuses}
+        send={player.send}
+      />
+      <main className={styles.main}>
+        <ConversationProvider>
+          <PlayerStage
+            player={player}
+            titles={titles}
+            lessonTitle={plan.title}
+            captions={captions}
+            debug={debug}
+            barEnd={
+              <>
+                <CaptionsToggle on={captions} onChange={setCaptions} />
+                <ThemeToggle />
+              </>
+            }
+            renderBoard={(p) => <LessonBoard player={p} session={askSession} />}
+            renderAsk={(p) => (
+              <LessonAsk
+                player={p}
+                session={askSession}
+                plan={plan}
+                replay={replay}
+                captions={captions}
+              />
+            )}
+          />
+        </ConversationProvider>
+      </main>
     </div>
   );
 }
-
-/** Page chrome, not a board object (ARCHITECTURE.md section 5.1). Hidden if it won't load. */
-function Cover({ src }: { src: string }) {
-  const [failed, setFailed] = useState(false);
-  if (failed) return null;
-  return (
-    // A run file served by our own route: next/image's optimiser would only add a copy.
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src}
-      alt=""
-      data-testid="lesson-cover"
-      onError={() => setFailed(true)}
-      // The server-rendered image can fail before hydration, when React isn't listening yet.
-      ref={(img) => {
-        if (img?.complete && img.naturalWidth === 0) setFailed(true);
-      }}
-      style={COVER}
-    />
-  );
-}
-
-const LAYOUT: CSSProperties = {
-  display: "grid",
-  gap: 16,
-  maxWidth: CANVAS.w,
-  margin: "0 auto",
-};
-
-const HEADER: CSSProperties = {
-  display: "flex",
-  gap: 16,
-  alignItems: "center",
-};
-
-const COVER: CSSProperties = {
-  width: 96,
-  height: 96,
-  objectFit: "cover",
-  borderRadius: 8,
-};

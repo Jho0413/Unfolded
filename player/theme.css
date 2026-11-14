@@ -1,0 +1,106 @@
+/*
+ * The two themes (ARCHITECTURE.md section 1): dark "studio" and light, picked by
+ * `data-theme` on <html> (set before first paint by player/theme.ts's script). Every colour
+ * the app uses is defined here once; player/primitives/style.ts names the board's tokens
+ * (INK = "var(--wb-ink)", ...), so the board follows the theme with no React state.
+ *
+ * Lesson highlights use the accent (yellow / amber); anything from a question (a sketch, the
+ * answer tag) uses the answer blue.
+ */
+:root,
+[data-theme="dark"] {
+  --bg: #09090b;
+  --board: #0e0f12;
+  --dots: rgba(255, 255, 255, 0.045);
+  --surface: #16171b;
+  --surface-2: #1d1e23;
+  --line: #232429;
+  --line-2: #34353c;
+  --ink: #ecebe6;
+  --body: #c9c8c2;
+  --muted: #8b8d96;
+  --faint: #5a5c64;
+  --accent: #f5c451;
+  --accent-fill: rgba(245, 196, 81, 0.14);
+  --answer: #6cb4ff;
+  --answer-fill: rgba(108, 180, 255, 0.13);
+  --warn: #fb923c;
+  --warn-fill: rgba(251, 146, 60, 0.14);
+  --error: #f87171;
+  --ok: #4ade80;
+  --card: rgba(22, 23, 27, 0.92);
+  --shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --bg: #f6f5f2;
+  --board: #ffffff;
+  --dots: #e4e2dc;
+  --surface: #ffffff;
+  --surface-2: #f1f0ec;
+  --line: #e6e4de;
+  --line-2: #d5d2ca;
+  --ink: #1a1a19;
+  --body: #3f3e3a;
+  --muted: #6b6a66;
+  --faint: #a3a19b;
+  --accent: #c08a12;
+  --accent-fill: rgba(234, 179, 8, 0.16);
+  --answer: #2563eb;
+  --answer-fill: rgba(37, 99, 235, 0.09);
+  --warn: #c2410c;
+  --warn-fill: rgba(194, 65, 12, 0.1);
+  --error: #b91c1c;
+  --ok: #2f8a4e;
+  --card: rgba(255, 255, 255, 0.94);
+  --shadow:
+    0 1px 2px rgba(20, 20, 10, 0.05), 0 14px 36px rgba(20, 20, 10, 0.12);
+  color-scheme: light;
+}
+
+/* The board's tokens (player/primitives/style.ts). A sketch layer re-points them at the answer blue. */
+:root {
+  --wb-ink: var(--ink);
+  --wb-muted: var(--muted);
+  --wb-board: var(--board);
+  --wb-copy-stroke: var(--line-2);
+  --wb-page: var(--bg);
+  --wb-frame: var(--line);
+  --wb-accent: var(--accent);
+  --wb-accent-fill: var(--accent-fill);
+  --wb-warn: var(--warn);
+  --wb-warn-fill: var(--warn-fill);
+  --wb-font: var(--font-stix), "STIX Two Text", Georgia, serif;
+  --ui-font: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  --mono-font: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+[data-layer="sketch"] {
+  --wb-ink: var(--answer);
+  --wb-muted: var(--answer);
+  --wb-accent: var(--answer);
+  --wb-accent-fill: var(--answer-fill);
+}
+
+/* While a sketch is on the board, the lesson underneath steps back. */
+[data-layer="main"] {
+  transition: opacity 0.4s;
+}
+[data-sketching="true"] [data-layer="main"] {
+  opacity: 0.3;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.5 var(--ui-font);
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--answer);
+  outline-offset: 2px;
+}
