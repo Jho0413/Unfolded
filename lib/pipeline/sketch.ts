@@ -1,6 +1,7 @@
-// Q&A sketch generation (ARCHITECTURE.md sections 4 and 8): Claude writes a Sketch with
-// structured output for the agent's description, on top of the learner's board (or an empty
-// one with `fresh`). validate.ts checks its ids against its own objects plus the board's, and
+// Q&A sketch generation (ARCHITECTURE.md sections 4 and 8): Claude writes a sketch in the wire
+// format with structured output for the agent's description, on top of the learner's board (or
+// an empty one with `fresh`). It is converted to a Sketch, validate.ts checks its ids against
+// its own objects plus the board's, and
 // lib/pipeline/generate.ts retries a rejection once; a second rejection, a refusal, a cut-off
 // or a provider error fails the sketch.
 import "server-only";
@@ -8,14 +9,16 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { SketchRequest } from "@/shared/lesson";
 import { BoardState, type Sketch } from "@/shared/scene";
-import { validateSketch } from "@/shared/validate";
 import { config } from "@/lib/config";
 import {
   claudeMessages,
   type ClaudeMessages,
   generateWithRetry,
 } from "@/lib/pipeline/generate";
-import { SKETCH_OUTPUT_FORMAT } from "@/lib/pipeline/outputFormat";
+import {
+  SKETCH_OUTPUT_FORMAT,
+  validateWireSketch,
+} from "@/lib/pipeline/outputFormat";
 import {
   SKETCH_SYSTEM_PROMPT,
   sketchContextPrompt,
@@ -56,7 +59,7 @@ export async function generateSketch(
       label: "sketch",
       request: buildSketchRequest(req),
       validate: (json) =>
-        validateSketch(json, { board: req.board, fresh: req.fresh }),
+        validateWireSketch(json, { board: req.board, fresh: req.fresh }),
       retryPrompt: sketchRetryPrompt,
       timeoutMs: config.sketch.timeoutMs,
     },

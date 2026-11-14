@@ -182,6 +182,20 @@ describe("POST /api/sketch: the sketch against the board", () => {
     expect(fake.calls).toHaveLength(2);
     expect(logs.warned()).toContain('duplicate id "a"');
   });
+  it("a wire action that can't convert (a move with no to): retried with the error", async () => {
+    const logs = quietLogs();
+    const noTo = {
+      objects: [],
+      actions: [{ do: "move", target: { id: "a" }, durationMs: 400, atMs: 0 }],
+    };
+    const fake = script(reply(noTo), reply(TARGETS_BOARD));
+    const res = await post({ description: "slide it", board: BOARD });
+    expect(res.status).toBe(200);
+    expect(fake.calls[1].body.messages.at(-1)?.content).toContain(
+      'move needs to "a"',
+    );
+    expect(logs.warned()).toContain('move needs to "a"');
+  });
 });
 
 describe("POST /api/sketch: an invalid sketch or a failed request is an error response, not a sketch", () => {

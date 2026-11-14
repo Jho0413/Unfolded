@@ -2,7 +2,8 @@
 // request sends. The route tests cover the validation and failure cases.
 import { describe, expect, it } from "vitest";
 import { config } from "@/lib/config";
-import { SKETCH_OUTPUT_FORMAT } from "@/lib/pipeline/outputFormat";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import { SKETCH_OUTPUT_FORMAT, WireSketch } from "@/lib/pipeline/outputFormat";
 import {
   SKETCH_SYSTEM_PROMPT,
   sketchRetryPrompt,
@@ -52,6 +53,13 @@ describe("buildSketchRequest", () => {
     expect(buildSketchRequest(REQ).output_config?.format).toBe(
       SKETCH_OUTPUT_FORMAT,
     );
+  });
+
+  it("the sketch output format is the SDK's JSON schema for the wire sketch, not the contract's Sketch", () => {
+    expect(SKETCH_OUTPUT_FORMAT).toEqual({
+      type: "json_schema",
+      schema: zodOutputFormat(WireSketch).schema,
+    });
   });
 
   it("the system prompt is the same constant for every request", () => {
