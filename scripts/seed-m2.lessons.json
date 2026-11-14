@@ -1,0 +1,64 @@
+{
+  "lessons": [
+    {
+      "lessonId": "m2-attention",
+      "pdfUrl": "https://arxiv.org/pdf/1706.03762",
+      "plan": {
+        "title": "Attention Is All You Need",
+        "coverPrompt": "A clean whiteboard sketch of a grid of words connected by lines of different thickness, showing which words attend to which, in a calm educational style",
+        "steps": [
+          {
+            "title": "Queries, keys and values",
+            "goal": "Each token's vector is multiplied by three learned weight matrices to give its query, its key and its value. Show the three projections on a small example."
+          },
+          {
+            "title": "Scaled dot-product scores",
+            "goal": "Scaled dot-product attention: multiply Q by K transpose to get the scores, then divide by the square root of d_k. Work a small numeric example."
+          },
+          {
+            "title": "Softmax over the scores",
+            "goal": "Softmax over the attention scores: turn one row of scores into weights that sum to one, then use them to mix the rows of V."
+          },
+          {
+            "title": "Multi-head attention",
+            "goal": "Multi-head attention: several heads attend in parallel with their own projections, then their outputs are concatenated and projected."
+          },
+          {
+            "title": "Positional encoding",
+            "goal": "Attention alone ignores word order, so the paper adds sine and cosine positional encodings of different frequencies to the embeddings. Show the values for a few positions and dimensions."
+          }
+        ]
+      }
+    },
+    {
+      "lessonId": "m2-newton3p",
+      "pdfUrl": "https://arxiv.org/pdf/2307.16051",
+      "plan": {
+        "title": "Newton's Method in Three Precisions",
+        "coverPrompt": "A clean whiteboard sketch of a curve with tangent lines stepping down to its root, drawn in three ink colours, in a calm educational style",
+        "steps": [
+          {
+            "title": "The Newton step",
+            "goal": "The Newton iteration x+ = xc - F'(xc)^-1 F(xc): solve the Jacobian system for the step, then update. Work one step on a small 2x2 system."
+          },
+          {
+            "title": "Iterative refinement",
+            "goal": "Iterative refinement: solve with a cheap low-precision factorization, compute the residual in higher precision, and correct, repeating until the residual is small."
+          },
+          {
+            "title": "Why three precisions",
+            "goal": "Why three precisions: residual in double, Jacobian stored in single, factorization in half, because the O(N^3) factorization dominates the cost."
+          },
+          {
+            "title": "How fast it converges",
+            "goal": "What the paper's analysis says about how fast the iteration converges when the Jacobian and its factorization are kept in lower precision than the residual."
+          },
+          {
+            "title": "What the experiments show",
+            "goal": "The paper's numerical results: compare the iteration histories of the precision combinations it tests, and what they show about cost and accuracy."
+          }
+        ]
+      }
+    }
+  ]
+}
