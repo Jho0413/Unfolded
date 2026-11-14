@@ -9,10 +9,10 @@ import { readFixture } from "@/lib/fakes";
 import { fakeClaude, fakeMessage } from "@/lib/fakes/claude";
 import { STEP_OUTPUT_FORMAT } from "@/lib/pipeline/outputFormat";
 import { STEP_SYSTEM_PROMPT } from "@/lib/pipeline/prompts/step";
+import { GenerationError } from "@/lib/pipeline/generate";
 import {
   buildStepRequest,
   generateStep,
-  StepGenerationError,
   type StepRequest,
 } from "@/lib/pipeline/step";
 import type { LessonPlanOutput } from "@/shared/lesson";
@@ -56,8 +56,8 @@ async function failure(replies: Parameters<typeof fakeClaude>[0]) {
   const claude = fakeClaude(replies);
   vi.spyOn(console, "warn").mockImplementation(() => {});
   const err = await generateStep(REQ, claude).catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(StepGenerationError);
-  return { err: err as StepGenerationError, claude };
+  expect(err).toBeInstanceOf(GenerationError);
+  return { err: err as GenerationError, claude };
 }
 
 describe("generateStep (G1)", () => {

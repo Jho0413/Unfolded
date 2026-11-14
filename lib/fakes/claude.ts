@@ -1,11 +1,11 @@
-// A fake Claude for step generation (ARCHITECTURE.md section 10). With no script it answers
-// every request with the recorded step response (FAKE_APIS=1); tests pass a script of replies
+// A fake Claude for step and sketch generation (ARCHITECTURE.md section 10). With no script it
+// answers every request with a recorded response (FAKE_APIS=1); tests pass a script of replies
 // and read back the requests it got.
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
 import { config } from "@/lib/config";
 import { readFixture } from "@/lib/fakes";
-import type { ClaudeMessages } from "@/lib/pipeline/step";
+import type { ClaudeMessages } from "@/lib/pipeline/generate";
 
 /** A reply the fake gives: a message, or an error it throws (as the SDK would). */
 export type FakeReply = Anthropic.Message | Error;
@@ -20,11 +20,15 @@ export interface FakeClaude extends ClaudeMessages {
 
 /**
  * Serves `replies` in order, one per request; a request past the end fails the test. Without
- * `replies`, every request gets `config.step.fixture`: a Message in the API's shape whose step
- * is the demo-m1 fixture, until a recorded Sonnet 5.5 response replaces it (the full Step
- * schema is too large for structured output today, and S3 is simplifying it).
+ * `replies`, every request gets `fixture`, a Message in the API's shape: `config.step.fixture`
+ * (whose step is the demo-m1 fixture) or `config.sketch.fixture`, both hand-written until
+ * recorded Sonnet 5.5 responses replace them (the full Step and Sketch schemas are too large
+ * for structured output today, #27).
  */
-export function fakeClaude(replies?: readonly FakeReply[]): FakeClaude {
+export function fakeClaude(
+  replies?: readonly FakeReply[],
+  fixture: string = config.step.fixture,
+): FakeClaude {
   const calls: FakeClaude["calls"] = [];
   return {
     calls,
@@ -35,7 +39,7 @@ export function fakeClaude(replies?: readonly FakeReply[]): FakeClaude {
       return {
         async finalMessage() {
           if (replies === undefined)
-            return readFixture<Anthropic.Message>(config.step.fixture);
+            return readFixture<Anthropic.Message>(fixture);
           const reply = replies[i];
           if (reply === undefined)
             throw new Error(
