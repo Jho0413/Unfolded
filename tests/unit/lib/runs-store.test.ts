@@ -2,6 +2,7 @@
 // runs/<lessonId>/ (ARCHITECTURE.md sections 5.1 and 5.5).
 import { execFileSync } from "node:child_process";
 import {
+  link,
   mkdir,
   mkdtemp,
   readdir,
@@ -41,6 +42,12 @@ vi.mock("@/lib/config", async (importOriginal) => {
       },
     },
   };
+});
+
+// link() is spied on so a test can make every version look taken.
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return { ...actual, link: vi.fn(actual.link) };
 });
 
 beforeEach(async () => {
@@ -216,6 +223,44 @@ describe("saving step versions", () => {
     expect(await listRunFiles("demo-m1")).toEqual([]);
   });
 
+  it("a save gives up after 100 taken versions instead of spinning", async () => {
+    const taken = Object.assign(new Error("taken"), { code: "EEXIST" });
+    vi.mocked(link).mockRejectedValue(taken);
+    try {
+      await expect(
+        saveStepVersion("demo-m1", 0, {}, new Uint8Array([1])),
+      ).rejects.toThrow("after 100 tries");
+      expect(link).toHaveBeenCalledTimes(100);
+    } finally {
+      vi.mocked(link).mockReset();
+      const actual =
+        await vi.importActual<typeof import("node:fs/promises")>(
+          "node:fs/promises",
+        );
+      vi.mocked(link).mockImplementation(actual.link);
+    }
+  });
+
+  it("a step JSON written outside saveStepVersion is never overwritten", async () => {
+    await mkdir(path.join(dirs.runs, "demo-m1"));
+    await writeFile(
+      path.join(dirs.runs, "demo-m1", "step-0.v1.json"),
+      '{"theirs":true}',
+    );
+    expect(await saveStepVersion("demo-m1", 0, {}, new Uint8Array([1]))).toBe(
+      2,
+    );
+    expect(await readRunJson("demo-m1", "step-0.v1.json", z.unknown())).toEqual(
+      { theirs: true },
+    );
+  });
+
+  it("a hand-made version too large to count past doesn't block saves", () => {
+    expect(
+      nextStepVersion(["step-0.v9007199254740991.mp3", "step-0.v2.json"], 0),
+    ).toBe(3);
+  });
+
   it("a version whose save stopped after its audio is never reused", async () => {
     await writeRunFile("demo-m1", "step-0.v1.mp3", new Uint8Array([9]));
     expect(nextStepVersion(await listRunFiles("demo-m1"), 0)).toBe(2);
@@ -255,6 +300,13 @@ describe("writes", () => {
     ).toEqual({
       title: "b",
     });
+  });
+
+  it("a value with no JSON form is refused and nothing is written", async () => {
+    await expect(
+      writeRunJson("demo-m1", "plan.json", undefined),
+    ).rejects.toThrow(TypeError);
+    expect(await listRunFiles("demo-m1")).toEqual([]);
   });
 
   it("a failed write leaves no temporary file behind", async () => {
@@ -335,6 +387,13 @@ describe("reads", () => {
     await mkdir(path.join(dirs.runs, "demo-m1"));
     execFileSync("mkfifo", [path.join(dirs.runs, "demo-m1", "pipe.json")]);
     expect((await readRunFile("demo-m1", "pipe.json")).kind).toBe("refused");
+  });
+
+  it("a run file that isn't JSON throws", async () => {
+    await writeRunFile("demo-m1", "plan.json", "{");
+    await expect(
+      readRunJson("demo-m1", "plan.json", z.unknown()),
+    ).rejects.toThrow(SyntaxError);
   });
 
   it("a run file that fails its schema throws", async () => {

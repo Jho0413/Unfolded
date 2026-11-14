@@ -59,6 +59,7 @@ describe("serves a saved file", () => {
       "application/json; charset=utf-8",
     );
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(res.headers.get("cache-control")).toBe("no-store");
     expect(await res.json()).toEqual({ title: "x" });
   });
 
@@ -102,6 +103,7 @@ describe("bad lessonId -> 400", () => {
   it("not matching ^[a-z0-9-]{1,40}$", async () => {
     for (const id of ["", "Demo", "demo_m1", "a".repeat(41), "demo m1", "démo"])
       await expectBadName(id, "plan.json");
+    expect(console.warn).not.toHaveBeenCalled();
   });
 
   it("traversal: .., ../x, encoded and absolute", async () => {
@@ -189,6 +191,7 @@ describe("bad file name -> 400", () => {
     await writeRunFile("real", "plan.json", "{}");
     await symlink(path.join(dirs.runs, "real"), path.join(dirs.runs, "linked"));
     await expectBadName("linked", "plan.json");
+    expect(console.warn).toHaveBeenCalledOnce();
   });
 
   it("a folder: no directory listing", async () => {
@@ -196,6 +199,9 @@ describe("bad file name -> 400", () => {
       recursive: true,
     });
     await expectBadName("demo-m1", "media.json");
+    expect(console.warn).toHaveBeenCalledWith(
+      "[api/runs] demo-m1/media.json refused: not a regular file",
+    );
   });
 });
 

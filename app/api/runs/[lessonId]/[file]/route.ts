@@ -4,6 +4,7 @@
 import "server-only";
 import type { NextRequest } from "next/server";
 import { readRunFile, servableContentType } from "@/lib/runs/store";
+import type { ApiError } from "@/shared/lesson";
 import { RUNS_ROUTE_ERRORS } from "./errors";
 
 export async function GET(
@@ -13,22 +14,31 @@ export async function GET(
   const { lessonId, file } = await ctx.params;
   const contentType = servableContentType(lessonId, file);
   if (contentType === undefined)
-    return Response.json({ error: RUNS_ROUTE_ERRORS.badName }, { status: 400 });
+    return Response.json(
+      { error: RUNS_ROUTE_ERRORS.badName } satisfies ApiError,
+      { status: 400 },
+    );
 
   let result;
   try {
     result = await readRunFile(lessonId, file);
   } catch (err) {
     console.error(`[api/runs] ${lessonId}/${file} read failed`, err);
-    return Response.json({ error: RUNS_ROUTE_ERRORS.failed }, { status: 500 });
+    return Response.json(
+      { error: RUNS_ROUTE_ERRORS.failed } satisfies ApiError,
+      { status: 500 },
+    );
   }
   if (result.kind === "refused") {
     console.warn(`[api/runs] ${lessonId}/${file} refused: ${result.reason}`);
-    return Response.json({ error: RUNS_ROUTE_ERRORS.badName }, { status: 400 });
+    return Response.json(
+      { error: RUNS_ROUTE_ERRORS.badName } satisfies ApiError,
+      { status: 400 },
+    );
   }
   if (result.kind === "missing")
     return Response.json(
-      { error: RUNS_ROUTE_ERRORS.missing(lessonId, file) },
+      { error: RUNS_ROUTE_ERRORS.missing(lessonId, file) } satisfies ApiError,
       { status: 404 },
     );
 

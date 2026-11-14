@@ -78,7 +78,13 @@ function versionsOf(
   const versions: number[] = [];
   for (const file of files) {
     const m = STEP_FILE_RE.exec(file);
-    if (m && Number(m[1]) === n && kinds.includes(m[3]))
+    // A hand-made version too large to count past is ignored rather than blocking saves.
+    if (
+      m &&
+      Number(m[1]) === n &&
+      kinds.includes(m[3]) &&
+      Number.isSafeInteger(Number(m[2]) + 1)
+    )
       versions.push(Number(m[2]));
   }
   return versions.sort((a, b) => a - b);
@@ -201,13 +207,21 @@ export async function writeRunFile(
   }
 }
 
-/** Writes a value as pretty JSON (the run folder is read by people too). */
+/** Pretty JSON (the run folder is read by people too). Throws when value has no JSON form. */
+function toJsonText(value: unknown): string {
+  const text: string | undefined = JSON.stringify(value, null, 2);
+  if (text === undefined)
+    throw new TypeError(`no JSON form for ${String(value)}`);
+  return `${text}\n`;
+}
+
+/** Writes a value as JSON. Throws, writing nothing, when the value has no JSON form. */
 export async function writeRunJson(
   lessonId: string,
   file: string,
   value: unknown,
 ): Promise<void> {
-  await writeRunFile(lessonId, file, `${JSON.stringify(value, null, 2)}\n`);
+  await writeRunFile(lessonId, file, toJsonText(value));
 }
 
 /**
@@ -249,15 +263,16 @@ export async function saveStepVersion(
 ): Promise<number> {
   checkStepNumbers(n, 1);
   // Serialised before claiming a version, so a step that can't be saved leaves no audio.
-  const text: string | undefined = JSON.stringify(step, null, 2);
-  if (text === undefined)
-    throw new TypeError(`step ${n} has no JSON form: ${String(step)}`);
-  const json = `${text}\n`;
+  const json = toJsonText(step);
   for (let tries = 0; tries < MAX_VERSION_CLAIMS; tries++) {
     const k = nextStepVersion(await listRunFiles(lessonId), n);
     if (!(await createRunFile(lessonId, stepAudioFileName(n, k), audio)))
       continue;
     if (await createRunFile(lessonId, stepFileName(n, k), json)) return k;
+    // Only something writing step files outside saveStepVersion can get here.
+    throw new Error(
+      `${lessonId}/${stepFileName(n, k)} exists without its audio claim`,
+    );
   }
   throw new Error(
     `couldn't claim a version of step ${n} in ${lessonId} after ${MAX_VERSION_CLAIMS} tries`,
@@ -304,6 +319,9 @@ export async function readRunFile(
     if (isMissing(err)) return { kind: "missing" };
     if (errorCode(err) === "ELOOP")
       return { kind: "refused", reason: "symlink" };
+    // A socket can't be opened as a file.
+    if (errorCode(err) === "ENXIO")
+      return { kind: "refused", reason: "not a regular file" };
     throw err;
   }
 }
