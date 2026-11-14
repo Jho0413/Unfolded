@@ -2,6 +2,7 @@
 // in a production server unless FAKE_APIS=1 (how e2e and CI run it).
 import { afterEach, describe, expect, it, vi } from "vitest";
 import DevBoardPage from "@/app/dev/board/page";
+import { resetEnvForTests } from "@/lib/env";
 
 // connection() resolves once a request arrives. During `next build`'s
 // prerender it never does, so prerendering stops there.
@@ -12,21 +13,32 @@ vi.mock("next/server", () => ({ connection }));
 
 const props = { searchParams: Promise.resolve({}) };
 
+/** A production server in real mode: keys set, no fakes (lib/env.ts). */
+function realMode() {
+  vi.stubEnv("NODE_ENV", "production");
+  vi.stubEnv("FAKE_APIS", undefined);
+  vi.stubEnv("NEXT_PUBLIC_FAKE_APIS", undefined);
+  vi.stubEnv("REPLAY_RUN", undefined);
+  vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+  vi.stubEnv("ELEVENLABS_API_KEY", "test-key");
+  vi.stubEnv("ELEVENLABS_VOICE_ID", "test-voice");
+}
+
 afterEach(() => {
   vi.unstubAllEnvs();
+  resetEnvForTests();
   connection.mockReset();
 });
 
 describe("/dev/board gate", () => {
   it("404s in production without FAKE_APIS", async () => {
-    vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("FAKE_APIS", "");
+    realMode();
     await expect(DevBoardPage(props)).rejects.toThrow(
       /NEXT_HTTP_ERROR_FALLBACK;404/,
     );
   });
   it("renders in production with FAKE_APIS=1", async () => {
-    vi.stubEnv("NODE_ENV", "production");
+    realMode();
     vi.stubEnv("FAKE_APIS", "1");
     await expect(DevBoardPage(props)).resolves.toBeTruthy();
   });
@@ -35,8 +47,7 @@ describe("/dev/board gate", () => {
     await expect(DevBoardPage(props)).resolves.toBeTruthy();
   });
   it("is decided per request, not at build time: a prerender never reaches the gate", async () => {
-    vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("FAKE_APIS", "");
+    realMode();
     connection.mockImplementation(() => new Promise(() => {}));
     let settled = false;
     void DevBoardPage(props).then(

@@ -7,12 +7,12 @@
 //
 // Production servers answer 404 unless started with FAKE_APIS=1 (how e2e and
 // CI run the production build), so it is never reachable in a real
-// `npm start`. The gate reads FAKE_APIS per request, not at build time.
-// TODO: read FAKE_APIS through lib/env once F2 (#24) is merged.
+// `npm start`. The gate reads the env per request, not at build time.
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
+import { fakesEnabled } from "@/lib/fakes";
 import { Whiteboard } from "@/player/Whiteboard";
 import { M1_CUE_TIMES, SCENES, isScene, sceneState } from "./scenes";
 
@@ -33,8 +33,7 @@ export default async function DevBoardPage({
   // Without this, `next build` prerenders the page and fixes the gate with
   // the build's env: a plain build would 404 even under FAKE_APIS=1.
   await connection();
-  if (process.env.NODE_ENV === "production" && process.env.FAKE_APIS !== "1")
-    notFound();
+  if (process.env.NODE_ENV === "production" && !fakesEnabled()) notFound();
 
   const params = await searchParams;
   const sceneParam = first(params.scene) ?? "fixed";
