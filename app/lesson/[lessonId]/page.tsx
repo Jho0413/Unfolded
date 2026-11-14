@@ -1,10 +1,12 @@
-// The lesson page (ROADMAP P6, ARCHITECTURE.md sections 3 and 5): plays a saved lesson from
-// runs/<lessonId>/ in the player. The plan and the list of saved step versions are read here,
-// on the server; the steps and their audio reach the browser through GET /api/runs.
+// The lesson page (ROADMAP P6, L2, L3, ARCHITECTURE.md sections 3 and 5): plays the lesson in
+// runs/<lessonId>/ in the player. The plan is read here, on the server; each step comes through
+// POST /api/lessons/<lessonId>/steps/<n> (saved, or generated now), and its audio through
+// GET /api/runs.
 //
 // A bad lessonId or a lesson with no saved plan is a 404 with "No such lesson or step."
-// (./not-found.tsx). A step with no saved file fails in the player with "This step isn't in
-// the saved run.", and Back or Retry recover.
+// (./not-found.tsx). A step the route can't give fails in the player with the route's message
+// ("Couldn't make this step.", or in replay "This step isn't in the saved run."), and Retry
+// or Back recover.
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
@@ -30,7 +32,6 @@ export default async function LessonPage({
       <LessonView
         lessonId={lesson.lessonId}
         plan={lesson.plan}
-        versions={lesson.versions}
         replay={getEnv().mode === "replay"}
         debug={debug === "1"}
       />

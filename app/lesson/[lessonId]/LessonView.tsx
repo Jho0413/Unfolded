@@ -1,6 +1,7 @@
 "use client";
-// The lesson page's browser side (ROADMAP P6): the plan's title and cover, and the player
-// fed by the saved run (./savedSteps.ts).
+// The lesson page's browser side (ROADMAP P6, L2, L3): the plan's title and cover, and the
+// player fed by the step route (./stepRoute.ts), with step n + 1 prefetched while step n plays
+// (player/prefetch.ts). A step that fails shows the route's message, and Retry asks again.
 //
 // The Ask panel (./LessonAsk.tsx) is mounted through the Player's `renderAsk` and
 // `renderBoard`, sharing one AskSession; `replay` makes it say "Q&A needs a connection".
@@ -11,29 +12,24 @@ import { CANVAS } from "@/shared/scene";
 import type { LessonPlan } from "@/shared/lesson";
 import { ConversationProvider } from "@/qa/conversation";
 import { createAskSession } from "@/qa/askSession";
+import { prefetchingFetcher } from "@/player/prefetch";
 import { LessonAsk, LessonBoard } from "./LessonAsk";
-import { savedStepFetcher } from "./savedSteps";
+import { stepRouteFetcher } from "./stepRoute";
 
 export interface LessonViewProps {
   lessonId: string;
   plan: LessonPlan;
-  /** Per plan step, the saved version to play, or null when none is saved. */
-  versions: (number | null)[];
   /** REPLAY_RUN mode (ARCHITECTURE.md section 5.5). */
   replay: boolean;
   /** `?debug=1`: the player's clock overlay. */
   debug: boolean;
 }
 
-export function LessonView({
-  lessonId,
-  plan,
-  versions,
-  replay,
-  debug,
-}: LessonViewProps) {
+export function LessonView({ lessonId, plan, replay, debug }: LessonViewProps) {
   // One fetcher per page load: the props never change while it's open.
-  const [fetchStep] = useState(() => savedStepFetcher(lessonId, versions));
+  const [fetchStep] = useState(() =>
+    prefetchingFetcher(stepRouteFetcher(lessonId), plan.steps.length),
+  );
   const [askSession] = useState(() => createAskSession());
   return (
     <div data-testid="lesson" data-replay={replay ? "1" : "0"} style={LAYOUT}>

@@ -1,15 +1,20 @@
-// The lesson page's loading (ROADMAP P6): reading a saved run on the server
-// (app/lesson/[lessonId]/loadLesson.ts) and each step through GET /api/runs in
-// the browser (savedSteps.ts), with the ARCHITECTURE.md section 7 messages.
+// The lesson page's loading (ROADMAP P6, L3): reading the plan on the server
+// (app/lesson/[lessonId]/loadLesson.ts) and each step through POST
+// /api/lessons/<id>/steps/<n> in the browser (stepRoute.ts), with the ARCHITECTURE.md
+// section 7 messages.
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadLesson } from "@/app/lesson/[lessonId]/loadLesson";
-import { savedStepFetcher } from "@/app/lesson/[lessonId]/savedSteps";
+import { stepRouteFetcher } from "@/app/lesson/[lessonId]/stepRoute";
 import { M1_CUE_TIMES, m1 } from "@/app/dev/board/scenes";
 import { MESSAGES } from "@/player/machine";
-import { STEP_NOT_IN_RUN, StepResponse } from "@/shared/lesson";
+import {
+  NO_SUCH_LESSON,
+  STEP_NOT_IN_RUN,
+  type StepResponse,
+} from "@/shared/lesson";
 
 const dirs = vi.hoisted(() => ({ runs: "" }));
 vi.mock("@/lib/config", async (importOriginal) => {
@@ -49,19 +54,12 @@ describe("loadLesson", () => {
       await writeFile(path.join(dirs.runs, id, name), data);
   }
 
-  it("returns the plan and the latest saved version of each step (null when none)", async () => {
-    await save("m1", {
-      "plan.json": JSON.stringify(PLAN),
-      "step-0.v1.json": "{}",
-      "step-0.v2.json": "{}",
-      "step-0.v3.mp3": "", // audio claimed, JSON not written yet: not a version
-      "step-2.v1.json": "{}",
-    });
+  it("returns the plan, with or without saved steps", async () => {
+    await save("m1", { "plan.json": JSON.stringify(PLAN) });
     expect(await loadLesson("m1")).toEqual({
       kind: "ok",
       lessonId: "m1",
       plan: PLAN,
-      versions: [2, null, 1],
     });
   });
 
@@ -84,54 +82,55 @@ describe("loadLesson", () => {
   });
 });
 
-describe("savedStepFetcher", () => {
-  const saved = { step: m1, cueTimes: M1_CUE_TIMES };
+describe("stepRouteFetcher", () => {
+  const step: StepResponse = {
+    step: m1,
+    cueTimes: M1_CUE_TIMES,
+    version: 2,
+    audioUrl: "/api/runs/m1/step-0.v2.mp3",
+  };
   const log = { error: vi.fn() };
   afterEach(() => log.error.mockReset());
 
-  function fetcher(reply: () => Response, versions = [3, null]) {
-    const urls: string[] = [];
-    const fetchFn = async (url: string) => {
-      urls.push(url);
+  function fetcher(reply: () => Response) {
+    const calls: [string, string | undefined][] = [];
+    const fetchFn = async (url: string, init: RequestInit) => {
+      calls.push([url, init.method]);
       return reply();
     };
-    return { urls, fetchStep: savedStepFetcher("m1", versions, fetchFn, log) };
+    return { calls, fetchStep: stepRouteFetcher("m1", fetchFn, log) };
   }
 
-  it("reads step-<n>.v<k>.json through the runs route and points at its .mp3", async () => {
-    const { urls, fetchStep } = fetcher(() => Response.json(saved));
-    const reply = await fetchStep(0);
-    expect(urls).toEqual(["/api/runs/m1/step-0.v3.json"]);
-    expect(StepResponse.parse(reply)).toEqual({
-      ...saved,
-      version: 3,
-      audioUrl: "/api/runs/m1/step-0.v3.mp3",
-    });
+  it("POSTs to the step route and returns its StepResponse", async () => {
+    const { calls, fetchStep } = fetcher(() => Response.json(step));
+    expect(await fetchStep(0)).toEqual(step);
+    expect(calls).toEqual([["/api/lessons/m1/steps/0", "POST"]]);
   });
 
-  it("Step (replay): a step with no saved version -> 'This step isn't in the saved run.', no request", async () => {
-    const { urls, fetchStep } = fetcher(() => Response.json(saved));
-    expect(await fetchStep(1)).toEqual({ error: STEP_NOT_IN_RUN });
-    expect(await fetchStep(7)).toEqual({ error: STEP_NOT_IN_RUN });
-    expect(urls).toEqual([]);
-  });
+  it.each([
+    [502, "Couldn't make this step."],
+    [500, "Couldn't make this step."],
+    [404, STEP_NOT_IN_RUN],
+    [404, NO_SUCH_LESSON],
+    [400, NO_SUCH_LESSON],
+  ])(
+    "an error reply (%i) -> its message for the player",
+    async (status, error) => {
+      const { fetchStep } = fetcher(() => Response.json({ error }, { status }));
+      expect(await fetchStep(0)).toEqual({ error });
+      expect(log.error).not.toHaveBeenCalled();
+    },
+  );
 
-  it("a step file removed since the page loaded (404) isn't in the saved run", async () => {
-    const { fetchStep } = fetcher(() =>
-      Response.json({ error: "x" }, { status: 404 }),
-    );
-    expect(await fetchStep(0)).toEqual({ error: STEP_NOT_IN_RUN });
-  });
-
-  it("another HTTP error -> 'Couldn't make this step. Retry?', logged", async () => {
-    const { fetchStep } = fetcher(() =>
-      Response.json({ error: "x" }, { status: 500 }),
+  it("an error with no message -> 'Couldn't make this step. Retry?', logged", async () => {
+    const { fetchStep } = fetcher(
+      () => new Response("<html>gateway</html>", { status: 504 }),
     );
     expect(await fetchStep(0)).toEqual({ error: MESSAGES.stepFailed });
     expect(log.error).toHaveBeenCalledOnce();
   });
 
-  it("a file that isn't a saved step -> 'Couldn't make this step. Retry?', logged", async () => {
+  it("a reply that isn't a step -> 'Couldn't make this step. Retry?', logged", async () => {
     const { fetchStep } = fetcher(() =>
       Response.json({ step: { title: "x" } }),
     );
@@ -140,9 +139,8 @@ describe("savedStepFetcher", () => {
   });
 
   it("a network failure rejects, for the step loader to report", async () => {
-    const fetchStep = savedStepFetcher(
+    const fetchStep = stepRouteFetcher(
       "m1",
-      [1],
       () => Promise.reject(new TypeError("down")),
       log,
     );
