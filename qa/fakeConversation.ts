@@ -13,8 +13,12 @@ import type {
   StartOptions,
 } from "./types";
 
-/** A token that makes `start` fail as if the agent couldn't connect (tests). */
+/** A token that makes a WebRTC `start` fail as if WebRTC were blocked (tests). */
 export const FAKE_CONNECT_FAIL_TOKEN = "fake-connect-fail";
+/** A signed URL that makes a websocket `start` fail too (tests). */
+export const FAKE_CONNECT_FAIL_SIGNED_URL = "wss://fake-connect-fail";
+/** A token whose `start` rejects instead of reporting an error (tests). */
+export const FAKE_START_REJECT_TOKEN = "fake-start-reject";
 
 /** One canned agent turn: the first whose `match` fits the question answers it. */
 export type FakeTurn = {
@@ -61,6 +65,10 @@ export class FakeConversation {
   status: "disconnected" | "connected" = "disconnected";
   textOnly = false;
   micMuted = false;
+  /** How the current or last session connected. */
+  transport: StartOptions["transport"] | null = null;
+  /** Every start, in order (tests check the fallback). */
+  readonly starts: StartOptions["transport"][] = [];
   readonly contextUpdates: string[] = [];
   readonly transcript: QaMessage[] = [];
   readonly toolCalls: FakeToolCall[] = [];
@@ -80,17 +88,29 @@ export class FakeConversation {
     this.tools = tools;
   }
 
-  async start({ conversationToken, textOnly }: StartOptions): Promise<void> {
+  async start(options: StartOptions): Promise<void> {
     if (this.status === "connected") return;
     const session = ++this.session;
+    this.starts.push(options.transport);
     await tick();
     if (session !== this.session) return;
-    if (conversationToken === FAKE_CONNECT_FAIL_TOKEN) {
+    if (
+      options.transport === "webrtc" &&
+      options.conversationToken === FAKE_START_REJECT_TOKEN
+    )
+      throw new Error("fake: startSession rejected");
+    const blocked =
+      options.transport === "webrtc"
+        ? options.conversationToken === FAKE_CONNECT_FAIL_TOKEN
+        : options.signedUrl === FAKE_CONNECT_FAIL_SIGNED_URL;
+    if (blocked) {
       this.callbacks.onError?.("Could not connect to the agent");
       this.callbacks.onDisconnect?.("error");
       return;
     }
     this.status = "connected";
+    this.transport = options.transport;
+    const { textOnly } = options;
     this.textOnly = textOnly;
     this.micMuted = textOnly;
     this.callbacks.onConnect?.();
@@ -107,8 +127,20 @@ export class FakeConversation {
     this.close("error");
   }
 
-  async sendUserMessage(text: string): Promise<void> {
-    if (this.status !== "connected") return;
+  /** Throws (synchronously) without a session, as the SDK does; resolves once answered. */
+  sendUserMessage(text: string): Promise<void> {
+    if (this.failNextSend) {
+      this.failNextSend = false;
+      throw new Error("fake: the session is broken");
+    }
+    if (this.status !== "connected") throw new Error("fake: no active session");
+    return this.answer(text);
+  }
+
+  /** Test hook: the next sendUserMessage throws, as the SDK would on a broken session. */
+  failNextSend = false;
+
+  private async answer(text: string): Promise<void> {
     this.emit({ role: "user", text });
     const turn = this.script.find((t) => t.match.test(text));
     if (!turn) return;

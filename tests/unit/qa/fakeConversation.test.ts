@@ -21,7 +21,11 @@ function setup(tools = {}) {
 describe("FakeConversation", () => {
   it("connects and greets", async () => {
     const { fake, cb, messages } = setup();
-    await fake.start({ conversationToken: "t", textOnly: false });
+    await fake.start({
+      transport: "webrtc",
+      conversationToken: "t",
+      textOnly: false,
+    });
     expect(cb.onConnect).toHaveBeenCalledOnce();
     expect(fake.status).toBe("connected");
     expect(messages).toEqual([{ role: "agent", text: FAKE_GREETING }]);
@@ -30,6 +34,7 @@ describe("FakeConversation", () => {
   it("fails to connect with the fail token", async () => {
     const { fake, cb } = setup();
     await fake.start({
+      transport: "webrtc",
       conversationToken: FAKE_CONNECT_FAIL_TOKEN,
       textOnly: false,
     });
@@ -40,7 +45,11 @@ describe("FakeConversation", () => {
 
   it("replays a canned answer to a typed question", async () => {
     const { fake, messages } = setup();
-    await fake.start({ conversationToken: "t", textOnly: false });
+    await fake.start({
+      transport: "webrtc",
+      conversationToken: "t",
+      textOnly: false,
+    });
     await fake.sendUserMessage("What is this?");
     expect(messages.slice(1)).toEqual([
       { role: "user", text: "What is this?" },
@@ -52,7 +61,11 @@ describe("FakeConversation", () => {
     const highlight = vi.fn(() => "ok");
     const goTo = vi.fn(() => "no step 9");
     const { fake } = setup({ highlight, go_to_step: goTo });
-    await fake.start({ conversationToken: "t", textOnly: false });
+    await fake.start({
+      transport: "webrtc",
+      conversationToken: "t",
+      textOnly: false,
+    });
     await fake.sendUserMessage("show me the first row");
     await fake.sendUserMessage("go to step 9");
     expect(highlight).toHaveBeenCalledWith({ target_id: "q", row: 0 });
@@ -63,7 +76,11 @@ describe("FakeConversation", () => {
   it("highlights the first id the latest context offers", async () => {
     const highlight = vi.fn(() => "ok");
     const { fake } = setup({ highlight });
-    await fake.start({ conversationToken: "t", textOnly: false });
+    await fake.start({
+      transport: "webrtc",
+      conversationToken: "t",
+      textOnly: false,
+    });
     fake.sendContextualUpdate("Objects on the board (ids for highlight): a, b");
     await fake.sendUserMessage("show me the first row");
     expect(highlight).toHaveBeenCalledWith({ target_id: "a", row: 0 });
@@ -71,7 +88,11 @@ describe("FakeConversation", () => {
 
   it("tells the agent when a tool has no handler", async () => {
     const { fake } = setup();
-    await fake.start({ conversationToken: "t", textOnly: false });
+    await fake.start({
+      transport: "webrtc",
+      conversationToken: "t",
+      textOnly: false,
+    });
     await fake.sendUserMessage("show me the first row");
     expect(fake.toolCalls[0].result).toBe('tool "highlight" isn\'t available');
   });
@@ -79,7 +100,11 @@ describe("FakeConversation", () => {
   it("records context updates, user activity and the mic", async () => {
     const { fake } = setup();
     fake.sendContextualUpdate("before connect");
-    await fake.start({ conversationToken: "t", textOnly: false });
+    await fake.start({
+      transport: "webrtc",
+      conversationToken: "t",
+      textOnly: false,
+    });
     fake.sendContextualUpdate("ctx");
     fake.sendUserActivity();
     fake.setMicMuted(true);
@@ -92,7 +117,11 @@ describe("FakeConversation", () => {
 
   it("keeps a text-only session's mic muted", async () => {
     const { fake } = setup();
-    await fake.start({ conversationToken: "t", textOnly: true });
+    await fake.start({
+      transport: "webrtc",
+      conversationToken: "t",
+      textOnly: true,
+    });
     fake.setMicMuted(false);
     expect(fake.textOnly).toBe(true);
     expect(fake.micMuted).toBe(true);
@@ -100,18 +129,30 @@ describe("FakeConversation", () => {
 
   it("reports end as user and drop as error, once", async () => {
     const { fake, cb } = setup();
-    await fake.start({ conversationToken: "t", textOnly: false });
+    await fake.start({
+      transport: "webrtc",
+      conversationToken: "t",
+      textOnly: false,
+    });
     fake.drop();
     fake.end();
     expect(cb.onDisconnect.mock.calls).toEqual([["error"]]);
-    await fake.start({ conversationToken: "t", textOnly: false });
+    await fake.start({
+      transport: "webrtc",
+      conversationToken: "t",
+      textOnly: false,
+    });
     fake.end();
     expect(cb.onDisconnect.mock.calls).toEqual([["error"], ["user"]]);
   });
 
   it("reports hangUp as agent", async () => {
     const { fake, cb } = setup();
-    await fake.start({ conversationToken: "t", textOnly: false });
+    await fake.start({
+      transport: "webrtc",
+      conversationToken: "t",
+      textOnly: false,
+    });
     fake.hangUp();
     expect(cb.onDisconnect.mock.calls).toEqual([["agent"]]);
     expect(fake.status).toBe("disconnected");
@@ -119,7 +160,11 @@ describe("FakeConversation", () => {
 
   it("sends no answer after the session drops mid-question", async () => {
     const { fake, messages } = setup();
-    await fake.start({ conversationToken: "t", textOnly: false });
+    await fake.start({
+      transport: "webrtc",
+      conversationToken: "t",
+      textOnly: false,
+    });
     const pending = fake.sendUserMessage("Why?");
     fake.drop();
     await pending;
@@ -130,7 +175,11 @@ describe("FakeConversation", () => {
 describe("FakeConversation end during connect", () => {
   it("doesn't connect when ended before the connect lands", async () => {
     const { fake, cb } = setup();
-    const pending = fake.start({ conversationToken: "t", textOnly: false });
+    const pending = fake.start({
+      transport: "webrtc",
+      conversationToken: "t",
+      textOnly: false,
+    });
     fake.end();
     await pending;
     expect(cb.onConnect).not.toHaveBeenCalled();

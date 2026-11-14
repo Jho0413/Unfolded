@@ -93,16 +93,29 @@ function useRealConversation({
       ]),
     );
     return {
-      start: ({ conversationToken, textOnly }: StartOptions) =>
-        startSession({
-          conversationToken,
-          connectionType: "webrtc",
-          textOnly,
+      start: async (options: StartOptions) => {
+        const common = {
+          textOnly: options.textOnly,
           clientTools,
-        }),
+          stripAudioTags: true,
+        };
+        // startSession rejects when the session can't start; the panel handles it.
+        await (options.transport === "webrtc"
+          ? startSession({
+              ...common,
+              connectionType: "webrtc",
+              conversationToken: options.conversationToken,
+            })
+          : startSession({
+              ...common,
+              connectionType: "websocket",
+              signedUrl: options.signedUrl,
+            }));
+      },
       end: endSession,
-      // The SDK throws without an active session (e.g. a blur after a drop).
-      sendUserMessage: (text: string) => quietly(() => sendUserMessage(text)),
+      // Throws without an active session: the panel says Q&A ended (section 7).
+      sendUserMessage,
+      // The SDK throws without an active session (e.g. a blur after a drop): only logged.
       sendUserActivity: () => quietly(sendUserActivity),
       sendContextualUpdate: (text: string) =>
         quietly(() => sendContextualUpdate(text)),
@@ -155,15 +168,22 @@ function useFakeConversation({
   }, [fake]);
   return useMemo(
     () => ({
-      start: (options) => void fake.start(options),
+      start: (options) => fake.start(options),
       end: () => fake.end(),
       sendUserMessage: (text) => void fake.sendUserMessage(text),
       sendUserActivity: () => fake.sendUserActivity(),
       sendContextualUpdate: (text) => fake.sendContextualUpdate(text),
       setMicMuted: (muted) => fake.setMicMuted(muted),
-      // Tests deny the mic by setting window.__qaFakeMicDenied before load.
-      requestMicrophone: async () =>
-        !(window as { __qaFakeMicDenied?: boolean }).__qaFakeMicDenied,
+      // Tests deny the mic by setting window.__qaFakeMicDenied before load, or leave the
+      // permission prompt unanswered with window.__qaFakeMicPending (it never settles).
+      requestMicrophone: () => {
+        const w = window as {
+          __qaFakeMicDenied?: boolean;
+          __qaFakeMicPending?: boolean;
+        };
+        if (w.__qaFakeMicPending) return new Promise<boolean>(() => {});
+        return Promise.resolve(!w.__qaFakeMicDenied);
+      },
     }),
     [fake],
   );
