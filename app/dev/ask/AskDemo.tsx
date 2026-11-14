@@ -3,7 +3,7 @@
 // Ask panel wired to ask / closeAsk / agentDisconnected and the client tools
 // (qa/tools.ts), as P6 will wire them. The board is a list of objects here;
 // highlights are listed, and thrown away when Ask closes (section 8).
-import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   initialState,
   logResult,
@@ -11,10 +11,19 @@ import {
   type PlayerState,
   transition,
 } from "@/player/machine";
-import type { BoardObject, BoardState } from "@/shared/scene";
-import { AskPanel } from "@/qa/AskPanel";
+import type { Action, BoardObject, BoardState, Sketch } from "@/shared/scene";
 import { ConversationProvider } from "@/qa/conversation";
+import { AskPanel, type AskApi } from "@/qa/AskPanel";
+import {
+  addAction,
+  addSketch,
+  type AskLayer,
+  askScene,
+  EMPTY_LAYER,
+} from "@/qa/askBoard";
+import { SKETCH_FAILED, sketchFailedUpdate } from "@/qa/drawScene";
 import { createClientTools, type HighlightAction } from "@/qa/tools";
+import { Whiteboard } from "@/player/Whiteboard";
 
 const PLAN = [
   { title: "Matrices", goal: "What a matrix is" },
@@ -40,7 +49,6 @@ const BOARDS: BoardObject[][] = [
   [matrix("q", 100), matrix("k", 400)],
   [matrix("q", 100), matrix("k", 400), matrix("out", 700)],
 ];
-const EMPTY_BOARD: BoardState = { objects: [], copies: [], active: [] };
 function boardOf(objects: BoardObject[]): BoardState {
   return {
     objects: objects.map((object) => ({
@@ -54,22 +62,55 @@ function boardOf(objects: BoardObject[]): BoardState {
 }
 const CTX = { stepCount: PLAN.length };
 
-/** The player machine as a tiny store: send() answers synchronously. */
+/**
+ * The player machine and the Ask layer as a tiny store: send() answers
+ * synchronously, so go_to_step can return the machine's answer to the agent.
+ */
 function createMachine() {
-  let state: PlayerState = initialState().state;
+  let snap: { state: PlayerState; layer: AskLayer } = {
+    state: initialState().state,
+    layer: EMPTY_LAYER,
+  };
+  let openedAt = 0;
   const listeners = new Set<() => void>();
+  const set = (next: Partial<typeof snap>) => {
+    snap = { ...snap, ...next };
+    for (const fn of listeners) fn();
+  };
+  const sinceOpen = () => performance.now() - openedAt;
   return {
-    get: () => state,
+    get: () => snap,
     subscribe: (fn: () => void) => {
       listeners.add(fn);
-      return () => listeners.delete(fn);
+      return () => void listeners.delete(fn);
     },
     send: (event: PlayerEvent) => {
-      const result = transition(state, event, CTX);
+      const was = snap.state.kind;
+      const result = transition(snap.state, event, CTX);
       logResult(result);
-      state = result.state;
-      for (const fn of listeners) fn();
+      const restore =
+        result.outcome === "changed" &&
+        result.effects.some((e) => e.type === "restoreBoard");
+      if (was !== "asking" && result.state.kind === "asking")
+        openedAt = performance.now();
+      set({
+        state: result.state,
+        layer: restore ? EMPTY_LAYER : snap.layer,
+      });
       return result;
+    },
+    sinceOpen,
+    addAction: (a: Action) =>
+      set({ layer: addAction(snap.layer, a, sinceOpen()) }),
+    addSketch: (sketch: Sketch, fresh: boolean) =>
+      set({ layer: addSketch(snap.layer, sketch, sinceOpen(), fresh) }),
+    /** The board on screen: the frozen lesson board plus the Ask layer. */
+    board: (): BoardState => {
+      const { state, layer } = snap;
+      const from = state.kind === "asking" ? state.from : state;
+      const objects = from.kind === "loading" ? [] : BOARDS[from.step];
+      if (state.kind !== "asking") return boardOf(objects);
+      return askScene({ objects, timed: [], pausedT: 0 }, layer, sinceOpen());
     },
   };
 }
@@ -80,11 +121,22 @@ function currentStep(s: PlayerState): number {
 
 export function AskDemo({ replay }: { replay: boolean }) {
   const [machine] = useState(createMachine);
-  const state = useSyncExternalStore(
+  const { state } = useSyncExternalStore(
     machine.subscribe,
     machine.get,
     machine.get,
   );
+  // Redraw every frame while asking, so sketch actions play from arrival.
+  const [, setFrame] = useState(0);
+  const asking = state.kind === "asking";
+  useEffect(() => {
+    if (!asking) return;
+    let id = requestAnimationFrame(function tick() {
+      setFrame((f) => f + 1);
+      id = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(id);
+  }, [asking]);
   const [log, setLog] = useState<string[]>([]);
   const [highlights, setHighlights] = useState<HighlightAction[]>([]);
 
@@ -102,38 +154,39 @@ export function AskDemo({ replay }: { replay: boolean }) {
     [machine],
   );
 
-  const board = useCallback((): BoardState => {
-    const s = machine.get();
-    const from = s.kind === "asking" ? s.from : s;
-    return from.kind === "loading" ? EMPTY_BOARD : boardOf(BOARDS[from.step]);
-  }, [machine]);
-  const highlight = useCallback(
-    (a: HighlightAction) => setHighlights((h) => [...h, a]),
-    [],
-  );
-
-  const tools = useMemo(() => {
-    const t = createClientTools({
-      board,
-      highlight,
-      send,
-      isAsking: () => machine.get().kind === "asking",
-    });
-    // Log each call and its result for the e2e tests.
-    return Object.fromEntries(
-      Object.entries(t).map(([name, handler]) => [
-        name,
-        async (p: never) => {
-          const result = await (handler as (p: never) => unknown)(p);
-          setLog((l) => [
-            ...l,
-            `${name} ${JSON.stringify(p)} -> ${String(result ?? "(no result)")}`,
-          ]);
-          return result;
+  const tools = useCallback(
+    (ask: AskApi) => {
+      const t = createClientTools({
+        board: machine.board,
+        highlight: (a: HighlightAction) => {
+          machine.addAction(a);
+          setHighlights((h) => [...h, a]);
         },
-      ]),
-    ) as typeof t;
-  }, [board, highlight, send, machine]);
+        drawSketch: machine.addSketch,
+        sketchFailed: (description) => {
+          ask.showNotice(SKETCH_FAILED);
+          ask.tellAgent(sketchFailedUpdate(description));
+        },
+        send,
+        isAsking: () => machine.get().state.kind === "asking",
+      });
+      // Log each call and its result for the e2e tests.
+      return Object.fromEntries(
+        Object.entries(t).map(([name, handler]) => [
+          name,
+          async (p: never) => {
+            const result = await (handler as (p: never) => unknown)(p);
+            setLog((l) => [
+              ...l,
+              `${name} ${JSON.stringify(p)} -> ${String(result ?? "(no result)")}`,
+            ]);
+            return result;
+          },
+        ]),
+      ) as typeof t;
+    },
+    [send, machine],
+  );
 
   const step = currentStep(state);
   // The board stays on the step Ask opened from until Ask closes (section 8);
@@ -196,6 +249,9 @@ export function AskDemo({ replay }: { replay: boolean }) {
           onClose={onClose}
           onAgentDisconnected={onDropped}
         />
+        <div style={{ maxWidth: 960, border: "1px solid #e2e8f0" }}>
+          <Whiteboard state={machine.board()} />
+        </div>
         <ul data-testid="highlights">
           {highlights.map((a, i) => (
             <li key={i} data-target={JSON.stringify(a.target)}>

@@ -9,6 +9,7 @@ const ASK = {
   ended: "Q&A ended unexpectedly.",
   micOff: "Mic is off. Type your question; the answer will appear as text.",
   needsConnection: "Q&A needs a connection.",
+  sketchFailed: "Couldn't draw that.",
 };
 
 async function open(page: Page, query = "") {
@@ -182,6 +183,87 @@ test.describe("client tools on /dev/ask (ROADMAP Q4)", () => {
     await expect(state(page)).toHaveAttribute("data-state", "paused");
     await expect(state(page)).toHaveAttribute("data-step", "0");
   });
+});
+
+const SKETCH = {
+  objects: [{ kind: "text", id: "note", x: 600, y: 400, text: "row 1" }],
+  actions: [{ do: "highlight", target: { id: "q", row: 0 }, atMs: 0 }],
+};
+
+test.describe("draw_scene on /dev/ask (ROADMAP Q5)", () => {
+  test("a valid sketch is drawn when it arrives, while the conversation continues", async ({
+    page,
+  }) => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    let body: {
+      description?: string;
+      fresh?: boolean;
+      board?: { objects: { object: { id: string } }[] };
+    } = {};
+    await page.route("**/api/sketch", async (route) => {
+      body = route.request().postDataJSON();
+      await gate;
+      await route.fulfill({ json: { sketch: SKETCH } });
+    });
+    await open(page);
+    await toPlaying(page);
+    await askAndConnect(page);
+    await typeQuestion(page, "can you draw it?");
+    // The agent answers at once: draw_scene doesn't wait for the sketch.
+    await expect(
+      page.getByTestId("ask-transcript").locator('[data-role="agent"]').last(),
+    ).toContainText("Let me sketch that");
+    await expect(page.getByTestId("tool-log")).toContainText(
+      'draw_scene {"description":"Circle the first row of q","fresh":false} -> (no result)',
+    );
+    const note = page
+      .getByTestId("whiteboard")
+      .locator('[data-object-id="note"]');
+    await expect(note).toHaveCount(0);
+    expect(body.description).toBe("Circle the first row of q");
+    expect(body.fresh).toBe(false);
+    expect(body.board?.objects.map((o) => o.object.id)).toEqual(["q", "a"]);
+    release();
+    await expect(note).toHaveCount(1);
+    await expect(notice(page)).toHaveCount(0);
+    // Closing Ask throws the drawing away.
+    await page.getByRole("button", { name: "Close" }).click();
+    await expect(note).toHaveCount(0);
+  });
+
+  for (const [name, reply] of [
+    ["an error response", { status: 502, json: { error: ASK.sketchFailed } }],
+    [
+      "a sketch invalid on the board",
+      {
+        status: 200,
+        json: {
+          sketch: {
+            objects: [],
+            actions: [{ do: "highlight", target: { id: "zz" }, atMs: 0 }],
+          },
+        },
+      },
+    ],
+  ] as const) {
+    test(`${name}: "${ASK.sketchFailed}", and the agent is told`, async ({
+      page,
+    }) => {
+      await page.route("**/api/sketch", (route) => route.fulfill(reply));
+      await open(page);
+      await toPlaying(page);
+      await askAndConnect(page);
+      await typeQuestion(page, "can you draw it?");
+      await expect(notice(page)).toHaveText(ASK.sketchFailed);
+      await expect
+        .poll(() => page.evaluate(() => window.__qaFake?.contextUpdates.at(-1)))
+        .toContain("couldn't be drawn");
+      await expect(
+        page.getByTestId("whiteboard").locator('[data-object-id="zz"]'),
+      ).toHaveCount(0);
+    });
+  }
 });
 
 test.describe("Ask messages (ARCHITECTURE.md section 7)", () => {
