@@ -65,7 +65,7 @@ app/
   page.tsx                          upload page
   lesson/[lessonId]/page.tsx        player page
   api/lessons/route.ts              POST: PDF -> lesson plan
-  api/lessons/[lessonId]/steps/[n]/route.ts   POST: generate step n (script + audio + cue times)
+  api/lessons/[lessonId]/steps/[n]/route.ts   POST: generate step n (script + audio + cue times), or return it if it's ready; after a failure, a new POST tries again (section 6.2)
   api/sketch/route.ts               POST: Q&A drawing request -> sketch
   api/lessons/[lessonId]/signals/route.ts     POST: record a learner signal or "step n started" (section 5.4)
   api/runs/[lessonId]/[file]/route.ts         GET: serve step JSON, audio and media from runs/ (no path traversal)
@@ -106,7 +106,7 @@ There are two ownership areas, and the folders of each are in the `AGENTS.md` §
 - **A, browser:** the contract, the player and the Q&A browser side.
 - **B, server:** the pipeline, the API routes (including `/api/sketch`), voice (`agent/`) and fal.
 
-Task owners go on the GitHub issues. Files every task touches (`package.json`, `lib/config.ts`, `lib/env.ts`, `lib/fakes/`, `tests/e2e/`, `.github/`, `app/layout.tsx`) can be edited by anyone, with a post on the board.
+Task owners go on the GitHub issues. Files every task touches (`package.json`, `lib/config.ts`, `lib/env.ts`, `instrumentation.ts`, `.env.example`, `lib/fakes/`, `tests/e2e/`, `.github/`, `app/layout.tsx`) can be edited by anyone, with a post on the board.
 
 ## 4. The scene contract (`shared/scene.ts`)
 
@@ -157,7 +157,7 @@ type Sketch = {                               // what /api/sketch returns for a 
 - **Writing.** `write` replaces a matrix cell's value or a text object's text, so a text showing `1·5 + 2·7` can become `19` and then move into a cell.
 
 **The M1 demo in this contract** (`lib/fakes/fixtures/demo-m1.step.json`, hand-written in F3 as the contract's acceptance test). Matrices `a` and `b` and an empty result `c` are visible; `p1` (`1·5`), `p2` (`2·7`) and `sum` are hidden `text` objects.
-1. `[[row]]`: highlight row 0 of `a` and move it (a copy) to a point left of `c`. `[[col]]`: highlight column 0 of `b` and move it beside the row's copy. The row and column slide together.
+1. `[[row]]`: highlight row 0 of `a`. `[[col]]`: highlight column 0 of `b`. `[[slide]]`: two `move` actions on this one cue, row 0 of `a` (a copy) to a point left of `c` and column 0 of `b` (a copy) to a point beside it. The row and column slide together.
 2. `[[pair1]]`, `[[pair2]]`: show `p1`, then `p2`. The pairs multiply.
 3. `[[add]]`: show `sum` with `1·5 + 2·7`. `[[total]]`: write `19` to `sum`.
 4. `[[drop]]`: move `sum` to `{ id: "c", row: 0, col: 0 }`. `[[done]]`: write `19` to that cell, hide `sum` and hide both copies. The sum has dropped into (1,1), the first cell.
@@ -342,7 +342,7 @@ stateDiagram-v2
   failed --> loading: retry / back / goToStep
 ```
 
-`loading` carries the step it's loading and whether to **autoplay**: yes for Next, Back and goToStep; no after a Q&A jump. `stepReady(i)` and `stepFailed(i)` carry their step index. An event for a step other than the one being loaded is a late reply to an earlier request: it's ignored and logged. Ask can open while a step loads (a step that wasn't prefetched can take a while, which is when the learner wants to ask). The step keeps loading, and the result is remembered for when Ask closes.
+`loading` carries the step it's loading and whether to **autoplay**: yes for Next, Back and goToStep; no after a Q&A jump. `stepReady(i)` and `stepFailed(i)` carry their step index. Entering `loading` requests the step, so Retry from `failed` is just a new request, which generates the step again on the server (section 6.2). An event for a step other than the one being loaded is a late reply to an earlier request: it's ignored and logged. Ask can open while a step loads (a step that wasn't prefetched can take a while, which is when the learner wants to ask). The step keeps loading, and the result is remembered for when Ask closes.
 
 Every state × event pair has a defined result, and each cell gets a test:
 - **ignored** means the state doesn't change and nothing is shown.
@@ -379,19 +379,19 @@ stateDiagram-v2
   staleGenerating --> started: started n (an older version played, A1)
   ready --> generating: newer signal (not started)
   ready --> started: started n
-  failed --> generating: retry
+  failed --> generating: request (a new request after a failure tries again)
 ```
 
-| State \ event | request | rejected (zod or validate) | valid + audio + cues | refusal / Claude error after SDK retries / `max_tokens` cut-off | TTS or quota error, no alignment | newer signal (A1) | started n (A1) | retry |
-|---|---|---|---|---|---|---|---|---|
-| notRequested | → generating | can't happen | can't happen | can't happen | can't happen | ignored (generates with the new version later) | can't happen (not served) | ignored |
-| generating | waits for this generation (no second one) | first time: retry with errors; second time: → failed, or → ready with the older version if this is a regeneration (A1) | → ready | → failed, or → ready with the older version if this is a regeneration (A1) | → failed, or → ready with the older version if this is a regeneration (A1) | → staleGenerating | → started if an older version played (the browser didn't wait for this one); the running attempt is discarded when it finishes. On a first generation, can't happen (nothing served) | ignored |
-| staleGenerating | waits | discarded → generating | discarded → generating | → generating (new version) | → generating (new version) | stays (the latest version is used) | → started, as in generating | ignored |
-| ready | returns it from `runs/` | can't happen | can't happen | can't happen | can't happen | → generating (new version) | → started | ignored |
-| started | returns the played version | discarded: an attempt still running when an older version started (A1) | discarded (A1) | discarded (A1) | discarded (A1) | ignored (already heard) | ignored | ignored |
-| failed | returns "Couldn't make this step." | can't happen | can't happen | can't happen | can't happen | ignored | can't happen (not served) | → generating |
+| State \ event | request | rejected (zod or validate) | valid + audio + cues | refusal / Claude error after SDK retries / `max_tokens` cut-off | TTS or quota error, no alignment | newer signal (A1) | started n (A1) |
+|---|---|---|---|---|---|---|---|
+| notRequested | → generating | can't happen | can't happen | can't happen | can't happen | ignored (generates with the new version later) | can't happen (not served) |
+| generating | waits for this generation (no second one) | first time: retry with errors; second time: → failed, or → ready with the older version if this is a regeneration (A1) | → ready | → failed, or → ready with the older version if this is a regeneration (A1) | → failed, or → ready with the older version if this is a regeneration (A1) | → staleGenerating | → started if an older version played (the browser didn't wait for this one); the running attempt is discarded when it finishes. On a first generation, can't happen (nothing served) |
+| staleGenerating | waits | discarded → generating | discarded → generating | → generating (new version) | → generating (new version) | stays (the latest version is used) | → started, as in generating |
+| ready | returns it from `runs/` | can't happen | can't happen | can't happen | can't happen | → generating (new version) | → started |
+| started | returns the played version | discarded: an attempt still running when an older version started (A1) | discarded (A1) | discarded (A1) | discarded (A1) | ignored (already heard) | ignored |
+| failed | → generating: a new request after a failure tries again (this is how the player's Retry works) | can't happen | can't happen | can't happen | can't happen | ignored | can't happen (not served) |
 
-The two columns marked (A1), and the cells marked A1, can only happen once adaptation (A1) is built: A1 tests those, and G2 tests the rest. A fal error doesn't fail the step: the image object is hidden (section 7). In replay mode this machine doesn't run, and a step missing from the folder is a `failed` step.
+The two columns marked (A1), and the cells marked A1, can only happen once adaptation (A1) is built: A1 tests those, and G2 tests the rest. A fal error doesn't fail the step: the image object is hidden (section 7). In replay mode this machine doesn't run: a step missing from the folder fails on every request, with "This step isn't in the saved run." (section 5.5).
 
 ## 7. Errors and rejections
 
@@ -411,7 +411,7 @@ The developer gets the full error in the server log, tagged with the route, less
 | Ask | Token route fails, or the agent can't connect | "Questions are unavailable right now." | The lesson carries on; close the panel |
 | Ask | Session drops mid-question | "Q&A ended unexpectedly." | Ask again |
 | Ask | Microphone permission denied | "Mic is off. Type your question; the answer will appear as text." | Typed input (text-only session) |
-| Tool | `draw_scene` sketch invalid | Agent told "couldn't draw that", answers in words | None needed |
+| Tool | `draw_scene` sketch invalid, or the sketch request fails | The Ask panel shows "Couldn't draw that." The agent is told through `sendContextualUpdate()` (it doesn't wait for a result, section 8) | The agent answers in words |
 | Tool | `highlight` on an unknown id | Agent told `unknown object "x"` | None needed |
 | Server start | Missing required env var for the mode (section 9) | The server refuses to start and names the missing var | Fix `.env.local` |
 
@@ -432,7 +432,7 @@ The developer gets the full error in the server log, tagged with the route, less
   - the ids of the objects on the board
   - the questions asked earlier in this lesson
 
-  So the agent knows what "this" means and which ids `highlight` can use.
+  So the agent knows what "this" means and which ids `highlight` can use. The browser also sends one when a `draw_scene` sketch fails, so the agent answers in words.
 - **Client tools.** Names and parameters are in `shared/tools.ts`. The agent config and `qa/tools.ts` both use that list, and a test checks they match.
 
 | Tool | Parameters | Waits for result? | Effect | Returns to the agent |
@@ -442,12 +442,12 @@ The developer gets the full error in the server log, tagged with the route, less
 | `draw_scene` | `description` (plain words), `fresh?` (default false) | **no** | Browser → `POST /api/sketch` (low effort) with the current board → `Sketch` → validated → drawn on top of the current board when it arrives, or on an empty board with `fresh: true` | nothing, so the agent keeps talking while the sketch is made |
 | `simplify_upcoming` | `reason` | no | Posts a signal (section 5.4) | nothing |
 
-- `draw_scene` doesn't wait, because a Claude request can't finish inside a natural pause. The agent's prompt tells it to describe the sketch out loud while it appears. A failed sketch is logged and shows "Couldn't draw that". Spike S2 measures the sketch's latency.
+- `draw_scene` doesn't wait, because a Claude request can't finish inside a natural pause. The agent's prompt tells it to describe the sketch out loud while it appears. A failed sketch is logged, the Ask panel shows "Couldn't draw that", and the browser tells the agent through `sendContextualUpdate()` so it answers in words (section 7). Spike S2 measures the sketch's latency.
 - `draw_scene` takes plain words, not scene JSON. The voice model only describes what to draw, and Claude writes the validated sketch, so the scene schema stays in one place and out of the agent's prompt.
-- **A sketch builds on the board the learner is looking at.** The request body is `{ description, fresh, board }`, where `board` is the current `BoardState`. The route checks the body with zod, including a cap on the board's size. Claude sees the board, so an answer to "why does the row go with the column?" can highlight and draw over the matrix on screen.
+- **A sketch builds on the board the learner is looking at.** The request body is `{ description, fresh, board }`, where `board` is the current `BoardState`. The route checks the body with zod, including a cap on the board's size (`config.maxBoardObjects`). Claude sees the board, so an answer to "why does the row go with the column?" can highlight and draw over the matrix on screen.
   - The sketch's ids are checked against its own objects plus the board's (section 4). With `fresh: true` the sketch starts from an empty board, and later sketches in this Ask build on that new board, not the lesson board.
   - The browser validates the sketch again against the board it has when the sketch arrives, since the board may have changed while Claude worked.
-- **The board during Ask.** Ask freezes the lesson board at `pausedT`: the audio time when Ask opened, the end of the step from `stepEnded` or `finished`, or an empty board from `loading`. `highlight` and sketches draw on top of it, each timed from when it arrives. **Closing Ask throws all of that away**: the board goes back to `sceneAt(step, pausedT)` and the player is paused there (section 6.1), so Play carries on from the same point. If Ask was opened while loading and the step arrived meanwhile, the board is that step at 0.
+- **The board during Ask.** Ask freezes the lesson board at `pausedT`: the audio time when Ask opened, the end of the step from `stepEnded` or `finished`, or an empty board from `loading`. `highlight` and sketches draw on top of it, each timed from when it arrives. **Closing Ask throws all of that away**: the board goes back to `sceneAt(step, pausedT)` and the player returns to the state Ask was opened from, with `playing` becoming `paused` (section 6.1), so Play carries on from the same point. If Ask was opened while loading and the step arrived meanwhile, the board is that step at 0.
 - **Agent config in the repo.** We use the official **ElevenLabs CLI** (`@elevenlabs/cli`) rather than writing our own sync script.
   - The agent and its client tools are config files in `agent/`, pushed with the CLI's agent and tool `push` commands.
   - The CLI tracks the agent's id. Its tracking file is committed, so the team shares **one** agent.
@@ -481,7 +481,7 @@ The developer gets the full error in the server log, tagged with the route, less
 
 - `lib/env.ts` validates the env once, at server start, from `instrumentation.ts` `register()`, with zod. Code behind it trusts the values. A missing required key stops the server, and the error names the key.
 - Keys are only read in `lib/` and the API routes, which import `"server-only"`. The browser never sees a key.
-- All of these live in `lib/config.ts`: model ids, effort per request type, `maxNarrationChars`, `maxPdfMb`, `coverTimeoutMs`, the image cap per lesson (E1) and the `runs/` path.
+- All of these live in `lib/config.ts`: model ids, effort per request type, `maxNarrationChars`, `maxPdfMb`, `coverTimeoutMs`, `maxBoardObjects` (the cap on the board a sketch request sends, section 8), the image cap per lesson (E1) and the `runs/` path.
 
 ## 10. Testing: how we prove it works
 
