@@ -54,6 +54,7 @@ PDF ──► Claude (gets the PDF directly, no parser step)
 - **The player is a pure function.** `sceneAt(script, t)` returns the whiteboard state at time `t`. Back, Replay and scrubbing are just seeks on the audio element. There is no animation state to rewind.
 - **Cue markers become times.** A marker such as `[[row1]]` sits in the narration text. After the markers are stripped, the marker's position maps to the character that follows it, and that character's timestamp from ElevenLabs is the cue time.
 - **Fully live generation, including in the demo.** While the learner is on step N, step N+1 is generated (script + audio) ahead of time.
+- **Replay safety net (no DB):** each generated step (scene script + audio) is also written to a local folder. If the network fails during judging, a saved run can be replayed. Live stays the default.
 
 ### Q&A mode
 
@@ -63,7 +64,7 @@ PDF ──► Claude (gets the PDF directly, no parser step)
   - `highlight`: points at something already on the board
   - `go_to_step`: jumps the lesson to a given step
   - `simplify_upcoming`: asks for the steps still to come to be rewritten more simply
-- The agent needs context about where the learner is: the current step's script, the plan, and the questions asked so far. It gets this when the session starts and through contextual updates.
+- The agent needs context about where the learner is: the current step's script, the plan, and the questions asked so far. It gets the plan and current step when the session starts, and an update on every step change.
 - Adaptation: the questions asked feed into the generation of upcoming steps.
 
 ### Not decided yet
