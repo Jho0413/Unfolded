@@ -12,12 +12,14 @@
     "test": "vitest run",
     "e2e": "playwright test",
     "spike:s3": "tsx --conditions=react-server scripts/s3-spike.ts",
+    "spike:s4": "tsx --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/s4-spike.ts",
     "agent:push": "sh -c 'set -a; for f in .env .env.local; do [ -f \"$f\" ] && . \"./$f\"; done; set +a; AGENT_PUSH=1 vitest run agent/agent.test.ts && cd agent && elevenlabs tools push && elevenlabs agents push' && prettier --write agent",
     "make:m1": "tsx --conditions=react-server --env-file-if-exists=.env.local scripts/make-m1.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",
     "@elevenlabs/react": "^1.22.1",
+    "@fal-ai/client": "^1.11.0",
     "katex": "^0.19.1",
     "next": "16.4.6",
     "react": "19.3.0",
