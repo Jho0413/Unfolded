@@ -21,6 +21,18 @@ export const config = {
   } satisfies Record<string, Effort>,
   /** Narration cap after cue markers are stripped (`narration too long`, ARCHITECTURE.md section 4). */
   maxNarrationChars: 1500,
+  /** A step request (ARCHITECTURE.md sections 5.1 and 6.2). */
+  step: {
+    /** Output cap, thinking included. A cut-off fails the step. */
+    maxTokens: 32_000,
+    /**
+     * Deadline for one attempt, the SDK's own retries included, until the whole streamed
+     * answer is in (S3 may tune it). The SDK's `timeout` only covers waiting for headers.
+     */
+    timeoutMs: 180_000,
+    /** Served when FAKE_APIS=1, in the Messages API's response shape. */
+    fixture: "claude-step.message.json",
+  },
   /** Upload cap: our own choice, not Claude's limit (ARCHITECTURE.md section 5.1). */
   maxPdfMb: 32,
   /** How long the plan route waits for the fal cover before returning without it. */

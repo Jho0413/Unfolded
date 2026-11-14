@@ -11,9 +11,11 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "e2e": "playwright test",
+    "agent:push": "sh -c \"set -a; . ./.env.local; set +a; cd agent && elevenlabs tools push && elevenlabs agents push\" && prettier --write agent",
     "make:m1": "tsx --conditions=react-server --env-file-if-exists=.env.local scripts/make-m1.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
     "@elevenlabs/react": "^1.22.1",
     "katex": "^0.19.1",
     "next": "16.4.6",
@@ -23,6 +25,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@elevenlabs/cli": "1.11.0",
     "@playwright/test": "^1.65.1",
     "@types/node": "^22.20.5",
     "@types/react": "^19",
