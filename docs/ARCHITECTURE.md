@@ -348,9 +348,9 @@ sceneAt(objects: BoardObject[], timed: { action; startMs; durationMs }[], tMs: n
 - Everything generated is written to `runs/<lessonId>/`: `plan.json`, the cover, `step-<n>.v<k>.json`, the audio, cue times and media for each step, and `signals.json`.
 - Steps are **versioned** (`v1`, `v2`, ...) because a signal can regenerate one. `signals.json` records which version of each step started playing.
 - Starting the app with `REPLAY_RUN=<lessonId>`:
-  - The upload page redirects to `/lesson/<lessonId>`.
-  - The routes serve each step's *played* version, or its latest version if it never played, from the folder. They never call Claude, ElevenLabs or fal.
-  - A step that isn't in the folder fails, with "This step isn't in the saved run."
+  - The upload page redirects to `/lesson/<lessonId>`, decided on each request (the page waits for `connection()`), so the build's env never fixes it.
+  - The routes serve each step's *played* version, or its latest version if it never played, from the folder. They never call Claude, ElevenLabs or fal. Until A1 records played versions in `signals.json`, the step route serves the latest.
+  - A step that isn't in the folder fails, with "This step isn't in the saved run." (the step route's 404; a saved file that isn't a `SavedStep` counts as missing). A bad `n` or a lesson with no `plan.json` gets the usual "No such lesson or step." (section 7).
 - Q&A needs the network, so in replay mode the Ask panel says "Q&A needs a connection".
 
 ## 6. State machines
@@ -459,7 +459,7 @@ The developer gets the full error in the server log, tagged with the route, less
 | Upload | Over `config.maxPdfMb`, encrypted or over `config.maxPdfPages` pages (our byte checks, section 5.1), or Claude rejects the document (too many pages, encrypted, unreadable) | "This PDF is too large or locked." | Another PDF |
 | Plan | Invalid plan twice (zod, or fewer than `config.plan.minSteps` steps), refusal, a cut-off, or a Claude or Files API error | "Couldn't read this paper." | Retry, or another PDF |
 | Step | Any `failed` cause in section 6.2 (502), or a failure outside the table such as a missing `paper.json` or a failed save (500); the reason is logged with the route, lesson and step, and `failed (<event>)` | "Couldn't make this step." | Retry (player `failed` state): the next request generates again |
-| Step | Replay mode, and the step isn't in the run | "This step isn't in the saved run." | Back, or another step |
+| Step | Replay mode, and the step isn't in the run (404, on every request; nothing is generated) | "This step isn't in the saved run." | Back, or another step |
 | Plan or step | fal error or timeout, or no `FAL_KEY` | Nothing: the plan or step shows without the illustration | The image is hidden and the error is logged |
 | Player | Browser blocks autoplay | "Press play to start." | Play button |
 | Player | Audio fails to load or decode | "Couldn't play the audio. Retry?" | Retry |
