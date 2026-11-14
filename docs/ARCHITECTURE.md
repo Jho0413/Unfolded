@@ -244,7 +244,8 @@ sequenceDiagram
   - Budget: about 25 US dollars of fal credits per teammate. So it's one image per lesson plan, a saved cover is never regenerated, replay never calls fal, and tests use the fal fake.
 - **Files reach the browser through `GET /api/runs/<lessonId>/<file>`.** `runs/` is outside `public/`, and `next start` won't serve files added after the build.
   - The player fetches each step's audio as a blob and plays it from a `blob:` URL. That keeps seeking reliable without HTTP Range support in the route.
-  - The route only serves names matching `^[a-z0-9.-]+$` from inside the run folder.
+  - The route only serves names matching `^[a-z0-9][a-z0-9.-]{0,99}$` (so never `.` or `..`) with a known extension (`.json`, `.mp3`, `.png`, `.jpg`, `.jpeg`, `.webp`) from inside the run folder, and never a symlink or a folder. A bad `lessonId` or file name → 400; a file that isn't there → 404.
+  - `lib/runs/store.ts` writes every file atomically (a temporary file, then a rename), so a reader never sees half a file. A new step version is a new file (`step-<n>.v<k>.json` and `step-<n>.v<k>.mp3`); an older version is never overwritten.
 
 ### 5.2 Cue markers become times (`lib/narration/cues.ts`, pure)
 
