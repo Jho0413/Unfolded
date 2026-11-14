@@ -108,6 +108,15 @@ export const config = {
     /** Served when FAKE_APIS=1, in ElevenLabs' response shape. */
     fixture: "elevenlabs-conversation-token.json",
   },
+  /**
+   * The Q&A agent's websocket signed URL, the Ask panel's fallback when WebRTC can't connect
+   * (ARCHITECTURE.md section 8). It uses agentToken's timeout and log limit: Ask waits on it the same way.
+   */
+  agentSignedUrl: {
+    url: "https://api.elevenlabs.io/v1/convai/conversation/get-signed-url",
+    /** Served when FAKE_APIS=1, in ElevenLabs' response shape. */
+    fixture: "elevenlabs-signed-url.json",
+  },
   /** Narration audio: ElevenLabs TTS with timestamps (ARCHITECTURE.md sections 5.2 and 11, S1). */
   tts: {
     /** POST <url>/<voice_id>/with-timestamps. The voice is ELEVENLABS_VOICE_ID (lib/env.ts). */

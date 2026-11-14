@@ -117,6 +117,12 @@ export const AgentTokenResponse = z.object({
 });
 export type AgentTokenResponse = z.infer<typeof AgentTokenResponse>;
 
+/** GET /api/agent/signed-url, the websocket fallback's signed URL. Fails like GET /api/agent/token. */
+export const AgentSignedUrlResponse = z.object({
+  signedUrl: z.string().min(1),
+});
+export type AgentSignedUrlResponse = z.infer<typeof AgentSignedUrlResponse>;
+
 /**
  * A saved step file, `runs/<id>/step-<n>.v<k>.json` (ARCHITECTURE.md section 5.1): the step and
  * its cue times. Its version and audio (`step-<n>.v<k>.mp3`) come from the file name, so the
