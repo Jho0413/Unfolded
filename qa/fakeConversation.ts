@@ -2,6 +2,7 @@
 // the build has NEXT_PUBLIC_FAKE_APIS=1. It replays canned agent turns and
 // calls the client tool handlers directly, so Playwright can test Q&A without
 // a network. Plain TypeScript, no React: qa/conversation.ts wraps it in a hook.
+import { OBJECT_ID_RE } from "@/shared/scene";
 import type { ClientToolName } from "@/shared/tools";
 import { callTool } from "./callTool";
 import type {
@@ -163,9 +164,7 @@ function toolParams(
   context: string | undefined,
 ): Record<string, unknown> {
   if (turn.tool?.name === "highlight") {
-    const id = /ids for highlight\): ([a-z][a-z0-9_]*)/.exec(
-      context ?? "",
-    )?.[1];
+    const id = CONTEXT_FIRST_ID.exec(context ?? "")?.[1];
     return id
       ? { ...turn.tool.params, target_id: id }
       : { ...turn.tool.params };
@@ -174,6 +173,11 @@ function toolParams(
   const n = Number(turn.match.exec(text)?.[1]);
   return Number.isInteger(n) ? { step: n } : { ...turn.tool.params };
 }
+
+/** The first id in a context's "ids for highlight" list (OBJECT_ID_RE without its anchors). */
+const CONTEXT_FIRST_ID = new RegExp(
+  `ids for highlight\\): (${OBJECT_ID_RE.source.replace(/^\^|\$$/g, "")})`,
+);
 
 function tick(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));

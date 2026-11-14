@@ -3,7 +3,7 @@
 // (./support/savedRun.ts, demo-m1 steps). /api/sketch is faked per test.
 // The panel's own cases (every Ask message, keys, mic) are in ask.spec.ts.
 import { expect, type Page, test } from "@playwright/test";
-import { savedRun } from "./support/savedRun";
+import { savedRun, savedStepTitle } from "./support/savedRun";
 
 test.use({
   launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
@@ -144,7 +144,85 @@ test("go_to_step while asking loads that step paused after close", async ({
     page.getByTestId("ask-transcript").locator('[data-role="agent"]').last(),
   ).toContainText("once you close this");
   await expect(player(page)).toHaveAttribute("data-state", "asking");
+  // The board stays on step 1 while asking; the agent is told step 2 is next.
+  await expect(player(page)).toHaveAttribute("data-step", "0");
+  await expect
+    .poll(() => page.evaluate(() => window.__qaFake?.contextUpdates.at(-1)))
+    .toContain("(next, after this question)");
   await page.getByRole("button", { name: "Close" }).click();
   await expect(player(page)).toHaveAttribute("data-state", "paused");
   await expect(player(page)).toHaveAttribute("data-step", "1");
+});
+
+/** Seeks the paused audio and waits for the seek to land. */
+async function seek(page: Page, seconds: number) {
+  await page.getByTestId("player-audio").evaluate(
+    (audio: HTMLAudioElement, t) =>
+      new Promise<void>((resolve) => {
+        audio.addEventListener("seeked", () => resolve(), { once: true });
+        audio.currentTime = t;
+      }),
+    seconds,
+  );
+}
+
+test("Ask opened mid-fade: the fade completes with nothing drawn", async ({
+  page,
+}) => {
+  await using run = await savedRun("e2e-lesson-ask-fade");
+  await page.goto(`/lesson/${run.lessonId}`);
+  await expect(player(page)).toHaveAttribute("data-state", "playing");
+  await page
+    .getByRole("toolbar", { name: "Player controls" })
+    .getByRole("button", { name: "Pause" })
+    .click();
+  await expect(player(page)).toHaveAttribute("data-state", "paused");
+  // 1.1 s: 100 ms into the 300 ms highlight of row 0 of a (cue "row" at 1 s).
+  await seek(page, 1.1);
+  const opacity = () =>
+    cell(page, "a", 0, 0).getAttribute("data-highlight-opacity");
+  await expect.poll(async () => Number(await opacity())).toBeLessThan(1);
+  await page.getByRole("button", { name: "Ask", exact: true }).click();
+  await expect(player(page)).toHaveAttribute("data-state", "asking");
+  // Q&A time is pausedT + the time since Ask opened (ARCH 5.3).
+  await expect.poll(opacity).toBe("1");
+});
+
+test("Ask while loading: the board stays empty when the step arrives, then shows at 0 after Close", async ({
+  page,
+}) => {
+  await using run = await savedRun("e2e-lesson-ask-loading");
+  let release: () => void = () => {};
+  const gate = new Promise<void>((r) => (release = r));
+  await page.route(
+    `**/api/runs/${run.lessonId}/step-0.v1.json`,
+    async (route) => {
+      await gate;
+      await route.continue();
+    },
+  );
+  await page.goto(`/lesson/${run.lessonId}`);
+  await expect(player(page)).toHaveAttribute("data-state", "loading");
+  await page.getByRole("button", { name: "Ask", exact: true }).click();
+  await expect(player(page)).toHaveAttribute("data-state", "asking");
+  await expect(page.getByTestId("ask-panel")).toHaveAttribute(
+    "data-phase",
+    "connected",
+  );
+  await expect
+    .poll(() => page.evaluate(() => window.__qaFake?.contextUpdates[0]))
+    .toContain("The board is empty.");
+  release();
+  // The step arrives while asking (its title shows in the player's header),
+  // but the board stays the empty one Ask froze.
+  const a = board(page).locator('[data-object-id="a"]');
+  await expect(page.getByRole("heading", { level: 2 })).toHaveText(
+    savedStepTitle(0),
+  );
+  await expect(player(page)).toHaveAttribute("data-state", "asking");
+  await expect(a).toHaveCount(0);
+  await page.getByRole("button", { name: "Close" }).click();
+  await expect(player(page)).toHaveAttribute("data-state", "paused");
+  await expect(a).toHaveCount(1);
+  await expect(cell(page, "a", 0, 0)).toHaveAttribute("data-highlight", "none");
 });
