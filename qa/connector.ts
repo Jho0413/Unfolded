@@ -1,20 +1,24 @@
 // The Ask panel's connection (ARCHITECTURE.md sections 7 and 8, issue #84). Plain TypeScript
 // with injected effects, so every path is unit-tested; qa/AskPanel.tsx renders its state.
 //
-// - Typed questions never wait on the mic. Opening Ask fetches a token and asks for the mic in
-//   parallel. Whichever comes first decides the session: mic granted -> a voice session; mic
-//   denied -> text-only, with "Mic is off…"; the learner focuses or types first (the browser's
-//   mic prompt still unanswered) -> text-only at once. A text-only session can switch to voice
-//   later (useMic), from a click, which is when the browser may ask.
-// - A question sent before the session connects is queued and sent on connect.
+// - Typed questions never wait on the mic. Opening Ask fetches the credentials and asks for the
+//   mic in parallel. The mic answer or the learner's typing decides the session: mic granted ->
+//   voice; mic denied -> text-only, with "Mic is off…"; the learner focuses or types first (the
+//   browser's mic prompt still unanswered) -> text-only at once. A text-only session can switch
+//   to voice later (useMic, a click, which is when the browser may ask).
+// - A question sent before the session connects is queued and sent after the context on connect.
 // - Each attempt has a generation: after every await, a stale attempt (the panel closed,
-//   failed, or started another) stops, so nothing starts after the panel has given up.
-// - WebRTC first; if it fails before connecting (blocked on venue Wi-Fi: start rejects, an
-//   error or a disconnect arrives, or it takes longer than ATTEMPT_TIMEOUT_MS), the same session
-//   is retried once over a websocket with a signed URL. A websocket that worked is kept for
-//   later sessions on this page.
+//   failed, or moved on) stops, so nothing starts after the panel has given up.
+// - WebRTC first (or the transport that last worked on this page). If it fails before
+//   connecting (no credentials, start rejects, an error or a disconnect arrives, or it takes
+//   longer than ATTEMPT_TIMEOUT_MS, credentials included), the other transport is tried once:
+//   a websocket with a signed URL when WebRTC is blocked on venue Wi-Fi. Before the second
+//   attempt starts, the first one's start is allowed to settle (up to SETTLE_MS) and ended, so
+//   the single-session SDK never has two starts in flight and a late callback from the first
+//   isn't taken for the second.
 // - Failures are logged and shown with the section 7 messages: "Questions are unavailable right
-//   now." when no session starts, "Q&A ended unexpectedly." when a question can't be sent.
+//   now." when no session starts, "Q&A ended unexpectedly." when a session drops or a question
+//   can't be sent.
 import { MESSAGES } from "@/player/machine";
 import { QA_UNAVAILABLE } from "@/shared/lesson";
 import type {
@@ -24,8 +28,10 @@ import type {
   Transport,
 } from "./types";
 
-/** How long one connect attempt may take before it counts as failed. */
+/** How long one connect attempt may take, credentials included, before it counts as failed. */
 export const ATTEMPT_TIMEOUT_MS = 8000;
+/** How long an abandoned attempt's start may take to settle before the next one starts. */
+export const SETTLE_MS = 2000;
 
 export const CONNECTOR_MESSAGES = {
   unavailable: QA_UNAVAILABLE,
@@ -34,7 +40,7 @@ export const CONNECTOR_MESSAGES = {
 } as const;
 
 /**
- * waiting: the token or the mic answer hasn't come yet (the input already works).
+ * waiting: the mic answer hasn't come and the learner hasn't typed (the input already works).
  * connecting: a session is starting. failed: no session could start.
  */
 export type ConnectorPhase =
@@ -58,7 +64,7 @@ export type ConnectorDeps = {
   requestMicrophone: () => Promise<boolean>;
   onState: (state: ConnectorState) => void;
   /** The session connected: send the agent its context (queued questions follow). */
-  onConnected: () => void;
+  onConnected: (state: ConnectorState) => void;
   /** A connected session dropped, or a question couldn't be sent: the machine's agentDisconnected. */
   onDropped: () => void;
   /** The agent ended the session normally: close Ask. */
@@ -76,17 +82,31 @@ export const INITIAL_CONNECTOR_STATE: ConnectorState = {
   notice: null,
 };
 
+type Credentials =
+  | { transport: "webrtc"; conversationToken: string }
+  | { transport: "websocket"; signedUrl: string };
+
+const other = (t: Transport): Transport =>
+  t === "webrtc" ? "websocket" : "webrtc";
+
 export class AskConnector {
   private state: ConnectorState = INITIAL_CONNECTOR_STATE;
   private gen = 0;
   private queue: string[] = [];
-  /** Set once the mode is decided for the current open (typing or the mic answer). */
+  /** Set until the mode is decided for the current open (typing or the mic answer). */
   private decide: ((textOnly: boolean) => void) | null = null;
   private timer: unknown = null;
-  private attempt: { textOnly: boolean; transport: Transport } | null = null;
-  private preferWebsocket = false;
-  private readonly setTimer;
-  private readonly clearTimer;
+  /** The attempt whose callbacks count; null between attempts (callbacks are then stale). */
+  private attempt: {
+    transport: Transport;
+    textOnly: boolean;
+    canFallBack: boolean;
+  } | null = null;
+  /** The last start, so the next attempt can wait for it to settle. */
+  private lastStart: Promise<unknown> = Promise.resolve();
+  private preferred: Transport = "webrtc";
+  private readonly setTimer: (fn: () => void, ms: number) => unknown;
+  private readonly clearTimer: (handle: unknown) => void;
 
   constructor(private readonly deps: ConnectorDeps) {
     this.setTimer = deps.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
@@ -99,29 +119,26 @@ export class AskConnector {
     return this.state;
   }
 
-  /** Ask opened: start deciding the session (voice if the mic comes first, else text). */
+  /** Ask opened: fetch credentials and ask for the mic in parallel; the first answer decides. */
   open(): void {
     const gen = this.begin();
     this.set({ ...INITIAL_CONNECTOR_STATE, phase: "waiting" });
     const decided = new Promise<boolean>((resolve) => (this.decide = resolve));
+    // Fetched now, not after the mic answer; a failure shows up when the attempt uses it.
+    const transport = this.preferred;
+    const credentials = this.credentials(transport).catch(() => null);
     void this.deps.requestMicrophone().then(
-      (mic) => {
-        if (gen !== this.gen || this.decide === null) return;
-        if (!mic)
-          this.set({ micDenied: true, notice: CONNECTOR_MESSAGES.micOff });
-        this.decideMode(!mic);
-      },
+      (mic) => this.micAnswered(gen, mic),
       (err: unknown) => {
         this.deps.log.warn("[qa] mic request failed", err);
-        if (gen !== this.gen || this.decide === null) return;
-        this.set({ micDenied: true, notice: CONNECTOR_MESSAGES.micOff });
-        this.decideMode(true);
+        this.micAnswered(gen, false);
       },
     );
     void (async () => {
       const textOnly = await decided;
       if (gen !== this.gen) return;
-      await this.connect(gen, textOnly);
+      this.set({ phase: "connecting", textOnly });
+      await this.tryTransport(gen, transport, textOnly, credentials, true);
     })();
   }
 
@@ -130,15 +147,29 @@ export class AskConnector {
     this.decideMode(true);
   }
 
-  /** Switch a text-only session to voice (a click, so the browser may ask for the mic). */
+  /**
+   * Switch a text-only session to voice (a click, so the browser may ask for the mic). The
+   * working session is ended only once the mic is granted.
+   */
   async useMic(): Promise<void> {
-    const gen = this.begin();
-    this.deps.conversation.end();
-    this.set({ phase: "waiting", notice: null });
+    const gen = this.gen;
     const mic = await this.deps.requestMicrophone().catch(() => false);
-    if (gen !== this.gen) return;
-    if (!mic) this.set({ micDenied: true, notice: CONNECTOR_MESSAGES.micOff });
-    await this.connect(gen, !mic);
+    if (gen !== this.gen || this.state.phase !== "connected") return;
+    if (!mic) {
+      this.set({ micDenied: true, notice: CONNECTOR_MESSAGES.micOff });
+      return;
+    }
+    const next = this.begin();
+    this.deps.conversation.end();
+    this.set({ phase: "connecting", textOnly: false, notice: null });
+    const transport = this.preferred;
+    await this.tryTransport(
+      next,
+      transport,
+      false,
+      this.credentials(transport).catch(() => null),
+      true,
+    );
   }
 
   /** Ask closed: drop everything in flight, end the session. */
@@ -159,7 +190,7 @@ export class AskConnector {
     this.set({ notice: null });
   }
 
-  /** A typed question: sent now if connected, queued while connecting. False if it failed. */
+  /** A typed question: sent now if connected, queued until then. False if it failed. */
   send(text: string): boolean {
     const { phase } = this.state;
     if (phase === "waiting" || phase === "connecting") {
@@ -174,15 +205,16 @@ export class AskConnector {
   // ---- conversation callbacks
 
   connected(): void {
-    if (this.state.phase !== "connecting" || this.attempt === null) {
+    const attempt = this.attempt;
+    if (this.state.phase !== "connecting" || attempt === null) {
       // A connect that lands after Ask closed, failed or moved on is ended at once.
       this.deps.conversation.end();
       return;
     }
     this.stopTimer();
-    if (this.attempt.transport === "websocket") this.preferWebsocket = true;
-    this.set({ phase: "connected", transport: this.attempt.transport });
-    this.deps.onConnected();
+    this.preferred = attempt.transport;
+    this.set({ phase: "connected", transport: attempt.transport });
+    this.deps.onConnected(this.state);
     const queued = this.queue;
     this.queue = [];
     for (const text of queued) if (!this.sendNow(text)) break;
@@ -220,6 +252,19 @@ export class AskConnector {
     return ++this.gen;
   }
 
+  private micAnswered(gen: number, mic: boolean): void {
+    if (gen !== this.gen) return;
+    // Recorded even after typing decided text-only, so "Use the mic" isn't offered after a refusal.
+    if (!mic) {
+      const undecided = this.decide !== null;
+      this.set({
+        micDenied: true,
+        ...(undecided && { notice: CONNECTOR_MESSAGES.micOff }),
+      });
+    }
+    this.decideMode(!mic);
+  }
+
   private decideMode(textOnly: boolean): void {
     const decide = this.decide;
     if (decide === null) return;
@@ -228,73 +273,90 @@ export class AskConnector {
     decide(textOnly);
   }
 
-  private async connect(gen: number, textOnly: boolean): Promise<void> {
-    this.set({ phase: "connecting", textOnly });
-    await this.tryTransport(
-      gen,
-      textOnly,
-      this.preferWebsocket ? "websocket" : "webrtc",
-    );
-  }
-
-  private async tryTransport(
-    gen: number,
-    textOnly: boolean,
-    transport: Transport,
-  ): Promise<void> {
-    const options = await this.credentials(transport, textOnly);
-    if (gen !== this.gen) return;
-    if (options === null) {
-      this.deps.log.error(`[qa] no ${transport} credentials`);
-      return this.attemptFailedFor(transport, textOnly);
-    }
-    this.attempt = { textOnly, transport };
-    this.stopTimer();
-    this.timer = this.setTimer(() => {
-      if (gen === this.gen && this.state.phase === "connecting")
-        this.attemptFailed(
-          `${transport} took longer than ${ATTEMPT_TIMEOUT_MS} ms`,
-        );
-    }, ATTEMPT_TIMEOUT_MS);
-    try {
-      await this.deps.conversation.start(options);
-    } catch (err) {
-      if (gen !== this.gen || this.attempt?.transport !== transport) return;
-      this.deps.log.error(`[qa] ${transport} session failed to start`, err);
-      this.attemptFailed(`${transport} start rejected`);
-    }
-  }
-
-  private async credentials(
-    transport: Transport,
-    textOnly: boolean,
-  ): Promise<StartOptions | null> {
+  private async credentials(transport: Transport): Promise<Credentials | null> {
     if (transport === "webrtc") {
       const conversationToken = await this.deps.fetchToken();
       return conversationToken === null
         ? null
-        : { transport, conversationToken, textOnly };
+        : { transport, conversationToken };
     }
     const signedUrl = await this.deps.fetchSignedUrl();
-    return signedUrl === null ? null : { transport, signedUrl, textOnly };
+    return signedUrl === null ? null : { transport, signedUrl };
   }
 
-  /** The current attempt failed before connecting: fall back to the websocket once, or fail. */
+  /** One attempt; on failure before connecting, `canFallBack` tries the other transport once. */
+  private async tryTransport(
+    gen: number,
+    transport: Transport,
+    textOnly: boolean,
+    credentials: Promise<Credentials | null>,
+    canFallBack: boolean,
+  ): Promise<void> {
+    const fail = (why: string, err?: unknown) => {
+      if (gen !== this.gen) return;
+      this.deps.log.warn(`[qa] ${transport} attempt failed: ${why}`, err ?? "");
+      this.attemptFailedFor(transport, textOnly, canFallBack);
+    };
+    // The timer covers the credentials too: a hung token route still ends in a message.
+    this.stopTimer();
+    this.timer = this.setTimer(() => {
+      if (gen === this.gen && this.state.phase === "connecting")
+        fail(`took longer than ${ATTEMPT_TIMEOUT_MS} ms`);
+    }, ATTEMPT_TIMEOUT_MS);
+    const creds = await credentials;
+    if (gen !== this.gen) return;
+    if (creds === null) return fail("no credentials");
+    // Let an abandoned attempt's start settle first (bounded), and end it.
+    await Promise.race([
+      this.lastStart.catch(() => {}),
+      new Promise((r) => this.setTimer(() => r(undefined), SETTLE_MS)),
+    ]);
+    if (gen !== this.gen) return;
+    this.attempt = { transport, textOnly, canFallBack };
+    const options: StartOptions = { ...creds, textOnly };
+    const start = this.deps.conversation.start(options);
+    this.lastStart = start;
+    try {
+      await start;
+    } catch (err) {
+      if (gen !== this.gen || this.attempt?.transport !== transport) return;
+      this.deps.log.error(`[qa] ${transport} session failed to start`, err);
+      fail("start rejected");
+    }
+  }
+
+  /** The current attempt failed before connecting (an error or a disconnect callback). */
   private attemptFailed(why: string): void {
     const attempt = this.attempt;
-    if (attempt === null) return;
+    if (attempt === null) return; // a stale callback from an abandoned attempt
     this.deps.log.warn(`[qa] ${attempt.transport} attempt failed: ${why}`);
-    this.attemptFailedFor(attempt.transport, attempt.textOnly);
+    this.attemptFailedFor(
+      attempt.transport,
+      attempt.textOnly,
+      attempt.canFallBack,
+    );
   }
 
-  private attemptFailedFor(transport: Transport, textOnly: boolean): void {
+  private attemptFailedFor(
+    transport: Transport,
+    textOnly: boolean,
+    canFallBack: boolean,
+  ): void {
     this.stopTimer();
     this.attempt = null;
     this.deps.conversation.end();
-    if (transport === "webrtc") {
-      this.deps.log.info("[qa] trying the websocket connection instead");
-      // A fresh generation, so the abandoned WebRTC attempt can't report back.
-      void this.tryTransport(++this.gen, textOnly, "websocket");
+    if (canFallBack) {
+      const next = other(transport);
+      this.deps.log.info(`[qa] trying the ${next} connection instead`);
+      // A fresh generation, so the abandoned attempt can't report back.
+      const gen = ++this.gen;
+      void this.tryTransport(
+        gen,
+        next,
+        textOnly,
+        this.credentials(next).catch(() => null),
+        false,
+      );
       return;
     }
     this.queue = [];

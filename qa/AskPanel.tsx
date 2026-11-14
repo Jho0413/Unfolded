@@ -14,11 +14,11 @@ import {
   useRef,
   useState,
 } from "react";
-import { MESSAGES } from "@/player/machine";
 import { z } from "zod";
-import { AgentTokenResponse, QA_UNAVAILABLE } from "@/shared/lesson";
+import { AgentTokenResponse } from "@/shared/lesson";
 import {
   AskConnector,
+  CONNECTOR_MESSAGES,
   type ConnectorPhase,
   type ConnectorState,
   INITIAL_CONNECTOR_STATE,
@@ -28,9 +28,7 @@ import { useQaConversation } from "./conversation";
 import type { AskApi, QaConversation, QaMessage, QaTools } from "./types";
 
 export const ASK_MESSAGES = {
-  unavailable: QA_UNAVAILABLE,
-  ended: MESSAGES.qaEnded,
-  micOff: "Mic is off. Type your question; the answer will appear as text.",
+  ...CONNECTOR_MESSAGES,
   needsConnection: "Q&A needs a connection.",
 } as const;
 
@@ -117,6 +115,7 @@ export function AskPanel({
   // Set in an effect once both exist; the callbacks only fire later.
   const connectorRef = useRef<AskConnector | null>(null);
   const conversationRef = useRef<QaConversation | null>(null);
+  const inputFocused = useRef(false);
   const conversation = useQaConversation({
     tools: resolvedTools,
     onConnect: () => connectorRef.current?.connected(),
@@ -147,7 +146,10 @@ export function AskPanel({
       fetchSignedUrl,
       requestMicrophone: () => conversationRef.current!.requestMicrophone(),
       onState: setSession,
-      onConnected: () => {
+      onConnected: (state) => {
+        // Typing already (focused while a voice session connected): mute, as on focus.
+        if (!state.textOnly && inputFocused.current)
+          conversationRef.current!.setMicMuted(true);
         const { context: c, questions: q } = contextRef.current;
         conversationRef.current!.sendContextualUpdate(
           buildContextUpdate({ ...c, earlierQuestions: q }),
@@ -285,10 +287,12 @@ export function AskPanel({
               value={draft}
               disabled={!usable}
               onFocus={() => {
+                inputFocused.current = true;
                 connectorRef.current?.typing();
                 if (voice) conversation.setMicMuted(true);
               }}
               onBlur={() => {
+                inputFocused.current = false;
                 if (voice) conversation.setMicMuted(false);
               }}
               onChange={(e) => {
