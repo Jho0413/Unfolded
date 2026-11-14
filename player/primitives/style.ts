@@ -45,11 +45,14 @@ export const LATEX_FONT = TEXT_SIZE.m;
  */
 export const LATEX_BOX = { w: 1200, h: 400 } as const;
 
-/**
- * The box arrows stop at for a latex object. KaTeX's size is only known after
- * layout, so this is a short formula's (about `f(x) = x^2`).
- */
-export const LATEX_ARROW_BOX = { w: 160, h: 64 } as const;
+/** Padding (px) around a formula, inside its highlight box. */
+export const LATEX_PAD = { x: 12, y: 4 } as const;
+/** KaTeX sets formulas at 1.21em of the surrounding font (its stylesheet). */
+export const KATEX_EM = 1.21;
+/** Average formula glyph width, in ems, for estimating a formula's width. */
+export const GLYPH_EM = 0.6;
+/** Colour of tex KaTeX can't render (KaTeX's own default). */
+export const LATEX_ERROR = "#cc0000";
 
 /**
  * Arrow look. An end that names a target stops `margin` outside the target's
@@ -61,7 +64,10 @@ export const ARROW = {
   head: { len: 18, w: 14 },
   margin: 10,
   labelFont: 22,
-  labelOffset: 18,
+  /** Clear space between the line and the nearest edge of its label's box. */
+  labelGap: 6,
+  /** The board-coloured outline behind a label, so it reads over the line. */
+  labelHalo: 6,
 } as const;
 
 /** The `data-highlight` value of a highlight. */

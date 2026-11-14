@@ -18,6 +18,7 @@ import {
   highlightAttr,
   objectProgress,
   opacityAttr,
+  textBox,
 } from "./style";
 
 export function Arrow({
@@ -43,6 +44,7 @@ export function Arrow({
       to,
       targetBox(board, arrow.from),
       targetBox(board, arrow.to),
+      arrow.label ? textBox(arrow.label, ARROW.labelFont) : undefined,
     );
   const opacity = state.visible ? fadeOpacity(active, { id: arrow.id }) : 0;
   const hl = state.highlight;
@@ -59,7 +61,7 @@ export function Arrow({
       data-from-y={from?.y}
       data-to-x={to?.x}
       data-to-y={to?.y}
-      data-label={arrow.label}
+      data-label-text={arrow.label}
       opacity={opacity}
       visibility={state.visible ? undefined : "hidden"}
     >
@@ -83,7 +85,7 @@ export function Arrow({
               fontSize={ARROW.labelFont}
               fill={INK}
               stroke={BOARD_BG}
-              strokeWidth={6}
+              strokeWidth={ARROW.labelHalo}
               paintOrder="stroke"
             >
               {arrow.label}
