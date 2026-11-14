@@ -1,0 +1,15 @@
+{
+  "type": "client",
+  "name": "resume_lesson",
+  "description": "Carry on with the lesson from where it stopped (after a go_to_step jump, that step starts).",
+  "expects_response": false,
+  "parameters": {
+    "type": "object",
+    "description": "Nothing: it acts on the lesson on screen",
+    "required": [],
+    "properties": {}
+  },
+  "dynamic_variables": {
+    "dynamic_variable_placeholders": {}
+  }
+}

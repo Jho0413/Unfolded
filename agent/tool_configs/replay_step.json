@@ -1,0 +1,15 @@
+{
+  "type": "client",
+  "name": "replay_step",
+  "description": "Say the current step again from its start.",
+  "expects_response": false,
+  "parameters": {
+    "type": "object",
+    "description": "Nothing: it acts on the lesson on screen",
+    "required": [],
+    "properties": {}
+  },
+  "dynamic_variables": {
+    "dynamic_variable_placeholders": {}
+  }
+}
