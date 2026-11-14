@@ -1,7 +1,9 @@
 // POST /api/lessons/<lessonId>/steps/<n>: step n (0-based) as a StepResponse, generated, narrated
 // and saved to runs/ if it isn't saved yet (ARCHITECTURE.md sections 5.1, 6.2 and 7). A request
 // while the step is generating waits for that generation; after a failure, a new request tries
-// again. lib/pipeline/lessonStep.ts does the work and logs failures.
+// again. In replay mode (REPLAY_RUN) a step comes only from the saved run: one that isn't
+// there is a 404 "This step isn't in the saved run.". lib/pipeline/lessonStep.ts does the work
+// and logs failures.
 import "server-only";
 import type { NextRequest } from "next/server";
 import { requestStep, parseStepNumber } from "@/lib/pipeline/lessonStep";
@@ -34,6 +36,8 @@ export async function POST(
       return failed(STEP_ROUTE_ERRORS.noSuchStep, 404);
     case "noSuchStep":
       return failed(STEP_ROUTE_ERRORS.noSuchStep, 400);
+    case "notInRun":
+      return failed(STEP_ROUTE_ERRORS.notInRun, 404);
     case "failed":
       return failed(STEP_ROUTE_ERRORS.failed, outcome.status);
   }

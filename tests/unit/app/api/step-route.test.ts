@@ -33,6 +33,7 @@ import {
 } from "@/lib/runs/store";
 import {
   ApiError,
+  STEP_NOT_IN_RUN,
   type LessonPlan,
   SavedStep,
   StepResponse,
@@ -43,6 +44,7 @@ import { Step } from "@/shared/scene";
 const state = vi.hoisted(() => ({
   messages: undefined as FakeClaude | undefined,
   ttsError: undefined as Error | undefined,
+  ttsCalls: 0,
   runs: "",
 }));
 vi.mock("@/lib/pipeline/generate", async (importOriginal) => {
@@ -57,8 +59,12 @@ vi.mock("@/lib/narration/tts", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/narration/tts")>();
   return {
     ...real,
-    narrate: (...args: Parameters<typeof real.narrate>) =>
-      state.ttsError ? Promise.reject(state.ttsError) : real.narrate(...args),
+    narrate: (...args: Parameters<typeof real.narrate>) => {
+      state.ttsCalls++;
+      return state.ttsError
+        ? Promise.reject(state.ttsError)
+        : real.narrate(...args);
+    },
   };
 });
 vi.mock("@/lib/config", async (importOriginal) => {
@@ -159,6 +165,7 @@ afterEach(async () => {
   resetStepRequestsForTests();
   state.messages = undefined;
   state.ttsError = undefined;
+  state.ttsCalls = 0;
   await rm(state.runs, { recursive: true, force: true });
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
@@ -466,7 +473,79 @@ describe('route: "No such lesson or step."', () => {
   it("the words are ARCHITECTURE.md section 7's", () => {
     expect(STEP_ROUTE_ERRORS).toEqual({
       noSuchStep: "No such lesson or step.",
+      notInRun: "This step isn't in the saved run.",
       failed: "Couldn't make this step.",
     });
+  });
+});
+
+describe("replay mode (REPLAY_RUN): the saved run only, no provider call", () => {
+  /** REPLAY_RUN wins over FAKE_APIS (lib/env.ts), so no fake may be called either. */
+  function replay() {
+    vi.stubEnv("REPLAY_RUN", LESSON);
+    resetEnvForTests();
+    return script();
+  }
+  async function saveStep(n: number, bytes: number[]) {
+    const step = Step.parse(await readFixture("demo-m1.step.json"));
+    await saveStepVersion(
+      LESSON,
+      n,
+      { step, cueTimes: {} },
+      new Uint8Array(bytes),
+    );
+    return step;
+  }
+
+  it("a saved step is served as its latest version; replay never calls the fakes", async () => {
+    const step = await saveStep(0, [1]);
+    await saveStep(0, [2]);
+    const claude = replay();
+    const res = await post(LESSON, "0");
+    expect(res.status).toBe(200);
+    expect(StepResponse.parse(await res.json())).toEqual({
+      step,
+      cueTimes: {},
+      version: 2,
+      audioUrl: `/api/runs/${LESSON}/step-0.v2.mp3`,
+    });
+    expect(claude.calls).toHaveLength(0);
+    expect(state.ttsCalls).toBe(0);
+  });
+
+  it('a missing step -> 404 "This step isn\'t in the saved run.", on every request, and nothing is generated', async () => {
+    const claude = replay();
+    for (let i = 0; i < 2; i++)
+      await expectError(await post(LESSON, "1"), 404, STEP_NOT_IN_RUN);
+    expect(STEP_ROUTE_ERRORS.notInRun).toBe(
+      "This step isn't in the saved run.",
+    );
+    expect(claude.calls).toHaveLength(0);
+    expect(state.ttsCalls).toBe(0);
+    expect(await stepFiles()).toEqual([]);
+  });
+
+  it("a step whose saved file is damaged is not in the run (404), not regenerated", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    await writeRunJson(LESSON, "step-0.v1.json", { step: "damaged" });
+    const claude = replay();
+    await expectError(await post(LESSON, "0"), 404, STEP_NOT_IN_RUN);
+    expect(claude.calls).toHaveLength(0);
+    expect(state.ttsCalls).toBe(0);
+  });
+
+  it("n past the plan -> 400, and a lesson with no plan -> 404 'No such lesson or step.'", async () => {
+    const claude = replay();
+    await expectError(
+      await post(LESSON, "2"),
+      400,
+      STEP_ROUTE_ERRORS.noSuchStep,
+    );
+    await expectError(
+      await post("other-lesson", "0"),
+      404,
+      STEP_ROUTE_ERRORS.noSuchStep,
+    );
+    expect(claude.calls).toHaveLength(0);
   });
 });
