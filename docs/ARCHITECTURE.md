@@ -111,6 +111,8 @@ qa/                                 browser
   fakeConversation.ts               the scripted fake: canned agent turns, calls tool handlers (window.__qaFake in fake builds, for Playwright)
   types.ts, callTool.ts             the adapter's types; a tool call checked against shared/tools.ts, then handled
   context.ts                        pure: the sendContextualUpdate() message, and the narration heard by time t
+  askBoard.ts                       pure: the board during Ask (frozen lesson board + highlights and sketches timed from arrival, fresh resets)
+  drawScene.ts                      the draw_scene request: POST /api/sketch, validate on arrival, draw or "Couldn't draw that."
   AskPanel.tsx                      voice + typed input, through conversation.ts; shows the Ask messages of section 7
   tools.ts                          client tool handlers, typed by shared/tools.ts
 scripts/                            dev scripts, run with tsx: make:m1 (make-m1.ts), seed:m2 (seed-m2.ts, its lessons in seed-m2.lessons.json), spike:s3, spike:s4 (s4-spike.ts)
@@ -509,6 +511,7 @@ The developer gets the full error in the server log, tagged with the route, less
 | `simplify_upcoming` | `reason` | no | Posts a signal (section 5.4) | nothing |
 
 - `draw_scene` doesn't wait, because a Claude request can't finish inside a natural pause. The agent's prompt tells it to describe the sketch out loud while it appears. A failed sketch is logged, the Ask panel shows "Couldn't draw that", and the browser tells the agent through `sendContextualUpdate()` so it answers in words (section 7). Spike S2 measures the sketch's latency.
+- In the browser (`qa/drawScene.ts`), the request times out after `SKETCH_FETCH_TIMEOUT_MS` (45 s, longer than the route's two attempts), and the board sent is capped at `MAX_BOARD_OBJECTS`, which mirrors `config.maxBoardObjects` (hidden objects are left out first; a board still over the cap fails without a request). `lib/config.ts` is server-only, so a unit test keeps both constants in line with it. A sketch or failure that arrives after Ask closed is dropped. The panel's `tools` prop can be a function of an `AskApi` (`showNotice`, `tellAgent`), which is how the handler shows "Couldn't draw that." and tells the agent.
 - `draw_scene` takes plain words, not scene JSON. The voice model only describes what to draw, and Claude writes the validated sketch, so the scene schema stays in one place and out of the agent's prompt.
 - **A sketch builds on the board the learner is looking at.** The request body is `{ description, fresh, board }`, where `board` is the current `BoardState`. The route checks the body with zod, including a cap on the board's size (`config.maxBoardObjects`). Claude sees the board, so an answer to "why does the row go with the column?" can highlight and draw over the matrix on screen.
   - The sketch's ids are checked against its own objects plus the board's (section 4). With `fresh: true` the sketch starts from an empty board, and later sketches in this Ask build on that new board, not the lesson board.
