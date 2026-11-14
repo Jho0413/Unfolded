@@ -272,11 +272,12 @@ describe("renderLatex (model-written tex)", () => {
         const result = validateStep(step, { maxNarrationChars: 100 });
         const rejected =
           !result.ok && result.errors.includes(errors.invalidLatex("x"));
-        // Rejected tex shows as KaTeX's error text or a red unknown command.
+        // Rejected tex shows as KaTeX's error text or a red unknown or
+        // refused command; accepted tex shows neither.
         const html = renderLatex(t).html!;
         return rejected
           ? html.includes('class="katex')
-          : !html.includes("katex-error");
+          : !html.includes("katex-error") && !html.includes("#cc0000");
       }),
     );
   });

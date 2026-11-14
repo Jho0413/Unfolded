@@ -122,10 +122,24 @@ function objectOnCanvas(obj: BoardObject): boolean {
   }
 }
 
+/**
+ * Whether KaTeX renders `tex` cleanly under KATEX_OPTIONS. A command refused
+ * by `trust: false` (\href, \url, \htmlClass, ...) doesn't throw, it renders
+ * as red source text, so the trust check is a callback that records the
+ * refusal and still refuses, as `trust: false` does.
+ */
 function latexParses(tex: string): boolean {
+  let refused = false;
   try {
-    katex.renderToString(tex, { ...KATEX_OPTIONS, throwOnError: true });
-    return true;
+    katex.renderToString(tex, {
+      ...KATEX_OPTIONS,
+      throwOnError: true,
+      trust: () => {
+        refused = true;
+        return false;
+      },
+    });
+    return !refused;
   } catch {
     return false;
   }
