@@ -6,7 +6,8 @@ import { rm } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { UPLOAD_ERRORS } from "@/app/upload";
-import { LessonPlanOutput } from "@/shared/lesson";
+import { CreateLessonResponse, LessonPlanOutput } from "@/shared/lesson";
+import { makePdf } from "../unit/lib/pipeline/pdfs";
 import { RUNS_DIR } from "./support/runsDir";
 
 /** The plan the fake serves (config.plan.fixture). */
@@ -20,9 +21,7 @@ const PLAN = LessonPlanOutput.parse(
     ).content.at(-1).text,
   ),
 );
-const TINY_PDF = Buffer.from(
-  "%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n",
-);
+const TINY_PDF = Buffer.from(makePdf());
 
 const created: string[] = [];
 test.afterAll(async () => {
@@ -39,7 +38,11 @@ test("a PDF becomes a plan of step titles, and Start opens the lesson", async ({
     mimeType: "application/pdf",
     buffer: TINY_PDF,
   });
+  // The lesson id comes from the route's answer, so the run is removed even if a check fails.
+  const answer = page.waitForResponse("**/api/lessons");
   await page.getByRole("button", { name: "Make the lesson" }).click();
+  const { lessonId } = CreateLessonResponse.parse(await (await answer).json());
+  created.push(lessonId);
 
   const plan = page.getByTestId("plan");
   await expect(plan.getByRole("heading", { name: PLAN.title })).toBeVisible();
@@ -49,8 +52,7 @@ test("a PDF becomes a plan of step titles, and Start opens the lesson", async ({
 
   const start = page.getByTestId("start-lesson");
   const href = await start.getAttribute("href");
-  expect(href).toMatch(/^\/lesson\/[a-z0-9-]{1,40}$/);
-  created.push(href!.split("/").at(-1)!);
+  expect(href).toBe(`/lesson/${lessonId}`);
   await start.click();
   await expect(page).toHaveURL(href!);
   await expect(page.getByTestId("lesson")).toBeVisible();

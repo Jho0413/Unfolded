@@ -20,6 +20,7 @@ import {
   type ClaudeMessages,
   GenerationError,
   generateWithRetry,
+  providerError,
 } from "@/lib/pipeline/generate";
 import { PLAN_OUTPUT_FORMAT, schemaErrors } from "@/lib/pipeline/outputFormat";
 import {
@@ -27,12 +28,7 @@ import {
   PLAN_SYSTEM_PROMPT,
   planRetryPrompt,
 } from "@/lib/pipeline/prompts/plan";
-import { writeRunJson } from "@/lib/runs/store";
-
-/** The saved plan in a run folder (read by the lesson page). */
-export const PLAN_FILE = "plan.json";
-/** The paper's Files API id in a run folder, for the step requests. */
-export const PAPER_FILE = "paper.json";
+import { PAPER_FILE, PLAN_FILE, writeRunJson } from "@/lib/runs/store";
 
 export const SavedPaper = z.object({
   fileId: z.string().min(1),
@@ -119,19 +115,14 @@ export async function uploadPaper(
     );
     return uploaded.id;
   } catch (err) {
-    if (!(err instanceof Anthropic.AnthropicError)) throw err;
-    const what =
-      err instanceof Anthropic.APIUserAbortError
-        ? `timed out after ${config.plan.timeoutMs} ms`
-        : `failed: ${err.name}: ${err.message}`;
-    throw new GenerationError("provider", `paper upload ${what}`, [], {
-      cause: err,
-    });
+    throw providerError(err, "paper upload", config.plan.timeoutMs);
   }
 }
 
 /** How many characters of the title go into a lesson id, before its random suffix. */
 const ID_SLUG_CHARS = 30;
+/** Random hex characters at the end of a lesson id: 4 billion ids per title. */
+const ID_SUFFIX_CHARS = 8;
 
 /** A new lesson id from the plan's title (pure): readable in runs/, unique by its suffix. */
 export function newLessonId(title: string, suffix: string): string {
@@ -159,9 +150,13 @@ export async function createLesson(
   pdf: { bytes: Uint8Array; filename: string },
   clients: Clients = {},
 ): Promise<{ lessonId: string; plan: LessonPlan }> {
+  // A paper whose plan then fails stays in the Files API: a hackathon-sized cost, not cleaned up.
   const fileId = await uploadPaper(pdf.bytes, pdf.filename, clients.files);
   const plan: LessonPlan = await generatePlan(fileId, clients.messages);
-  const lessonId = newLessonId(plan.title, randomUUID().slice(0, 8));
+  const lessonId = newLessonId(
+    plan.title,
+    randomUUID().slice(0, ID_SUFFIX_CHARS),
+  );
   await writeRunJson(lessonId, PAPER_FILE, {
     fileId,
     filename: pdf.filename,
@@ -172,7 +167,9 @@ export async function createLesson(
 
 /**
  * True when Claude refused the PDF itself (a 400 from the upload or the plan request: too
- * many pages, encrypted, unreadable), not when it failed to plan.
+ * many pages, encrypted, unreadable, too long), not when it failed to plan. A 400 can also be
+ * our own request's fault (a bad parameter or schema), which this can't tell apart without
+ * matching error text; such a bug shows the learner the PDF message, and the log has the cause.
  */
 export function paperRejected(err: unknown): boolean {
   return (

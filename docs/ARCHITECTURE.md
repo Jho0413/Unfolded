@@ -86,7 +86,7 @@ shared/                             imported by server and browser (the contract
 lib/                                server-only (import "server-only")
   config.ts                         model ids, effort, limits, paths: one place
   env.ts                            reads and validates env vars once
-  pipeline/plan.ts, step.ts, sketch.ts, generate.ts (one structured-output request, validated and retried once), prompts/, outputFormat.ts (the wire format Claude fills in for steps and sketches, and its converters)
+  pipeline/plan.ts, step.ts, sketch.ts, generate.ts (one structured-output request, validated and retried once), pdf.ts (the byte checks before upload), prompts/, outputFormat.ts (the wire format Claude fills in for steps and sketches, its converters, and the plan's schema)
   narration/cues.ts                 pure: strip markers, cue offsets -> times
   narration/tts.ts                  ElevenLabs TTS with timestamps
   agent/token.ts                    the Q&A agent's conversation token (fixture when FAKE_APIS=1)
@@ -223,7 +223,7 @@ sequenceDiagram
   participant E as ElevenLabs
   participant F as fal
   B->>A: POST /api/lessons (PDF)
-  A->>C: Files API upload, then plan request (structured output: LessonPlan)
+  A->>C: Files API upload, then plan request (structured output: LessonPlanOutput)
   A->>F: one cover illustration (optional, time-limited)
   A->>A: save runs/<id>/plan.json + paper file id + cover
   A-->>B: { lessonId, plan }
@@ -244,7 +244,7 @@ sequenceDiagram
   - It's uploaded once with the Files API (`client.files.upload`).
   - Every plan and step request then references it by `file_id`, as a `document` block.
   - The upload size cap (`config.maxPdfMb`) is our own choice, not Claude's limit. We don't parse the PDF, but `lib/pipeline/pdf.ts` checks its bytes before uploading: the `%PDF-` header within the first 1024 bytes, the size, an `/Encrypt` entry and a count of `/Type /Page` objects over `config.maxPdfPages` (Claude's 600-page limit). That catches the common cases without a paid request. When Claude rejects a PDF the checks missed (pages hidden in compressed object streams, an unreadable file), it answers 400, and we return the same upload error in section 7.
-  - The run folder gets `paper.json` (`{ fileId, filename }`, the paper's Files API id for the step requests) and then `plan.json`, last, so a lesson the page can open is always complete. The lesson id is the plan title's slug plus 8 random hex characters. `POST /api/lessons` answers `{ lessonId, plan }`, or `{ error }` with a section 7 message: 400 for no file or not a PDF, 413 over the size cap, 422 for an encrypted PDF, too many pages or a PDF Claude rejects, 502 when Claude fails to plan or upload, and 500 for anything else. The reason goes to the server log.
+  - The run folder gets `paper.json` (`PAPER_FILE` in `lib/runs/store.ts`, beside `PLAN_FILE`; `{ fileId, filename }`, the paper's Files API id for the step requests) and then `plan.json`, last, so a lesson the page can open is always complete. The lesson id is the plan title's slug plus 8 random hex characters. `POST /api/lessons` answers `{ lessonId, plan }`, or `{ error }` with a section 7 message: 400 for no file or not a PDF, 413 over the size cap (checked on `Content-Length` before the body is read, then on the file), 422 for an encrypted PDF, too many pages or a PDF Claude rejects, 502 when Claude fails to plan or upload, and 500 for anything else. The reason goes to the server log.
 - **Caching.** The document block carries `cache_control: { type: "ephemeral", ttl: "1h" }`, so later step requests reuse the cached paper. The 1-hour cache outlasts long Q&A pauses and rehearsals. Its writes cost more than the 5-minute cache's, but each request type writes the paper only once. For the cache to work:
   - The step system prompt must be byte-identical for every step.
   - The plan, goal and signals go *after* the document block.
@@ -448,7 +448,7 @@ The developer gets the full error in the server log, tagged with the route, less
 | Where | Problem | Learner sees | Recovery |
 |---|---|---|---|
 | Upload | No file, or not a PDF | "Please choose a PDF." | Pick again |
-| Upload | Over `config.maxPdfMb`, or Claude rejects the document (too many pages, encrypted, unreadable) | "This PDF is too large or locked." | Another PDF |
+| Upload | Over `config.maxPdfMb`, encrypted or over `config.maxPdfPages` pages (our byte checks, section 5.1), or Claude rejects the document (too many pages, encrypted, unreadable) | "This PDF is too large or locked." | Another PDF |
 | Plan | Invalid plan twice (zod, or fewer than `config.plan.minSteps` steps), refusal, a cut-off, or a Claude or Files API error | "Couldn't read this paper." | Retry, or another PDF |
 | Step | Any `failed` cause in section 6.2 | "Couldn't make this step." | Retry (player `failed` state) |
 | Step | Replay mode, and the step isn't in the run | "This step isn't in the saved run." | Back, or another step |

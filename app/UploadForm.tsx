@@ -102,7 +102,7 @@ export function UploadForm() {
       </button>
       {busy && (
         <p style={{ color: MUTED, margin: 0 }}>
-          Planning the lesson. This takes up to a minute.
+          Planning the lesson. This usually takes under a minute.
         </p>
       )}
       {state.kind === "failed" && (

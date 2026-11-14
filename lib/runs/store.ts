@@ -46,6 +46,11 @@ export function servableContentType(
   return CONTENT_TYPES[path.extname(file)];
 }
 
+/** The lesson's plan (shared/lesson.ts LessonPlan): written last when a lesson is made. */
+export const PLAN_FILE = "plan.json";
+/** The paper's Files API id (lib/pipeline/plan.ts SavedPaper), for the step requests. */
+export const PAPER_FILE = "paper.json";
+
 // ---------------------------------------------------------------- versioned step files
 
 const STEP_FILE_RE = /^step-(0|[1-9]\d*)\.v([1-9]\d*)\.(json|mp3)$/;

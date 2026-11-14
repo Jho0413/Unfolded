@@ -114,6 +114,11 @@ describe("newLessonId", () => {
       "a-very-long-title-that-goes-on-abc123",
     ],
     [
+      "a cut that ends on a separator drops its trailing dash",
+      "abcdefghij abcdefghij abcdefg xyz",
+      "abcdefghij-abcdefghij-abcdefg-abc123",
+    ],
+    [
       "a title with no letters or digits falls back to lesson",
       "∑∫√",
       "lesson-abc123",

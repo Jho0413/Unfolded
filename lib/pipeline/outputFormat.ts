@@ -217,7 +217,10 @@ export function validateWireSketch(
   );
 }
 
-/** A plan has no action unions, so it goes on the wire as the contract's own schema. */
+/**
+ * Not a wire format: a plan has no action unions, so Claude fills in shared/lesson.ts's own
+ * LessonPlanOutput schema (ARCHITECTURE.md section 5.1).
+ */
 export const PLAN_OUTPUT_FORMAT: Anthropic.JSONOutputFormat = {
   type: "json_schema",
   schema: zodOutputFormat(LessonPlanOutput).schema,

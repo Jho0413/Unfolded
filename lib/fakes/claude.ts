@@ -1,4 +1,4 @@
-// A fake Claude for step and sketch generation (ARCHITECTURE.md section 10). With no script it
+// A fake Claude for step, sketch and plan generation, and the paper's upload (ARCHITECTURE.md section 10). With no script it
 // answers every request with a recorded response (FAKE_APIS=1); tests pass a script of replies
 // and read back the requests it got.
 import "server-only";
@@ -22,8 +22,9 @@ export interface FakeClaude extends ClaudeMessages {
  * Serves `replies` in order, one per request; a request past the end fails the test. Without
  * `replies`, every request gets `fixture`, a Message in the API's shape in the wire format of
  * lib/pipeline/outputFormat.ts: `config.step.fixture` (a real Sonnet 5.5 step response,
- * Attention paper, scaled dot-product scores, recorded 2026-11-14) or `config.sketch.fixture`
- * (a real Sonnet 5.5 sketch).
+ * Attention paper, scaled dot-product scores, recorded 2026-11-14), `config.sketch.fixture`
+ * (a real Sonnet 5.5 sketch) or `config.plan.fixture` (a real Sonnet 5.5 plan of the Attention
+ * paper at medium effort, recorded 2026-11-14; plans have no wire format).
  */
 export function fakeClaude(
   replies?: readonly FakeReply[],
@@ -94,12 +95,12 @@ export interface FakeFiles extends ClaudeFiles {
 }
 
 /**
- * A fake Files API: every upload gets `reply` (an error is thrown, as the SDK would), or by
- * default the recorded upload response `fixture` (config.plan.uploadFixture).
+ * A fake Files API: every upload gets `reply` (an error is thrown, as the SDK would), or
+ * without one the recorded upload response `fixture` (config.plan.uploadFixture).
  */
 export function fakeFiles(
-  fixture: string = config.plan.uploadFixture,
   reply?: Anthropic.FileMetadata | Error,
+  fixture: string = config.plan.uploadFixture,
 ): FakeFiles {
   const calls: FakeFiles["calls"] = [];
   return {
