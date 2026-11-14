@@ -3,6 +3,7 @@
 // draws, so it must stay free of node-only imports.
 import katex from "katex";
 import type { z } from "zod";
+import { KATEX_OPTIONS } from "./latex";
 import {
   type Action,
   type Anchor,
@@ -123,7 +124,7 @@ function objectOnCanvas(obj: BoardObject): boolean {
 
 function latexParses(tex: string): boolean {
   try {
-    katex.renderToString(tex, { throwOnError: true, strict: "ignore" });
+    katex.renderToString(tex, { ...KATEX_OPTIONS, throwOnError: true });
     return true;
   } catch {
     return false;
