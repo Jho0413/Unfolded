@@ -5,15 +5,13 @@
 // into machine events (ask, closeAsk, agentDisconnected). The panel shows the
 // Ask messages of section 7 itself, so the page shouldn't also show the
 // machine's "Q&A ended unexpectedly." notice.
+//
+// What it looks like is section 5.6: the always-visible Ask box (a question
+// typed while Ask is closed opens it and is sent at once), and while asking,
+// the tutor card (player/cardView.ts askCard) with only the latest question
+// and answer. The connection itself is qa/connector.ts, unchanged.
 import { stripVoiceTags } from "./voiceTags";
-import {
-  type FormEvent,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentSignedUrlResponse, AgentTokenResponse } from "@/shared/lesson";
 import {
   AskConnector,
@@ -25,6 +23,8 @@ import {
 import { buildContextUpdate, type QaContext } from "./context";
 import { useQaConversation } from "./conversation";
 import type { AskApi, QaConversation, QaMessage, QaTools } from "./types";
+import { askCard } from "@/player/cardView";
+import { AskBox, CardNotice, TutorCard } from "@/player/TutorCard";
 
 export const ASK_MESSAGES = {
   ...CONNECTOR_MESSAGES,
@@ -49,7 +49,17 @@ export type AskPanelProps = {
   onClose: () => void;
   /** The session dropped: send the machine `agentDisconnected`. */
   onAgentDisconnected: () => void;
+  /**
+   * Whether Ask can open now (the machine takes `ask`). While it can't (a failed step), the
+   * closed panel's box and mic are off, so a typed question is never left waiting.
+   */
+  canAsk?: boolean;
+  /** The Captions toggle: off hides a voice answer's text (player/cardView.ts). */
+  captions?: boolean;
 };
+
+/** A transcript line, and whether it was typed (the card says "You asked" or "You said"). */
+type ShownMessage = QaMessage & { typed?: boolean };
 
 export type { AskApi };
 
@@ -72,6 +82,8 @@ export function AskPanel({
   onAsk,
   onClose,
   onAgentDisconnected,
+  canAsk = true,
+  captions = true,
 }: AskPanelProps) {
   const [session, setSession] = useState<ConnectorState>(
     () => INITIAL_CONNECTOR_STATE,
@@ -79,7 +91,7 @@ export function AskPanel({
   // A tool's message (a failed sketch), apart from the session's own notice,
   // so it never hides "Mic is off" and a later success can clear it.
   const [toolNotice, setToolNotice] = useState<string | null>(null);
-  const [messages, setMessages] = useState<QaMessage[]>([]);
+  const [messages, setMessages] = useState<ShownMessage[]>([]);
   const [questions, setQuestions] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
   const contextRef = useRef({ context, questions });
@@ -94,19 +106,36 @@ export function AskPanel({
 
   // Typed questions sent but not yet echoed back by the conversation.
   const typedEcho = useRef<string[]>([]);
-  const addMessage = useCallback((m: QaMessage) => {
+  // Questions asked in this Ask, for tagging the answer that drew (below).
+  const asked = useRef(0);
+  const addMessage = useCallback((m: ShownMessage) => {
     setMessages((ms) => [...ms, m]);
-    if (m.role === "user") setQuestions((qs) => [...qs, m.text]);
+    if (m.role === "user") {
+      asked.current++;
+      setQuestions((qs) => [...qs, m.text]);
+    }
   }, []);
+  // Which question's answer called draw_scene: the card tags it "Drawing on the board".
+  const [drewFor, setDrewFor] = useState<number | null>(null);
 
   const [link] = useState(() => new AgentLink());
-  const resolvedTools = useMemo(
-    () =>
+  const resolvedTools = useMemo(() => {
+    const made =
       typeof tools === "function"
         ? tools({ showNotice: setToolNotice, tellAgent: (t) => link.tell(t) })
-        : tools,
-    [tools, link],
-  );
+        : tools;
+    const draw = made?.draw_scene;
+    if (draw === undefined) return made;
+    return {
+      ...made,
+      draw_scene: (params: Parameters<typeof draw>[0]) => {
+        setDrewFor(asked.current);
+        return draw(params);
+      },
+    };
+  }, [tools, link]);
+  // A question typed in the box before Ask was open: sent once Ask opens (text-first).
+  const pending = useRef<string | null>(null);
 
   // Set in an effect once both exist; the callbacks only fire later.
   const connectorRef = useRef<AskConnector | null>(null);
@@ -165,16 +194,32 @@ export function AskPanel({
   // it. In a replay run there's no session: the panel says Q&A needs a connection.
   useEffect(() => {
     const connector = connectorRef.current;
-    if (!open || replay || connector === null) return;
+    if (!open) return;
+    const typed = pending.current;
+    // Cleared after this commit, not now: dev Strict Mode runs this effect twice (open,
+    // close, open), and the second open must send it too.
+    queueMicrotask(() => {
+      if (pending.current === typed) pending.current = null;
+    });
+    if (replay || connector === null) return;
     typedEcho.current = [];
     connector.open();
+    // Typed in the box before Ask opened: sent at once, so it's queued until the session
+    // connects and decides a text-only one (the mic prompt never holds it up).
+    if (typed !== null) {
+      typedEcho.current.push(typed);
+      addMessage({ role: "user", text: typed, typed: true });
+      connector.send(typed);
+    }
     return () => {
       connector.close();
       setMessages([]);
       setDraft("");
       setToolNotice(null);
+      setDrewFor(null);
+      asked.current = 0;
     };
-  }, [open, replay]);
+  }, [open, replay, addMessage]);
 
   // Tell the agent about every step change (or jump) while connected.
   const { phase } = session;
@@ -221,12 +266,20 @@ export function AskPanel({
   const usable = open && !replay && phase !== "failed" && phase !== "idle";
   const voice = phase === "connected" && !session.textOnly;
 
-  function submit(e: FormEvent) {
-    e.preventDefault();
+  function submit() {
     const text = draft.trim();
-    if (!text || !usable) return;
+    if (!text) return;
+    if (!open) {
+      // The box works before Ask is open: it opens Ask and the question goes at once.
+      if (!canAsk) return;
+      if (!replay) pending.current = text;
+      setDraft("");
+      ask();
+      return;
+    }
+    if (!usable) return;
     typedEcho.current.push(text);
-    addMessage({ role: "user", text });
+    addMessage({ role: "user", text, typed: true });
     setDraft("");
     connectorRef.current?.send(text);
   }
@@ -235,91 +288,113 @@ export function AskPanel({
   const shownNotice =
     open && replay ? ASK_MESSAGES.needsConnection : session.notice;
 
+  // Only the latest question and the agent's latest message after it are shown.
+  const { question, answer, asked: questionCount } = latestTurn(messages);
+  const card = askCard({
+    phase: shownPhase,
+    replay,
+    textOnly: session.textOnly,
+    question,
+    answer,
+    drew: drewFor !== null && drewFor === questionCount,
+    captions,
+  });
+
+  const offerMic =
+    usable && phase === "connected" && session.textOnly && !session.micDenied;
+  const mic = !open
+    ? { label: "Ask by voice", onClick: ask, disabled: !canAsk, live: false }
+    : offerMic
+      ? {
+          label: "Use the mic",
+          onClick: () => void connectorRef.current?.useMic(),
+          disabled: false,
+          live: false,
+        }
+      : {
+          label: "Ask by voice",
+          onClick: () => {},
+          disabled: true,
+          live: voice,
+        };
+
+  const notices = (
+    <>
+      {shownNotice && (
+        <CardNotice testId="ask-notice">{shownNotice}</CardNotice>
+      )}
+      {open && toolNotice && (
+        <CardNotice testId="ask-tool-notice">{toolNotice}</CardNotice>
+      )}
+    </>
+  );
+
   return (
-    <section
+    <div
+      role="group"
       aria-label="Ask"
       data-testid="ask-panel"
       data-open={open}
       data-phase={shownPhase}
       data-text-only={session.textOnly}
       data-transport={session.transport ?? ""}
-      style={panelStyle}
+      // Its card and box sit in the dock's own column.
+      style={{ display: "contents" }}
     >
-      {!open && (
-        <button type="button" onClick={ask} aria-keyshortcuts="A">
-          Ask
-        </button>
+      {open ? (
+        <TutorCard view={card} onAction={onClose} notices={notices} />
+      ) : (
+        // A dropped session's message outlives the panel (section 7).
+        notices
       )}
-      {shownNotice && (
-        <p role="status" data-testid="ask-notice" style={noticeStyle}>
-          {shownNotice}
-        </p>
-      )}
-      {open && toolNotice && (
-        <p role="status" data-testid="ask-tool-notice" style={noticeStyle}>
-          {toolNotice}
-        </p>
-      )}
-      {open && (
-        <>
-          {shownPhase === "waiting" && (
-            <p data-testid="ask-hint">
-              Allow the mic to talk, or type your question.
-            </p>
-          )}
-          {shownPhase === "connecting" && <p>Connecting…</p>}
-          <ol data-testid="ask-transcript" style={transcriptStyle}>
-            {messages.map((m, i) => (
-              <li key={i} data-role={m.role}>
-                <strong>{m.role === "user" ? "You" : "Tutor"}:</strong>{" "}
-                {m.role === "agent" ? stripVoiceTags(m.text) : m.text}
-              </li>
-            ))}
-          </ol>
-          <form onSubmit={submit} style={{ display: "flex", gap: 8 }}>
-            <input
-              aria-label="Type your question"
-              placeholder={usable ? "Type your question" : ""}
-              value={draft}
-              disabled={!usable}
-              onFocus={() => {
-                inputFocused.current = true;
-                connectorRef.current?.typing();
-                if (voice) conversation.setMicMuted(true);
-              }}
-              onBlur={() => {
-                inputFocused.current = false;
-                if (voice) conversation.setMicMuted(false);
-              }}
-              onChange={(e) => {
-                setDraft(e.target.value);
-                connectorRef.current?.typing();
-                if (phase === "connected") conversation.sendUserActivity();
-              }}
-              style={{ flex: 1 }}
-            />
-            <button type="submit" disabled={!usable || !draft.trim()}>
-              Send
-            </button>
-          </form>
-          {usable &&
-            phase === "connected" &&
-            session.textOnly &&
-            !session.micDenied && (
-              <button
-                type="button"
-                onClick={() => void connectorRef.current?.useMic()}
-              >
-                Use the mic
-              </button>
-            )}
-          <button type="button" onClick={onClose}>
-            Close
-          </button>
-        </>
-      )}
-    </section>
+      <AskBox
+        value={draft}
+        disabled={open ? !usable : !canAsk}
+        onChange={(text) => {
+          setDraft(text);
+          connectorRef.current?.typing();
+          if (phase === "connected") conversation.sendUserActivity();
+        }}
+        onSubmit={submit}
+        onFocus={() => {
+          inputFocused.current = true;
+          connectorRef.current?.typing();
+          if (voice) conversation.setMicMuted(true);
+        }}
+        onBlur={() => {
+          inputFocused.current = false;
+          if (voice) conversation.setMicMuted(false);
+        }}
+        mic={mic}
+      />
+    </div>
   );
+}
+
+/** The latest question, the agent's latest message after it, and how many were asked. */
+function latestTurn(messages: readonly ShownMessage[]): {
+  question: { text: string; via: "typed" | "voice" } | null;
+  answer: string | null;
+  asked: number;
+} {
+  let question: ShownMessage | null = null;
+  let answer: ShownMessage | null = null;
+  let asked = 0;
+  for (const m of messages) {
+    if (m.role === "user") {
+      question = m;
+      answer = null;
+      asked++;
+    } else answer = m;
+  }
+  return {
+    question:
+      question === null
+        ? null
+        : { text: question.text, via: question.typed ? "typed" : "voice" },
+    answer: answer === null ? null : stripVoiceTags(answer.text),
+    asked,
+  };
 }
 
 /** The conversation token, or null when Q&A is unavailable. */
@@ -358,25 +433,3 @@ function isTyping(target: EventTarget | null): boolean {
     target.tagName === "SELECT"
   );
 }
-
-const panelStyle = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 8,
-  maxWidth: 480,
-} as const;
-const noticeStyle = {
-  margin: 0,
-  padding: "6px 10px",
-  background: "#fef3c7",
-  border: "1px solid #f59e0b",
-  borderRadius: 6,
-} as const;
-const transcriptStyle = {
-  listStyle: "none",
-  margin: 0,
-  padding: 0,
-  display: "flex",
-  flexDirection: "column",
-  gap: 4,
-} as const;
