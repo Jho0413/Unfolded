@@ -12,6 +12,7 @@ import {
 } from "@/shared/scene";
 import { validateStep } from "@/shared/validate";
 import {
+  coversCell,
   resolveAnchor,
   sceneAt,
   type TimedAction,
@@ -295,6 +296,21 @@ describe("sceneAt: highlight", () => {
   });
 });
 
+describe("coversCell", () => {
+  it("a whole matrix covers every cell", () => {
+    expect(coversCell({ id: "m" }, 3, 2)).toBe(true);
+  });
+  it("a row covers its cells only", () => {
+    expect(coversCell({ id: "m", row: 1 }, 1, 0)).toBe(true);
+    expect(coversCell({ id: "m", row: 1 }, 0, 0)).toBe(false);
+  });
+  it("a cell covers itself only", () => {
+    expect(coversCell({ id: "m", row: 0, col: 1 }, 0, 1)).toBe(true);
+    expect(coversCell({ id: "m", row: 0, col: 1 }, 0, 0)).toBe(false);
+    expect(coversCell({ id: "m", row: 0, col: 1 }, 1, 1)).toBe(false);
+  });
+});
+
 // ---------------------------------------------------------------- move
 
 describe("sceneAt: move", () => {
@@ -319,6 +335,34 @@ describe("sceneAt: move", () => {
     expect(copy(end, "m", 0)).toMatchObject({ x: 800, y: 300 });
     expect(obj(end, "m").object).toEqual(board()[0]);
     expect(obj(end, "m").visible).toBe(true);
+  });
+
+  it("moving a single cell slides a copy of that cell", () => {
+    const timed = [
+      at(0, {
+        do: "move",
+        target: { id: "m", row: 0, col: 1 },
+        to: { x: 800, y: 300 },
+      }),
+    ];
+    const start = cellCentre(100, 100, 0, 1);
+    const mid = sceneAt(board(), timed, 200);
+    expect(mid.copies).toEqual([
+      {
+        source: { id: "m", row: 0, col: 1 },
+        x: (start.x + 800) / 2,
+        y: (start.y + 300) / 2,
+        visible: true,
+      },
+    ]);
+    const end = sceneAt(board(), timed, 400);
+    expect(copy(end, "m", 0, 1)).toMatchObject({ x: 800, y: 300 });
+    expect(copy(end, "m", 0)).toBeUndefined();
+    expect(obj(end, "m").object).toEqual(board()[0]);
+    expect(resolveAnchor(end, { id: "m", row: 0, col: 1 })).toEqual({
+      x: 800,
+      y: 300,
+    });
   });
 
   it("a later highlight of a moved row changes both (the copy reads the source cells)", () => {
@@ -560,6 +604,117 @@ describe("sceneAt: write", () => {
         ["x", "4"],
       ],
     });
+  });
+});
+
+// ---------------------------------------------------------------- no-ops
+
+describe("sceneAt: an action that changes nothing is never active", () => {
+  it("a show of a visible object", () => {
+    const s = sceneAt(
+      board(),
+      [at(0, { do: "show", target: { id: "t" } })],
+      200,
+    );
+    expect(s.active).toEqual([]);
+  });
+
+  it("a highlight in the colour the cells already have", () => {
+    const timed = [
+      at(0, { do: "highlight", target: { id: "m", row: 0 }, durationMs: 0 }),
+      at(1000, { do: "highlight", target: { id: "m", row: 0 } }),
+      at(1000, { do: "highlight", target: { id: "m", row: 0, col: 1 } }),
+    ];
+    expect(sceneAt(board(), timed, 1200).active).toEqual([]);
+  });
+
+  it("a highlight during an identical one in progress: the first keeps fading in", () => {
+    const first = at(0, { do: "highlight", target: { id: "t" } });
+    const s = sceneAt(
+      board(),
+      [first, at(100, { do: "highlight", target: { id: "t" } })],
+      200,
+    );
+    expect(s.active).toEqual([{ action: first.action, progress: 0.5 }]);
+  });
+
+  it("a write of the value already there", () => {
+    const s = sceneAt(
+      board(),
+      [
+        at(0, { do: "write", target: { id: "t" }, value: "hi" }),
+        at(0, { do: "write", target: { id: "m", row: 0, col: 1 }, value: "2" }),
+      ],
+      200,
+    );
+    expect(s.active).toEqual([]);
+  });
+
+  it("a hide of a hidden object, an unhighlight of nothing, a hide of a part that never moved", () => {
+    const s = sceneAt(
+      board(),
+      [
+        at(0, { do: "hide", target: { id: "h" } }),
+        at(0, { do: "unhighlight", target: { id: "m" } }),
+        at(0, { do: "hide", target: { id: "m", row: 0 } }),
+      ],
+      200,
+    );
+    expect(s.active).toEqual([]);
+  });
+
+  it("a show during a hide in progress is active (the hide would leave it hidden)", () => {
+    const show = at(200, { do: "show", target: { id: "t" } });
+    const s = sceneAt(
+      board(),
+      [at(0, { do: "hide", target: { id: "t" } }), show],
+      300,
+    );
+    expect(s.active.map((a) => a.action)).toContainEqual(show.action);
+  });
+
+  it("a hide during a show in progress is active (the show would leave it visible)", () => {
+    const hide = at(200, { do: "hide", target: { id: "h" } });
+    const s = sceneAt(
+      board(),
+      [at(0, { do: "show", target: { id: "h" } }), hide],
+      300,
+    );
+    expect(s.active.map((a) => a.action)).toContainEqual(hide.action);
+  });
+
+  it("a shorter hide during a longer one is active (it hides the object first)", () => {
+    const short = at(100, { do: "hide", target: { id: "t" }, durationMs: 200 });
+    const s = sceneAt(
+      board(),
+      [at(0, { do: "hide", target: { id: "t" }, durationMs: 1000 }), short],
+      200,
+    );
+    expect(s.active.map((a) => a.action)).toContainEqual(short.action);
+  });
+
+  it("a hide leaves active once a later show of the same object has ended", () => {
+    const timed = [
+      at(0, { do: "hide", target: { id: "t" }, durationMs: 1000 }),
+      at(300, { do: "show", target: { id: "t" } }),
+    ];
+    expect(sceneAt(board(), timed, 600).active).toHaveLength(2);
+    const after = sceneAt(board(), timed, 800);
+    expect(after.active).toEqual([]);
+    expect(obj(after, "t").visible).toBe(true);
+    expect(obj(sceneAt(board(), timed, 1000), "t").visible).toBe(true);
+  });
+
+  it("a highlight that changes at least one cell is active", () => {
+    const timed = [
+      at(0, { do: "highlight", target: { id: "m", row: 0 }, durationMs: 0 }),
+      at(1000, { do: "highlight", target: { id: "m" } }),
+      at(1000, { do: "highlight", target: { id: "m", row: 0 }, color: "warn" }),
+    ];
+    expect(sceneAt(board(), timed, 1200).active).toEqual([
+      { action: timed[1].action, progress: 0.5 },
+      { action: timed[2].action, progress: 0.5 },
+    ]);
   });
 });
 
