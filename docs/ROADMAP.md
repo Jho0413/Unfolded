@@ -46,7 +46,7 @@ Goal: keys work, CI checks everything, the contract exists, and the unknowns are
 | F3 | The contract: `shared/scene.ts`, `shared/lesson.ts`, `shared/tools.ts` (the tool-name list) and `shared/validate.ts`. Also the hand-written step `lib/fakes/fixtures/demo-m1.step.json`. | F1 | One unit test per row of the ARCH §4 validation table. **F3 is accepted only once `demo-m1.step.json` is hand-written against the contract, expresses the whole M1 demo in ARCH §4 (row and column slide together, the pairs multiply, the sum drops into (1,1)), and passes validation.** It's the contract's acceptance test. |
 | S1 | Spike: ElevenLabs TTS with timestamps on the M1 narration. Record the alignment shape, Unicode behaviour and latency. | F0 | Findings in ARCH §11, plus the fixture `lib/fakes/fixtures/tts-demo-m1.json`. |
 | S2 | Spike: ElevenLabs agent with one client tool.<br>• Compare two LLMs on latency and tool-calling.<br>• Check whether a text-only session speaks.<br>• Time a sketch request. | F0 | The chosen LLM and timings in ARCH §11, plus a board post. |
-| S3 | Spike: Sonnet 5.5 writes `Step` scripts for three concepts from the Attention paper. Measure validity rate and latency per effort level. | F0, F3 | Findings and the chosen effort in ARCH §11, plus `Step` fixtures saved. |
+| S3 | Spike: Sonnet 5.5 writes `Step` scripts for three concepts from the Attention paper and two from a second, different paper (non-ML or math-heavy; S3 picks it and posts it on the board). Measure validity rate and latency per effort level, on both papers. | F0, F3 | Findings and the chosen effort in ARCH §11, for both papers, plus `Step` fixtures saved. |
 | S5 | Spike: the ElevenLabs CLI. Push an agent and one client tool from `agent/`, and check how the CLI's tracking file records the agent id. | F0 | The commands in ARCH §11. |
 | D0 | Demo laptop, started early: Node version, repo, `.env.local`, browser mic permission, audio out to speakers. Kept up to date as features land. | F1 | A checklist in the issue, ticked on the actual demo laptop. |
 
@@ -76,25 +76,25 @@ Goal: Claude writes a step for a concept, and the same player renders it.
 | ID | Task | Depends on | Proven by |
 |---|---|---|---|
 | G1 | `lib/pipeline/step.ts`: Sonnet 5.5 with structured output → validate → retry once with the errors → fail. | S3, F2, F3 | Unit tests with fakes: valid first time; invalid then valid; invalid twice → failed; refusal → failed. |
-| G2 | `POST /api/lessons/[id]/steps/[n]`: generate the step, TTS and cues, save to `runs/`. One generation per step at a time. Includes `npm run seed:m2`, which uploads the Attention paper and writes a hand-made `runs/dev-m2/plan.json`. | G1, C1, C2 | Unit tests for each cell of the ARCH §6.2 table, except the cells marked A1. Route tests for a bad `lessonId` or `n`. Real run: three seeded concepts each generate and play. |
+| G2 | `POST /api/lessons/[id]/steps/[n]`: generate the step, TTS and cues, save to `runs/`. One generation per step at a time. Includes `npm run seed:m2`, which uploads a paper and writes a hand-made plan for it to `runs/<id>/plan.json` (seeded for the Attention paper and the second paper). | G1, C1, C2 | Unit tests for each cell of the ARCH §6.2 table, except the cells marked A1. Route tests for a bad `lessonId` or `n`. Real run: three seeded Attention concepts and one from the second paper each generate and play. |
 | P7 | More primitives: `latex` (KaTeX) and `arrow`. | P3 | Playwright on `/dev/board` with each primitive. Real run: screenshot. |
 
-**M2 demo check:** three concepts from the seeded lesson, each generated live, all play correctly in a real browser.
+**M2 demo check:** three concepts from the seeded Attention lesson and one from the second paper, each generated live, all play correctly in a real browser.
 
 ## M3: Paper → lesson
 
-Goal: upload the Attention paper and get a playable lesson.
+Goal: upload a paper and get a playable lesson. The Attention paper is the demo; the second paper shows it isn't tuned to one paper.
 
 | ID | Task | Depends on | Proven by |
 |---|---|---|---|
-| L1 | Upload page and `POST /api/lessons`: PDF checks, Files API upload, a plan with structured output, saved to `runs/`. The plan is shown as a list of step titles. | G1, F2, C2 | Route tests with PDFs generated in a temp dir (tiny valid, not a PDF, encrypted, over 600 pages, over 32 MB): each upload and plan row in ARCH §7, plus retry-once. Real run: the Attention paper gives a plan that passes the schema, has 5–12 steps, and covers dot product, scaling, softmax, multi-head and positional encoding. |
+| L1 | Upload page and `POST /api/lessons`: PDF checks, Files API upload, a plan with structured output, saved to `runs/`. The plan is shown as a list of step titles. | G1, F2, C2 | Route tests with PDFs generated in a temp dir (tiny valid, not a PDF, encrypted, over 600 pages, over 32 MB): each upload and plan row in ARCH §7, plus retry-once. Real run, for the Attention paper and the second paper: each plan passes the schema, has 5–12 steps and covers the paper's main ideas. Demo check for Attention only: the plan covers dot product, scaling, softmax, multi-head and positional encoding. |
 | L2 | Prefetch: generate step N+1 while step N plays. | G2, P6 | Playwright with fakes: pressing Next on a prefetched step makes no new generation request. Real run: once warm, Next shows the next step in under 1 s. |
 | L3 | Error states in the UI: player `failed` with Retry, and the upload error messages. | L1, P5 | Playwright with failing fakes: each message in ARCH §7 appears, and Retry works. |
 | S4 | Spike: fal image model for the cover (and later E1). Measure quality and latency, with as few generations as possible. | F0 | The chosen model id in ARCH §11. |
 | L4 | Cover illustration (the early fal moment): one fal image per lesson plan, from the plan's `coverPrompt`, saved to `runs/<id>/`, shown on the plan page and as the lesson page header. Outside the scene contract and `sceneAt`. Hidden when `FAL_KEY` is missing or fal fails or is slow. One image per plan, never regenerated: fal credits are about 25 US dollars per teammate. | L1, S4 | Route tests with the fal fake (never real fal): a cover is saved and returned; a fal error, timeout or missing `FAL_KEY` still returns the plan without a cover; a saved cover isn't generated again. Real run: the plan page and the lesson page show the cover. |
 | C3 | Replay mode: `REPLAY_RUN` serves each step's played version from `runs/` with no provider calls. The upload page redirects to the lesson, and a missing step shows its message. | L1, G2 | Route tests: replay never calls the fakes; a missing step → "This step isn't in the saved run." Real run: the saved demo lesson plays with Wi-Fi off. |
 
-**M3 demo check:** in a real browser, uploading the Attention paper gives a plan with its cover illustration, and steps 1–3 play back to back. Then the same run replays with Wi-Fi off.
+**M3 demo check:** in a real browser, uploading the Attention paper gives a plan with its cover illustration, and steps 1–3 play back to back. Then the same run replays with Wi-Fi off. Uploading the second paper also gives a valid plan, and its first step plays.
 
 ## M4: Interrupt and ask
 
