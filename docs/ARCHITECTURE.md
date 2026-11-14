@@ -71,7 +71,8 @@ app/
   api/runs/[lessonId]/[file]/route.ts         GET: serve step JSON, audio and media from runs/ (no path traversal)
   api/agent/token/route.ts          GET: ElevenLabs conversation token
   dev/board/page.tsx                dev only: renders a fixed BoardState (renderer tests)
-  dev/player/page.tsx               dev only: the player with a fake two-step lesson and silent audio (player tests)
+  dev/player/page.tsx               dev only: the player with a fake two-step lesson (player tests)
+  dev/player/audio/route.ts         dev only: that lesson's silent audio (or broken, or missing)
 instrumentation.ts                  register(): validates env once at server start (not at build)
 shared/                             imported by server and browser (the contract)
   scene.ts                          zod schemas: board objects, actions, step, sketch, board state
@@ -92,6 +93,7 @@ player/                             browser
   machine.ts                        pure: player state machine (section 6)
   Whiteboard.tsx, primitives/       matrix, text, latex, arrow, image
   usePlayer.ts                      audio element, clock, controls
+  stepLoader.ts                     a step's request, then its audio as a blob; only the latest request reports back
   controls.ts                       pure: which controls are enabled, key and play() results -> events
   Player.tsx                        the whiteboard, controls, status and the ?debug=1 overlay
 qa/                                 browser
@@ -378,10 +380,11 @@ Every state × event pair has a defined result, and each cell gets a test:
 - `goToStep(n)` with `n` outside the plan is **rejected** in every state: the agent tool returns `"no step n"` and the state doesn't change.
 - When the agent jumps steps during Q&A, it finishes speaking. The new step loads paused once Ask closes, so the narration never talks over the agent.
 - `playBlocked` is the browser refusing `audio.play()` without a user gesture, for example after a page reload.
-- **Where the events come from** (`player/usePlayer.ts`). The hook runs the effects and turns the browser's signals into events:
-  - `loadStep` requests the step, then fetches its audio as a blob. `stepReady(i)` is sent once both have arrived. A step request that fails sends `stepFailed(i)` with the server's message, or "Couldn't make this step. Retry?" when there is none (network down). An audio download that fails sends `stepFailed(i)` with "Couldn't play the audio. Retry?". Only the latest request can change the player: an older one that finishes later is dropped and logged.
+- **Where the events come from** (`player/usePlayer.ts`, `player/stepLoader.ts`). The hook runs the effects and turns the browser's signals into events:
+  - `loadStep` requests the step, then fetches its audio as a blob. `stepReady(i)` is sent once both have arrived, and the step is kept only if the machine takes it. A step request that fails sends `stepFailed(i)` with the server's message, or "Couldn't make this step. Retry?" when there is none (network down). An audio download that fails sends `stepFailed(i)` with "Couldn't play the audio. Retry?". Only the latest request can report back: an older one that finishes later, in success or failure, is dropped and logged.
   - `audio.play()` rejected with `NotAllowedError` sends `playBlocked`. Its other rejections are left to the element's `error` event, which sends `audioError` (so a decode error isn't sent twice). Playing an element that already failed (its error was ignored while paused) sends `audioError`.
-  - The audio plays exactly while the state is `playing`. A control is enabled exactly when its event would change the state. Space sends `pause` while playing and `resume` otherwise, except in a text field or on a button.
+  - The audio plays exactly while the state is `playing`. A pause from outside the page (a media key) while playing sends `pause`. A play from outside sends `resume`, and if the machine ignores it, the audio is paused again.
+  - A control is enabled exactly when its event would change the state. Space sends `pause` while playing and `resume` otherwise, but not with a modifier key, on key repeat, or on an interactive element (a text field, button, link or select, where Space already does something).
 
 ### 6.2 Step generation (per step, on the server)
 
