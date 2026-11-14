@@ -183,6 +183,8 @@ type Sketch = {                               // what /api/sketch returns for a 
 | An object, or an `{x, y}` point in an anchor, outside the 1600 × 900 canvas (for a matrix, its whole cell box; for `text` and `latex`, only their x,y) | rejected: `off canvas` |
 | Two objects with the same id | rejected: `duplicate id "x"` |
 | Narration longer than `config.maxNarrationChars` after the markers are stripped | rejected: `narration too long` |
+| Narration with nothing left after the markers are stripped (only markers or spaces) | rejected: `narration empty` (TTS would fail after validation, too late to retry) |
+| An arrow end that names an arrow (itself, or arrows anchored to each other) | rejected: `can't anchor to "x"` (an arrow's centre is the midpoint of its ends, so it would have no position) |
 | A sketch action or anchor uses an id from the board the sketch draws on | valid |
 | The same, with `fresh: true` (the board is empty) | rejected: `unknown object "x"` |
 | A sketch object reuses an id from the board it draws on | rejected: `duplicate id "x"` |
@@ -216,7 +218,7 @@ sequenceDiagram
     A->>F: illustrations for image objects (stretch, E1)
   end
   A->>A: cue offsets -> cue times, save step-0.v1.json + step-0.v1.mp3
-  A-->>B: { step, audioUrl, cueTimes }
+  A-->>B: { step, version, audioUrl, cueTimes }
   Note over B: browser fetches the audio as a blob, step 0 plays, browser requests step 1 ahead
 ```
 
