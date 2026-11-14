@@ -1,7 +1,12 @@
 // Scenes for the dev-only /dev/board page (renderer tests and screenshots).
 import demoM1 from "@/lib/fakes/fixtures/demo-m1.step.json";
 import type { CueTimes } from "@/shared/lesson";
-import { type BoardObject, type BoardState, Step } from "@/shared/scene";
+import {
+  type BoardObject,
+  type BoardState,
+  type CuedAction,
+  Step,
+} from "@/shared/scene";
 import { sceneAt, type TimedAction, timeline } from "@/player/sceneAt";
 
 /**
@@ -225,8 +230,8 @@ const lateHighlight: TimedAction[] = [
 
 /**
  * Arrows following what they point at: `fa` runs from a latex formula that
- * moves, `qa` from a matrix row whose copy slides, and a hidden formula fades
- * in before the arrow is highlighted.
+ * moves, `qa` from a matrix row whose copy slides, and a hidden formula and
+ * its hidden arrow `ga` fade in before `fa` is highlighted.
  */
 const ARROW_OBJECTS: BoardObject[] = [
   { kind: "latex", id: "f", x: 300, y: 300, tex: "f(x) = x^2" },
@@ -263,57 +268,51 @@ const ARROW_OBJECTS: BoardObject[] = [
     tex: "\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}",
     hidden: true,
   },
+  {
+    kind: "arrow",
+    id: "ga",
+    from: { id: "g" },
+    to: { id: "out" },
+    label: "sum",
+    hidden: true,
+  },
 ];
 
 const ARROW_TIMES = {
   move: 1000, // f to (300, 150), 1000 ms
   slide: 2000, // q row 0 to (1000, 600), 1000 ms
-  show: 3000, // g fades in, 400 ms
+  show: 3000, // g and its arrow ga fade in, 400 ms
   highlight: 3500, // fa warn and g accent, 400 ms
 } as const satisfies CueTimes;
 
-const arrowTimed: TimedAction[] = [
+const arrowActions: CuedAction[] = [
   {
-    action: {
-      do: "move",
-      target: { id: "f" },
-      to: { x: 300, y: 150 },
-      durationMs: 1000,
-    },
-    startMs: ARROW_TIMES.move,
+    cue: "move",
+    do: "move",
+    target: { id: "f" },
+    to: { x: 300, y: 150 },
     durationMs: 1000,
   },
   {
-    action: {
-      do: "move",
-      target: { id: "q", row: 0 },
-      to: { x: 1000, y: 600 },
-      durationMs: 1000,
-    },
-    startMs: ARROW_TIMES.slide,
+    cue: "slide",
+    do: "move",
+    target: { id: "q", row: 0 },
+    to: { x: 1000, y: 600 },
     durationMs: 1000,
   },
+  { cue: "show", do: "show", target: { id: "g" }, durationMs: 400 },
+  { cue: "show", do: "show", target: { id: "ga" }, durationMs: 400 },
   {
-    action: { do: "show", target: { id: "g" }, durationMs: 400 },
-    startMs: ARROW_TIMES.show,
+    cue: "highlight",
+    do: "highlight",
+    target: { id: "fa" },
+    color: "warn",
     durationMs: 400,
   },
-  {
-    action: {
-      do: "highlight",
-      target: { id: "fa" },
-      color: "warn",
-      durationMs: 400,
-    },
-    startMs: ARROW_TIMES.highlight,
-    durationMs: 400,
-  },
-  {
-    action: { do: "highlight", target: { id: "g" }, durationMs: 400 },
-    startMs: ARROW_TIMES.highlight,
-    durationMs: 400,
-  },
+  { cue: "highlight", do: "highlight", target: { id: "g" }, durationMs: 400 },
 ];
+
+const arrowTimed = timeline(arrowActions, ARROW_TIMES);
 
 export const SCENES = ["fixed", "m1", "m1-late-highlight", "arrows"] as const;
 export type SceneName = (typeof SCENES)[number];
