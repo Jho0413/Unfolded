@@ -87,6 +87,9 @@ lib/                                server-only (import "server-only")
   config.ts                         model ids, effort, limits, paths: one place
   env.ts                            reads and validates env vars once
   pipeline/plan.ts, step.ts, sketch.ts, generate.ts (one structured-output request, validated and retried once), prompts/, outputFormat.ts (the wire format Claude fills in for steps and sketches, and its converters)
+  pipeline/stepGeneration.ts        pure: the step-generation machine (section 6.2)
+  pipeline/lessonStep.ts            the step route's work: serve a saved step, or generate, narrate and save it, one generation per step at a time
+  pipeline/seed.ts                  npm run seed:m2: a hand-made plan and its uploaded paper -> runs/<id>/ (paper.json, plan.json)
   narration/cues.ts                 pure: strip markers, cue offsets -> times
   narration/tts.ts                  ElevenLabs TTS with timestamps -> audio + cue times (S1 fixture when FAKE_APIS=1)
   narration/makeM1.ts               npm run make:m1: demo-m1.step.json -> runs/demo-m1/ (plan.json, step-0.v<k>.json + .mp3)
@@ -109,7 +112,7 @@ qa/                                 browser
   context.ts                        pure: the sendContextualUpdate() message, and the narration heard by time t
   AskPanel.tsx                      voice + typed input, through conversation.ts; shows the Ask messages of section 7
   tools.ts                          client tool handlers, typed by shared/tools.ts
-scripts/                            dev scripts, run with tsx: make:m1 (make-m1.ts), seed:m2, spike:s3
+scripts/                            dev scripts, run with tsx: make:m1 (make-m1.ts), seed:m2 (seed-m2.ts, its lessons in seed-m2.lessons.json), spike:s3
 agent/                              ElevenLabs CLI config: the agent (prompt, voice, LLM) and its client tools, plus the CLI's tracking file
 runs/                               gitignored: one folder per lesson (store + replay)
 tests/e2e/                          Playwright, with FAKE_APIS=1 and NEXT_PUBLIC_FAKE_APIS=1
@@ -270,7 +273,9 @@ sequenceDiagram
   - The route only serves names matching `^[a-z0-9][a-z0-9.-]{0,99}$` (so never `.` or `..`) with a known extension (`.json`, `.mp3`, `.png`, `.jpg`, `.jpeg`, `.webp`) from inside the run folder, and never a symlink or a folder. A bad `lessonId` or file name → 400; a file that isn't there → 404.
   - `lib/runs/store.ts` writes every file atomically (a temporary file, then a rename, or a hard link for step versions so they never replace a file), so a reader never sees half a file. A new step version is saved with `saveStepVersion`: its audio `step-<n>.v<k>.mp3` first (creating it claims version k; if k is taken, it tries the next version, and gives up with an error after 100 tries), then `step-<n>.v<k>.json`, so an older version is never overwritten and a listed version always has its audio.
   - A step file holds `SavedStep` (`shared/lesson.ts`): `{ step, cueTimes }`. Its version and audio URL come from its name, so a saved step becomes a `StepResponse` without the step route. Writers (C1 `make:m1`, the step route) parse with `SavedStep` before `saveStepVersion`, and a run that's played on the lesson page also needs `plan.json` (`make:m1` writes it too).
-  - **The lesson page** (`app/lesson/[lessonId]/page.tsx`) reads `plan.json` and lists the saved step versions on the server (the browser can't list a run folder). The player then reads each step's latest saved version, `step-<n>.v<k>.json`, and its `.mp3` through this route. A bad `lessonId` or a lesson with no `plan.json` is a 404 page with "No such lesson or step." and a link back to upload; a step with no saved file fails in the player with "This step isn't in the saved run." Once the step route exists, it replaces the page's direct reads for steps not yet generated. Playing the step version recorded in `signals.json` waits for S1 (it plays the latest until then).
+  - **The lesson page** (`app/lesson/[lessonId]/page.tsx`) reads `plan.json` and lists the saved step versions on the server (the browser can't list a run folder). The player then reads each step's latest saved version, `step-<n>.v<k>.json`, and its `.mp3` through this route. A bad `lessonId` or a lesson with no `plan.json` is a 404 page with "No such lesson or step." and a link back to upload; a step with no saved file fails in the player with "This step isn't in the saved run." The step route now exists (below); the page still reads saved steps directly until L2/L3 switch its fetcher to the route, so a seeded lesson's steps play once a POST has generated them. Playing the step version recorded in `signals.json` waits for S1 (it plays the latest until then).
+- **The step route** (`POST /api/lessons/<lessonId>/steps/<n>`, `n` 0-based) answers a `StepResponse` (`{ step, version, audioUrl, cueTimes }`, the same shape the lesson page builds from a saved step). A saved step is served as its latest version, with no provider call. Otherwise it reads `plan.json` and `paper.json`, calls `generateStep` with the plan, the paper's file id and the previous step's saved narration (if any), narrates the step (`narrate`), and saves it with `saveStepVersion` as `SavedStep` plus its audio. Errors are in section 7.
+- **Seeded lessons (`npm run seed:m2`).** For each lesson in `scripts/seed-m2.lessons.json` (the Attention paper as `m2-attention`, Kelley's paper as `m2-newton3p`), it downloads the paper (or takes `--pdf <lessonId>=<file>`), runs the same PDF checks as the upload route, uploads it with the Files API and writes `paper.json`, then the hand-made plan as `plan.json`, so the step route can generate from it. Plans are data, held to the plan rules (`validatePlan`) before anything is uploaded. Real mode needs only `ANTHROPIC_API_KEY`; `FAKE_APIS=1` uses the recorded upload.
 
 ### 5.2 Cue markers become times (`lib/narration/cues.ts`, pure)
 
@@ -440,7 +445,9 @@ stateDiagram-v2
 | started | returns the played version | discarded: an attempt still running when an older version started (A1) | discarded (A1) | discarded (A1) | discarded (A1) | ignored (already heard) | ignored |
 | failed | → generating: a new request after a failure tries again (this is how the player's Retry works) | can't happen | can't happen | can't happen | can't happen | ignored | can't happen (not served) |
 
-The two columns marked (A1), and the cells marked A1, can only happen once adaptation (A1) is built: A1 tests those, and G2 tests the rest. A fal error doesn't fail the step: the image object is hidden (section 7). In replay mode this machine doesn't run: a step missing from the folder fails on every request, with "This step isn't in the saved run." (section 5.5).
+The two columns marked (A1), and the cells marked A1, can only happen once adaptation (A1) is built: A1 tests those, and G2 tests the rest. A fal error doesn't fail the step: the image object is hidden (section 7).
+
+`lib/pipeline/stepGeneration.ts` holds these cells as a pure function, and `lib/pipeline/lessonStep.ts` runs it. `generating` is an in-memory map from `lessonId/n` to the request generating it, set before that request's first read of the run folder, so any request arriving meanwhile waits on it and gets the same answer. `ready` is a saved `step-<n>.v<k>.json`. `failed` is remembered in memory until a generation succeeds; it behaves like `notRequested` (a request generates), so a server restart loses nothing. The map is per server process, which is enough for the one local server (section 1). In replay mode this machine doesn't run: a step missing from the folder fails on every request, with "This step isn't in the saved run." (section 5.5).
 
 ## 7. Errors and rejections
 
@@ -451,12 +458,12 @@ The developer gets the full error in the server log, tagged with the route, less
 | Upload | No file, or not a PDF | "Please choose a PDF." | Pick again |
 | Upload | Over `config.maxPdfMb`, or Claude rejects the document (too many pages, encrypted, unreadable) | "This PDF is too large or locked." | Another PDF |
 | Plan | Invalid plan twice (zod, or fewer than `config.plan.minSteps` steps), refusal, a cut-off, or a Claude or Files API error | "Couldn't read this paper." | Retry, or another PDF |
-| Step | Any `failed` cause in section 6.2 | "Couldn't make this step." | Retry (player `failed` state) |
+| Step | Any `failed` cause in section 6.2 (502), or a failure outside the table such as a missing `paper.json` or a failed save (500); the reason is logged with the route, lesson and step, and `failed (<event>)` | "Couldn't make this step." | Retry (player `failed` state): the next request generates again |
 | Step | Replay mode, and the step isn't in the run | "This step isn't in the saved run." | Back, or another step |
 | Plan or step | fal error or timeout, or no `FAL_KEY` | Nothing: the plan or step shows without the illustration | The image is hidden and the error is logged |
 | Player | Browser blocks autoplay | "Press play to start." | Play button |
 | Player | Audio fails to load or decode | "Couldn't play the audio. Retry?" | Retry |
-| Route | `lessonId` doesn't match `^[a-z0-9-]{1,40}$`, or `n` isn't a step in the plan | 400 "No such lesson or step." | Back to upload |
+| Route | `lessonId` doesn't match `^[a-z0-9-]{1,40}$`, or `n` isn't a step in the plan (not a plain decimal, or past the plan's last step); a lesson with no `plan.json` is a 404 with the same words | 400 "No such lesson or step." | Back to upload |
 | Lesson page | `/lesson/<lessonId>` with a bad `lessonId`, or a lesson with no saved or an invalid `plan.json` (logged) | A 404 page: "No such lesson or step." | "Back to upload" link |
 | Run file | `GET /api/runs/<lessonId>/<file>` with a bad `lessonId` or file name, an extension it doesn't serve, a symlink, a folder or another non-regular file | 400 "No such lesson or file." (a symlink, folder or other non-regular file is logged; a bad name isn't, as any URL can be typed) | The page shows its own error for the step or image |
 | Run file | The file isn't in the run folder | 404 `No saved file "<file>" in lesson "<lessonId>".` | As above |
