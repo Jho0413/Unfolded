@@ -56,8 +56,15 @@ async function requestToken(
   if (agentId === undefined)
     throw new AgentTokenError("unavailable", "ELEVENLABS_AGENT_ID is not set");
   const key = env.ELEVENLABS_API_KEY;
-  // An error body might echo what we sent; the log must never hold the key.
+  // An error body or a fetch error might echo what we sent; the log must never hold the key.
   const redact = (text: string) => text.replaceAll(key, "[redacted]");
+  // undici's message is only "fetch failed": the reason (ENOTFOUND, a timeout...) is the cause.
+  const describe = (err: unknown): string =>
+    redact(
+      err instanceof Error
+        ? `${err.name}: ${err.message}${err.cause === undefined ? "" : ` (${describe(err.cause)})`}`
+        : String(err),
+    );
 
   const url = new URL(config.agentToken.url);
   url.searchParams.set("agent_id", agentId);
@@ -71,22 +78,23 @@ async function requestToken(
   } catch (err) {
     throw new AgentTokenError(
       "provider",
-      `ElevenLabs token request failed: ${redact(err instanceof Error ? err.message : String(err))}`,
+      `ElevenLabs token request failed: ${describe(err)}`,
     );
   }
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new AgentTokenError(
       "provider",
-      `ElevenLabs token request returned ${res.status}: ${redact(detail.slice(0, 500))}`,
+      `ElevenLabs token request returned ${res.status}: ${redact(detail).slice(0, 500)}`,
     );
   }
   try {
     return await res.json();
-  } catch {
+  } catch (err) {
+    // Also a body that stalls past the timeout.
     throw new AgentTokenError(
       "provider",
-      "ElevenLabs token response is not JSON",
+      `ElevenLabs token response unreadable: ${describe(err)}`,
     );
   }
 }

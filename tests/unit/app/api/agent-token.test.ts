@@ -97,6 +97,7 @@ describe("GET /api/agent/token", () => {
     expect(url.origin + url.pathname).toBe(config.agentToken.url);
     expect(url.searchParams.get("agent_id")).toBe(AGENT_ID);
     expect(init.headers).toEqual({ "xi-api-key": KEY });
+    expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 
   it("missing ELEVENLABS_AGENT_ID: 503 with the unavailable message, ElevenLabs not called", async () => {
@@ -125,15 +126,43 @@ describe("GET /api/agent/token", () => {
     expect(log()).not.toContain(KEY);
   });
 
-  it("ElevenLabs unreachable or timed out: 502 with the unavailable message", async () => {
+  it("an ElevenLabs error body cut for the log: the key is redacted before the cut", async () => {
+    useEnv(REAL);
+    stubFetch(
+      async () => new Response(`${"x".repeat(495)}${KEY}`, { status: 400 }),
+    );
+    const log = captureErrorLog();
+
+    await expectUnavailable(await GET(), 502);
+    expect(log()).not.toContain(KEY.slice(0, 5));
+  });
+
+  it("ElevenLabs unreachable: 502 with the unavailable message, the cause logged without the key", async () => {
     useEnv(REAL);
     stubFetch(async () => {
-      throw new DOMException("The operation was aborted due to timeout");
+      throw new TypeError("fetch failed", {
+        cause: new Error(`getaddrinfo ENOTFOUND (sent ${KEY})`),
+      });
     });
     const log = captureErrorLog();
 
     await expectUnavailable(await GET(), 502);
-    expect(log()).toContain("timeout");
+    expect(log()).toContain("ENOTFOUND");
+    expect(log()).not.toContain(KEY);
+  });
+
+  it("ElevenLabs timed out: 502 with the unavailable message", async () => {
+    useEnv(REAL);
+    stubFetch(async () => {
+      throw new DOMException(
+        "The operation was aborted due to timeout",
+        "TimeoutError",
+      );
+    });
+    const log = captureErrorLog();
+
+    await expectUnavailable(await GET(), 502);
+    expect(log()).toContain("TimeoutError");
   });
 
   it("ElevenLabs replies without a token: 502 with the unavailable message", async () => {
@@ -147,12 +176,15 @@ describe("GET /api/agent/token", () => {
   it("ElevenLabs replies with something other than JSON: 502 with the unavailable message", async () => {
     useEnv(REAL);
     stubFetch(async () => new Response("<html>gateway</html>"));
-    captureErrorLog();
+    const log = captureErrorLog();
 
     await expectUnavailable(await GET(), 502);
+    expect(log()).toContain("response unreadable");
   });
 
-  it("replay mode: Q&A is off, so no token and ElevenLabs not called", async () => {
+  // Called below the route: replay mode needs a runs/<id>/ folder, and loadEnv() only looks in
+  // the real runs/ folder. The route's error path is the one the cases above cover.
+  it("replay mode: Q&A is off, so 503 and ElevenLabs not called", async () => {
     const fetch = stubFetch(async () => new Response());
 
     const err = await getConversationToken({
@@ -163,6 +195,7 @@ describe("GET /api/agent/token", () => {
     }).catch((e: unknown) => e);
 
     expect(err).toBeInstanceOf(AgentTokenError);
+    expect((err as AgentTokenError).reason).toBe("unavailable");
     expect(tokenErrorStatus(err)).toBe(503);
     expect(fetch).not.toHaveBeenCalled();
   });
