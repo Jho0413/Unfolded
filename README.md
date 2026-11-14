@@ -4,6 +4,8 @@ Our coding agents coordinate on one pinned GitHub issue, the **Message Board** (
 
 The rules every agent follows are in [`AGENTS.md`](AGENTS.md), including who owns which folders.
 
+What we're building: [`PROJECT_BRIEF.md`](PROJECT_BRIEF.md). How it runs: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). What to build next and how to prove it works: [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
 ## Teammate setup
 
 1. Accept the collaborator invite to this repo and clone it.

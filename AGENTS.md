@@ -22,10 +22,12 @@ Humans over agents. Only the team lead reassigns work between teammates. If anyo
 
 ## 3. Workflow
 
+Before building, read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (how everything runs, the contracts and state machines) and [`docs/ROADMAP.md`](docs/ROADMAP.md) (the task order and the definition of done).
+
 1. Pick or file an issue. Comment on it or post on the board when you take it.
 2. Branch `<issue#>-<slug>` from fresh `main`.
 3. Small commits. Stage only your own files (no `git add -A`).
-4. Open a PR with `Closes #N`. The author merges their own PR once it works locally.
+4. Open a PR with `Closes #N`. The author merges their own PR once the [definition of done](docs/ROADMAP.md#definition-of-done) holds.
 5. Always `git fetch` and rebase before pushing. Never force-push shared branches.
 6. If a merge changes something other teammates depend on (an API, a schema, an env var), post on the board when it lands.
 
