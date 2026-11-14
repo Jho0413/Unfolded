@@ -14,7 +14,12 @@ import {
   type FakeReply,
 } from "@/lib/fakes/claude";
 import { ApiError, SKETCH_FAILED, SketchResponse } from "@/shared/lesson";
-import type { BoardState, ObjectState, Sketch } from "@/shared/scene";
+import {
+  type BoardState,
+  type ObjectState,
+  type Sketch,
+  Step,
+} from "@/shared/scene";
 
 // The Claude the route gets: a scripted fake per test, or the real factory (FAKE_APIS=1).
 const claude = vi.hoisted(() => ({
@@ -316,11 +321,21 @@ describe("POST /api/sketch: a bad request body is a 400, and Claude isn't called
 });
 
 describe("POST /api/sketch with FAKE_APIS=1", () => {
-  it("serves the recorded sketch response, which is valid on the board", async () => {
+  it("serves the recorded sketch response, which is valid on the demo-m1 board", async () => {
     vi.stubEnv("FAKE_APIS", "1");
     vi.stubEnv("REPLAY_RUN", undefined);
     resetEnvForTests();
-    const res = await post({ description: "anything", board: BOARD });
+    const demo = Step.parse(await readFixture("demo-m1.step.json"));
+    const board: BoardState = {
+      objects: demo.objects.map((object) => ({
+        object,
+        visible: !object.hidden,
+        highlight: null,
+      })),
+      copies: [],
+      active: [],
+    };
+    const res = await post({ description: "anything", board });
     expect(res.status).toBe(200);
     const fixture = await readFixture<Anthropic.Message>(config.sketch.fixture);
     const text = fixture.content.find((b) => b.type === "text");

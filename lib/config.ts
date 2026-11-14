@@ -39,7 +39,10 @@ export const config = {
     maxTokens: 16_000,
     /** Deadline for one attempt, the SDK's own retries included, until the whole answer is in. */
     timeoutMs: 60_000,
-    /** Served when FAKE_APIS=1, in the Messages API's response shape. */
+    /**
+     * Served when FAKE_APIS=1: a recorded Sonnet 5.5 response, drawn on the demo-m1 board (it
+     * targets matrices a, b and c, so it's valid on that board, not on an empty one).
+     */
     fixture: "claude-sketch.message.json",
   },
   /** Upload cap: our own choice, not Claude's limit (ARCHITECTURE.md section 5.1). */

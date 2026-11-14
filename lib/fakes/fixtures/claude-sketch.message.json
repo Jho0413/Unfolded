@@ -1,30 +1,33 @@
 {
-  "id": "msg_fake_sketch",
+  "model": "claude-sonnet-5-5",
+  "id": "msg_011Ch3DRiAtjPvdxkckDvpED",
   "type": "message",
   "role": "assistant",
-  "model": "claude-sonnet-5-5",
-  "container": null,
-  "diagnostics": null,
   "content": [
     {
       "type": "text",
-      "text": "{\"objects\":[{\"kind\":\"text\",\"id\":\"sketch_note\",\"x\":1200,\"y\":120,\"text\":\"each output cell pairs one row with one column\",\"size\":\"m\"},{\"kind\":\"latex\",\"id\":\"sketch_formula\",\"x\":1200,\"y\":200,\"tex\":\"c_{ij} = \\\\sum_k a_{ik} b_{kj}\",\"hidden\":true},{\"kind\":\"arrow\",\"id\":\"sketch_arrow\",\"from\":{\"id\":\"sketch_note\"},\"to\":{\"id\":\"sketch_formula\"}}],\"actions\":[{\"do\":\"highlight\",\"target\":{\"id\":\"sketch_note\"},\"color\":\"accent\",\"durationMs\":400,\"atMs\":0},{\"do\":\"show\",\"target\":{\"id\":\"sketch_formula\"},\"durationMs\":400,\"atMs\":1500},{\"do\":\"highlight\",\"target\":{\"id\":\"sketch_formula\"},\"color\":\"warn\",\"durationMs\":400,\"atMs\":3000}]}",
-      "citations": null
+      "text": "{\"objects\":[{\"kind\":\"latex\",\"id\":\"dot_calc\",\"x\":1100,\"y\":324,\"tex\":\"1\\\\cdot 5+2\\\\cdot 7=19\",\"hidden\":true},{\"kind\":\"text\",\"id\":\"dot_note\",\"x\":1100,\"y\":250,\"text\":\"row 1 of A \u00b7 column 1 of B\",\"size\":\"s\",\"hidden\":true}],\"actions\":[{\"do\":\"highlight\",\"target\":{\"id\":\"a\",\"row\":0},\"durationMs\":400,\"color\":\"accent\",\"atMs\":0},{\"do\":\"highlight\",\"target\":{\"id\":\"b\",\"col\":0},\"durationMs\":400,\"color\":\"accent\",\"atMs\":600},{\"do\":\"show\",\"target\":{\"id\":\"dot_note\"},\"durationMs\":400,\"atMs\":1200},{\"do\":\"show\",\"target\":{\"id\":\"dot_calc\"},\"durationMs\":400,\"atMs\":2000},{\"do\":\"highlight\",\"target\":{\"id\":\"c\",\"row\":0,\"col\":0},\"durationMs\":400,\"color\":\"warn\",\"atMs\":3000},{\"do\":\"write\",\"target\":{\"id\":\"c\",\"row\":0,\"col\":0},\"durationMs\":400,\"value\":\"19\",\"atMs\":3400}]}"
     }
   ],
+  "container": null,
   "stop_reason": "end_turn",
   "stop_sequence": null,
   "stop_details": null,
   "usage": {
-    "cache_creation": null,
+    "input_tokens": 4023,
     "cache_creation_input_tokens": 0,
     "cache_read_input_tokens": 0,
-    "inference_geo": null,
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "output_tokens_details": null,
-    "server_tool_use": null,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 384,
     "service_tier": "standard",
-    "speed": null
-  }
+    "inference_geo": "global",
+    "speed": "standard",
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    }
+  },
+  "diagnostics": null
 }
