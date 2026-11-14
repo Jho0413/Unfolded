@@ -1,8 +1,8 @@
 // Reads and validates the environment once (ARCHITECTURE.md section 9).
 //
-// instrumentation.ts register() calls loadEnv() at server start, so a missing key stops the
-// server before it serves anything, and the error names the key. `next build` never calls
-// it. Code behind it calls getEnv() and trusts the values.
+// instrumentation.ts register() calls loadEnvOrExit() at server start, so a missing key
+// stops the server (exit code 1) before it serves a request, and the error names the key.
+// `next build` never calls it. Code behind it calls getEnv() and trusts the values.
 //
 // Modes, first match wins:
 //   REPLAY_RUN=<lessonId>  serve a saved run; needs runs/<lessonId>/, no keys
@@ -78,7 +78,10 @@ export interface ParseEnvOptions {
   builtWithBrowserFakes?: boolean;
 }
 
-/** Pure: validates `source` for the mode it selects. Throws EnvError naming every bad key. */
+/**
+ * Validates `source` for the mode it selects. Throws EnvError naming every bad key. Not
+ * pure: replay mode checks the run folder on disk, and fake mode may log a warning.
+ */
 export function parseEnv(
   source: Record<string, string | undefined>,
   options: ParseEnvOptions = {},
@@ -154,7 +157,7 @@ export function parseEnv(
 
 let cached: Env | undefined;
 
-/** Validates process.env and caches the result. Called once, from instrumentation.ts. */
+/** Validates process.env and caches the result. Throws EnvError if it is invalid. */
 export function loadEnv(): Env {
   cached = parseEnv(process.env, {
     // Inlined by next.config.ts `env` from NEXT_PUBLIC_FAKE_APIS at build time. Under
@@ -164,6 +167,21 @@ export function loadEnv(): Env {
         process.env.NEXT_PUBLIC_FAKE_APIS) === "1",
   });
   return cached;
+}
+
+/**
+ * Server start (instrumentation.ts): validates process.env, or logs why and exits with 1.
+ * Next logs an error thrown from register() and serves anyway (a 500 on every request), so
+ * exiting is how the server refuses to start. The message names keys, never their values.
+ */
+export function loadEnvOrExit(): Env {
+  try {
+    return loadEnv();
+  } catch (err) {
+    if (!(err instanceof EnvError)) throw err;
+    console.error(`[env] ${err.message}`);
+    process.exit(1);
+  }
 }
 
 /** The validated env. Validates on first use if register() hasn't run (e.g. in route tests). */

@@ -2,6 +2,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import demoM1 from "@/lib/fakes/fixtures/demo-m1.step.json";
+import { narrationCueTimes } from "@/lib/narration/cues";
 import {
   type Action,
   type BoardObject,
@@ -608,6 +609,28 @@ describe("sceneAt: robustness", () => {
       durationMs: 400,
     };
     expect(timeline([action], {})).toEqual([]);
+  });
+
+  it("timeline keeps an action cued on constructor when narrationCueTimes times it", () => {
+    const action = {
+      cue: "constructor",
+      do: "show" as const,
+      target: { id: "h" },
+      durationMs: 400,
+    };
+    const text = "Call the constructor now";
+    // One alignment entry per code point, 100 ms apart: the cue is at "c", entry 9.
+    const cueTimes = narrationCueTimes(
+      "Call the [[constructor]]constructor now",
+      {
+        characters: [...text],
+        character_start_times_seconds: [...text].map((_, i) => i * 0.1),
+        character_end_times_seconds: [...text].map((_, i) => i * 0.1 + 0.08),
+      },
+    );
+    expect(timeline([action], cueTimes)).toEqual([
+      { action, startMs: 900, durationMs: 400 },
+    ]);
   });
 
   it("never mutates its inputs", () => {

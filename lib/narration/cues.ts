@@ -114,9 +114,11 @@ export function cueTimes(
   // walkAlignment threw unless the arrays are non-empty and the times valid.
   const endMs = Math.round(a.character_end_times_seconds.at(-1)! * 1000);
 
-  const out: CueTimes = {};
+  // A Map, not a plain object: cue names like "constructor" or "__proto__"
+  // must not hit Object.prototype. fromEntries makes every key an own property.
+  const out = new Map<string, number>();
   for (const { cue, offset } of cues) {
-    if (cue in out) continue; // duplicates are rejected upstream; keep the first
+    if (out.has(cue)) continue; // duplicates are rejected upstream; keep the first
     let ms = endMs;
     for (let p = offset; p < text.length; p++) {
       const t = starts[p];
@@ -125,9 +127,9 @@ export function cueTimes(
         break;
       }
     }
-    out[cue] = ms;
+    out.set(cue, ms);
   }
-  return out;
+  return Object.fromEntries(out);
 }
 
 /** Convenience: narration with markers + alignment of its stripped text -> cue times. */

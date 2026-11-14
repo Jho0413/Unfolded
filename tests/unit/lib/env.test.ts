@@ -19,6 +19,7 @@ const ALL_KEYS = [
   "FAL_KEY",
   "FAKE_APIS",
   "NEXT_PUBLIC_FAKE_APIS",
+  "BUILT_WITH_BROWSER_FAKES",
   "REPLAY_RUN",
 ];
 
@@ -59,6 +60,10 @@ describe("Real (npm start)", () => {
     expect(env.FAL_KEY).toBeUndefined();
   });
 
+  it("an empty REPLAY_RUN counts as unset", () => {
+    expect(parseEnv({ ...REAL_KEYS, REPLAY_RUN: "" }).mode).toBe("real");
+  });
+
   it("refuses a build made with NEXT_PUBLIC_FAKE_APIS=1", () => {
     expect(() => parseEnv(REAL_KEYS, { builtWithBrowserFakes: true })).toThrow(
       "NEXT_PUBLIC_FAKE_APIS=1",
@@ -67,10 +72,11 @@ describe("Real (npm start)", () => {
 });
 
 describe("FAKE_APIS=1 (tests, CI)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it("requires no keys", () => {
-    expect(
-      parseEnv({ FAKE_APIS: "1" }, { builtWithBrowserFakes: true }).mode,
-    ).toBe("fake");
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(parseEnv({ FAKE_APIS: "1" }).mode).toBe("fake");
   });
 
   it("on a build without browser fakes, starts but warns", () => {
@@ -79,7 +85,6 @@ describe("FAKE_APIS=1 (tests, CI)", () => {
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining("real Q&A agent"),
     );
-    warn.mockRestore();
   });
 
   it("runs on a build made with NEXT_PUBLIC_FAKE_APIS=1", () => {
@@ -126,15 +131,27 @@ describe("REPLAY_RUN=<id>", () => {
   });
 });
 
+function clearKeys() {
+  for (const key of ALL_KEYS) vi.stubEnv(key, undefined);
+}
+
+function atServerStart() {
+  vi.stubEnv("NEXT_RUNTIME", "nodejs");
+  vi.stubEnv("NEXT_PHASE", "phase-production-server");
+}
+
+// Throws instead of exiting, so a test sees the call and the worker survives it.
+function stubExit() {
+  return vi.spyOn(process, "exit").mockImplementation(() => {
+    throw new Error("process.exit");
+  });
+}
+
 describe("next build", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     resetEnvForTests();
   });
-
-  function clearKeys() {
-    for (const key of ALL_KEYS) vi.stubEnv(key, undefined);
-  }
 
   it("needs no keys: register() skips validation in the build phase", async () => {
     clearKeys();
@@ -142,12 +159,51 @@ describe("next build", () => {
     vi.stubEnv("NEXT_PHASE", "phase-production-build");
     await expect(register()).resolves.toBeUndefined();
   });
+});
 
-  it("at server start, register() validates and stops on a missing key", async () => {
+describe("server start (register)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    resetEnvForTests();
+  });
+
+  it("a missing key logs the key and exits with 1", async () => {
     clearKeys();
-    vi.stubEnv("NEXT_RUNTIME", "nodejs");
-    vi.stubEnv("NEXT_PHASE", "phase-production-server");
-    await expect(register()).rejects.toThrow("ANTHROPIC_API_KEY");
+    atServerStart();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const exit = stubExit();
+    await expect(register()).rejects.toThrow("process.exit");
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "Missing required env vars: ANTHROPIC_API_KEY, ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID",
+      ),
+    );
+  });
+
+  it("a build made with NEXT_PUBLIC_FAKE_APIS=1 logs the rebuild hint and exits with 1", async () => {
+    clearKeys();
+    for (const [k, v] of Object.entries(REAL_KEYS)) vi.stubEnv(k, v);
+    vi.stubEnv("BUILT_WITH_BROWSER_FAKES", "1");
+    atServerStart();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const exit = stubExit();
+    await expect(register()).rejects.toThrow("process.exit");
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("Rebuild"));
+  });
+
+  it("a valid env starts without exiting and logs the mode", async () => {
+    clearKeys();
+    vi.stubEnv("FAKE_APIS", "1");
+    vi.stubEnv("NEXT_PUBLIC_FAKE_APIS", "1");
+    atServerStart();
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const exit = stubExit();
+    await register();
+    expect(exit).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith("[env] mode: fake");
   });
 });
 
