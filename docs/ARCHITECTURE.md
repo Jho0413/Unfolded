@@ -74,6 +74,7 @@ app/
   dev/board/scenes.ts               the dev page's fixed BoardState and demo-m1 scenes
   dev/player/page.tsx               dev only: the player with a fake two-step lesson (player tests); same gate (dev/devOnly.ts)
   dev/player/audio/route.ts         dev only: that lesson's silent audio (or broken, or missing)
+  dev/ask/page.tsx, AskDemo.tsx     dev only: the Ask panel driven by the player machine and a fake three-step lesson (?replay=1 as in a replay run); gated like dev/board
 instrumentation.ts                  register(): validates env once at server start (not at build)
 shared/                             imported by server and browser (the contract)
   scene.ts                          zod schemas: board objects, actions, step, sketch, board state
@@ -101,7 +102,10 @@ player/                             browser
   Player.tsx                        the whiteboard, controls, status and the ?debug=1 overlay
 qa/                                 browser
   conversation.ts                   adapter over @elevenlabs/react useConversation; a scripted fake when NEXT_PUBLIC_FAKE_APIS=1
-  AskPanel.tsx                      voice + typed input, through conversation.ts
+  fakeConversation.ts               the scripted fake: canned agent turns, calls tool handlers (window.__qaFake in fake builds, for Playwright)
+  types.ts, callTool.ts             the adapter's types; a tool call checked against shared/tools.ts, then handled
+  context.ts                        pure: the sendContextualUpdate() message, and the narration heard by time t
+  AskPanel.tsx                      voice + typed input, through conversation.ts; shows the Ask messages of section 7
   tools.ts                          client tool handlers, typed by shared/tools.ts
 scripts/                            dev scripts: make:m1, seed:m2
 agent/                              ElevenLabs CLI config: the agent (prompt, voice, LLM) and its client tools, plus the CLI's tracking file
@@ -445,6 +449,7 @@ The developer gets the full error in the server log, tagged with the route, less
 | Run file | Reading the file fails for another reason | 500 "Couldn't read this file." (the error is logged) | As above |
 | Ask | Token route fails, or the agent can't connect | "Questions are unavailable right now." | The lesson carries on; close the panel |
 | Ask | Session drops mid-question | "Q&A ended unexpectedly." | Ask again |
+| Ask | Replay mode (`REPLAY_RUN`): the page tells the panel, which never asks for a token | "Q&A needs a connection." | Close the panel |
 | Ask | Microphone permission denied | "Mic is off. Type your question; the answer will appear as text." | Typed input (text-only session) |
 | Tool | `draw_scene` sketch invalid, or the sketch request fails | The Ask panel shows "Couldn't draw that." The agent is told through `sendContextualUpdate()` (it doesn't wait for a result, section 8) | The agent answers in words |
 | Tool | `highlight` on an unknown id | Agent told `unknown object "x"` | None needed |
@@ -459,6 +464,7 @@ The developer gets the full error in the server log, tagged with the route, less
   3. `startSession({ conversationToken })` starts the session through `qa/conversation.ts`.
      - That adapter is the only file that imports `@elevenlabs/react`, which also needs a `ConversationProvider` around the lesson page.
      - With `NEXT_PUBLIC_FAKE_APIS=1` the adapter is a scripted fake: it replays canned agent turns and calls the tool handlers directly, so Playwright can test Q&A without a network.
+- **The panel and the machine.** `AskPanel` takes `open` (the player is `asking`), `replay`, the context, the tool handlers (Q4) and three callbacks the page turns into machine events: `onAsk` (`ask`), `onClose` (`closeAsk`) and `onAgentDisconnected` (`agentDisconnected`, when the session drops with an error). The panel shows the Ask messages of section 7 itself, so the page doesn't show the machine's "Q&A ended unexpectedly." notice again. A session the agent ends normally closes Ask like `closeAsk`, with no message.
 - **Typed questions** go through `sendUserMessage(text)` to the same agent.
   - While the learner types, the mic is muted so venue noise doesn't start a turn, and `sendUserActivity()` keeps the agent from talking over them.
   - If mic permission is denied, the session starts text-only and answers appear as text. Spike S2 confirms that text-only answers aren't spoken.
