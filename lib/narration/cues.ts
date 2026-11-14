@@ -94,9 +94,11 @@ export function insertMarkers(text: string, cues: CueOffset[]): string {
 
 /** How far ahead (in alignment entries and in text units) a resync may look. */
 const RESYNC_WINDOW = 64;
+/** Consecutive matches a resync point needs (fewer only at the very end). */
+const RESYNC_RUN = 3;
 
 /**
- * Cue -> ms from the start of the audio. Each cue gets the start time of the
+ * Cue -> whole ms from the start of the audio. Each cue gets the start time of the
  * first non-space character at or after its offset that the walk matched; a
  * cue with no such character (the very end) gets the last character's end time.
  * Throws NoAlignmentError when `alignment` is null or malformed, or nothing
@@ -109,7 +111,8 @@ export function cueTimes(
 ): CueTimes {
   const starts = walkAlignment(text, alignment);
   const a = alignment as Alignment;
-  const endMs = a.character_end_times_seconds.at(-1)! * 1000;
+  // walkAlignment threw unless the arrays are non-empty and the times valid.
+  const endMs = Math.round(a.character_end_times_seconds.at(-1)! * 1000);
 
   const out: CueTimes = {};
   for (const { cue, offset } of cues) {
@@ -167,6 +170,11 @@ function walkAlignment(
   ) {
     return fail("alignment arrays are empty or of different lengths");
   }
+  const validTime = (t: unknown) =>
+    typeof t === "number" && Number.isFinite(t) && t >= 0;
+  if (!startS.every(validTime) || !endS.every(validTime)) {
+    return fail("alignment times are not finite non-negative numbers");
+  }
 
   // Length in text units of the match of entry j at p, or 0.
   const matchAt = (p: number, j: number): number => {
@@ -178,6 +186,21 @@ function walkAlignment(
     return 0;
   };
 
+  // How many entries match in a row from (p, j), up to RESYNC_RUN, and
+  // whether the run reached the end of the text or of the alignment.
+  const runAt = (p: number, j: number) => {
+    let length = 0;
+    while (length < RESYNC_RUN) {
+      if (p >= text.length || j >= chars.length) return { length, toEnd: true };
+      const l = matchAt(p, j);
+      if (l === 0) return { length, toEnd: false };
+      length++;
+      p += l;
+      j++;
+    }
+    return { length, toEnd: false };
+  };
+
   const starts: (number | undefined)[] = new Array(text.length);
   let matched = 0;
   let p = 0;
@@ -185,26 +208,32 @@ function walkAlignment(
   while (p < text.length && j < chars.length) {
     let len = matchAt(p, j);
     if (len === 0) {
-      // Resync: smallest total skip (dp + dj) first, fewer text skips on ties.
       let found = false;
+      // Resync on the nearest pair (smallest dp + dj, fewer text skips on
+      // ties) that starts a run of RESYNC_RUN matches, or that runs to the
+      // end. A one-character match is too weak: "½ of" vs "one half of" would
+      // pair the "o" of "of" with the "o" of "one". If no pair reaches the
+      // run, take the longest run found.
+      let best: { dp: number; dj: number; run: number } | null = null;
       search: for (let d = 1; d <= 2 * RESYNC_WINDOW; d++) {
         for (let dp = 0; dp <= d; dp++) {
           const dj = d - dp;
           if (dp > RESYNC_WINDOW || dj > RESYNC_WINDOW) continue;
           if (p + dp >= text.length || j + dj >= chars.length) continue;
-          const l = matchAt(p + dp, j + dj);
-          if (l > 0) {
-            p += dp;
-            j += dj;
-            len = l;
-            found = true;
-            break search;
-          }
+          const run = runAt(p + dp, j + dj);
+          if (run.length > (best?.run ?? 0)) best = { dp, dj, run: run.length };
+          if (run.length >= RESYNC_RUN || run.toEnd) break search;
         }
+      }
+      if (best) {
+        p += best.dp;
+        j += best.dj;
+        len = matchAt(p, j);
+        found = true;
       }
       if (!found) break;
     }
-    starts[p] = startS[j] * 1000;
+    starts[p] = Math.round(startS[j] * 1000);
     matched++;
     p += len;
     j++;

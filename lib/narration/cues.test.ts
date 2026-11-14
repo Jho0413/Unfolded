@@ -25,7 +25,7 @@ function alignmentOf(chars: string[]): Alignment {
 const byCodePoint = (text: string) => alignmentOf([...text]);
 
 /** Start ms of the entry for the k-th code point (alignmentOf timing). */
-const at = (k: number) => k * 0.1 * 1000;
+const at = (k: number) => Math.round(k * 0.1 * 1000);
 
 function expectNoAlignment(fn: () => unknown) {
   expect(fn).toThrow(NoAlignmentError);
@@ -61,7 +61,7 @@ describe("cue markers become times (ARCH 5.2 table)", () => {
     expect(cues).toEqual([{ cue: "done", offset: text.length }]);
     const alignment = byCodePoint(text);
     expect(cueTimes(text, cues, alignment)).toEqual({
-      done: alignment.character_end_times_seconds.at(-1)! * 1000,
+      done: Math.round(alignment.character_end_times_seconds.at(-1)! * 1000),
     });
   });
 
@@ -108,8 +108,8 @@ describe("cue markers become times (ARCH 5.2 table)", () => {
     const { text, cues } = stripMarkers("one [[a]]two [[b]]three");
     expect(text).toBe("one two three");
     // Dropped "tw" (so `a` falls on "o", the nearest following time) and
-    // added "-" before "three".
-    const chars = [..."one o ", "-", ..."three"];
+    // added "-" inside "three".
+    const chars = [..."one o thr-ee"];
     const alignment = alignmentOf(chars);
     expect(cueTimes(text, cues, alignment)).toEqual({
       a: at(chars.indexOf("o", 1)),
@@ -125,6 +125,17 @@ describe("cue markers become times (ARCH 5.2 table)", () => {
     });
   });
 
+  it("The alignment skips or adds characters (normalisation): resync needs a run of matches, so a spelt-out expansion doesn't pull the cue a word early", () => {
+    const half = [..."one half of milk"];
+    expect(narrationCueTimes("½ [[a]]of milk", alignmentOf(half))).toEqual({
+      a: at(9),
+    });
+    const money = [..."pay five dollars now"];
+    expect(narrationCueTimes("pay $5 [[a]]now", alignmentOf(money))).toEqual({
+      a: at(17),
+    });
+  });
+
   it("alignment is null, or the walk can't match at all: error no alignment", () => {
     const { text, cues } = stripMarkers("hello [[a]]world");
     expectNoAlignment(() => cueTimes(text, cues, null));
@@ -135,6 +146,13 @@ describe("cue markers become times (ARCH 5.2 table)", () => {
       cueTimes(text, cues, {
         characters: ["h"],
         character_start_times_seconds: [0, 1],
+        character_end_times_seconds: [0.1],
+      }),
+    );
+    expectNoAlignment(() =>
+      cueTimes(text, cues, {
+        characters: ["h"],
+        character_start_times_seconds: [Number.NaN],
         character_end_times_seconds: [0.1],
       }),
     );
@@ -268,12 +286,18 @@ describe("properties (fast-check)", () => {
         ({ text, cues }, edits, gaps) => {
           const chars: string[] = [];
           const it = edits[Symbol.iterator]();
+          const glyphs = [...text];
+          let g = 0;
+          const junk = {
+            next: () => ({ value: glyphs[(g += 7) % glyphs.length] }),
+          };
           for (const ch of text) {
             const e = it.next().value;
-            if (e === "add") chars.push("#");
+            // Junk drawn from the text's own glyphs, so resyncs are ambiguous.
+            if (e === "add") chars.push(junk.next().value);
             if (e !== "drop") chars.push(ch);
           }
-          if (chars.filter((c) => c !== "#").length === 0) chars.push(...text);
+          if (chars.length === 0) chars.push(...text);
           let t = 0;
           const startS = chars.map((_, i) => (t += gaps[i % gaps.length]));
           const alignment: Alignment = {
@@ -313,8 +337,13 @@ describe("properties (fast-check)", () => {
           while (q < text.length && text[q] === " ") q++;
           const want =
             q < text.length
-              ? alignment.character_start_times_seconds[entryAt.get(q)!] * 1000
-              : alignment.character_end_times_seconds.at(-1)! * 1000;
+              ? Math.round(
+                  alignment.character_start_times_seconds[entryAt.get(q)!] *
+                    1000,
+                )
+              : Math.round(
+                  alignment.character_end_times_seconds.at(-1)! * 1000,
+                );
           expect(times[c.cue]).toBe(want);
         }
       }),
