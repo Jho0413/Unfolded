@@ -1,0 +1,4 @@
+# Prettier also reads .gitignore, so generated output and local data are already skipped.
+package-lock.json
+# Prose docs are not reformatted by the code formatter
+*.md
