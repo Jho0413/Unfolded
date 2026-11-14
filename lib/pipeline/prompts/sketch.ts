@@ -10,6 +10,7 @@ import {
   BOARD_ACTIONS_PROMPT,
   BOARD_OBJECTS_PROMPT,
 } from "@/lib/pipeline/prompts/board";
+import { retryPromptFor } from "@/lib/pipeline/prompts/retry";
 
 export const SKETCH_SYSTEM_PROMPT = `You draw on a whiteboard while a voice tutor answers a learner's question about a research paper. The tutor says in plain words what to draw; you turn that into a sketch: new objects, and timed actions that show, highlight, move or write on them. The tutor keeps talking while the sketch appears, so there is no narration.
 
@@ -64,6 +65,4 @@ export function sketchContextPrompt({
 }
 
 /** Sent after a rejected sketch, with the validator's messages (ARCHITECTURE.md section 4). */
-export function sketchRetryPrompt(errors: readonly string[]): string {
-  return `That sketch was rejected:\n${errors.map((e) => `- ${e}`).join("\n")}\n\nDraw the whole sketch again, fixing every problem listed.`;
-}
+export const sketchRetryPrompt = retryPromptFor("sketch", "Draw");
