@@ -54,7 +54,8 @@ interface Board {
   copyByKey: Map<string, PartCopy>;
 }
 
-function partKey(t: Target): string {
+/** A part's key, "a:r0", "a:c1" or "a:r0c1"; the renderer uses it to name copies. */
+export function partKey(t: Target): string {
   return `${t.id}:${t.row !== undefined ? `r${t.row}` : ""}${
     t.col !== undefined ? `c${t.col}` : ""
   }`;
