@@ -1,35 +1,22 @@
 // A latex object: a KaTeX formula centred on (x, y), with an optional
 // whole-object highlight. The tex is model output, so it only reaches the page
 // as KaTeX's own escaped HTML (KATEX_OPTIONS: trust off, sizes and macro
-// expansion capped), and tex KaTeX can't parse shows as an error, never a throw.
+// expansion capped), and tex KaTeX can't render shows as an error, never a throw.
 import "katex/dist/katex.min.css";
-import katex from "katex";
 import type { ActiveAction, LatexObject, ObjectState } from "@/shared/scene";
-import { KATEX_OPTIONS } from "@/shared/latex";
+import { renderLatex } from "./katex";
 import {
   HIGHLIGHT,
   INK,
   LATEX_BOX,
+  LATEX_ERROR,
   LATEX_FONT,
+  LATEX_PAD,
   fadeOpacity,
   highlightAttr,
   objectProgress,
   opacityAttr,
 } from "./style";
-
-// The board is redrawn on every animation frame, and a lesson has few
-// formulas, so each tex is rendered once.
-const rendered = new Map<string, string>();
-
-/** KaTeX's HTML for `tex`; tex it can't parse renders as its source, in the error colour. */
-export function latexHtml(tex: string): string {
-  let html = rendered.get(tex);
-  if (html === undefined) {
-    html = katex.renderToString(tex, { ...KATEX_OPTIONS, throwOnError: false });
-    rendered.set(tex, html);
-  }
-  return html;
-}
 
 export function Latex({
   latex,
@@ -44,6 +31,7 @@ export function Latex({
   const opacity = state.visible ? fadeOpacity(active, { id: latex.id }) : 0;
   const hl = state.highlight;
   const hlProgress = objectProgress(active, "highlight", latex.id, hl);
+  const { html } = renderLatex(latex.tex);
   return (
     <g
       data-object-id={latex.id}
@@ -79,7 +67,7 @@ export function Latex({
             style={{
               position: "relative",
               display: "inline-block",
-              padding: "4px 12px",
+              padding: `${LATEX_PAD.y}px ${LATEX_PAD.x}px`,
               fontSize: LATEX_FONT,
               color: INK,
             }}
@@ -97,10 +85,20 @@ export function Latex({
                 }}
               />
             )}
-            <span
-              style={{ position: "relative" }}
-              dangerouslySetInnerHTML={{ __html: latexHtml(latex.tex) }}
-            />
+            {html !== undefined ? (
+              <span
+                style={{ position: "relative" }}
+                dangerouslySetInnerHTML={{ __html: html }}
+              />
+            ) : (
+              // KaTeX failed outright: the source as plain text, escaped by React.
+              <span
+                className="katex-error"
+                style={{ position: "relative", color: LATEX_ERROR }}
+              >
+                {latex.tex}
+              </span>
+            )}
           </span>
         </div>
       </foreignObject>
