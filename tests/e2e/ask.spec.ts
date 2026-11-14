@@ -132,7 +132,9 @@ test.describe("Ask with the fake conversation", () => {
     const last = await page.evaluate(() =>
       window.__qaFake?.contextUpdates.at(-1),
     );
-    expect(last).toContain("3. Attention (current step)");
+    expect(last).toContain("1. Matrices (current step)");
+    expect(last).toContain("3. Attention (next, after this question)");
+    expect(last).toContain("Objects on the board (ids for highlight): a");
     expect(last).toContain("- go to step 3");
     await page.getByRole("button", { name: "Close" }).click();
     await expect(state(page)).toHaveAttribute("data-state", "loading");
@@ -160,6 +162,21 @@ test.describe("Ask messages (ARCHITECTURE.md section 7)", () => {
     await expect(state(page)).toHaveAttribute("data-state", "paused");
     // Ask again clears it.
     await askAndConnect(page);
+    await expect(notice(page)).toHaveCount(0);
+  });
+
+  test("the agent ends the session normally: back to the previous state, no message", async ({
+    page,
+  }) => {
+    await open(page);
+    await toPlaying(page);
+    await askAndConnect(page);
+    await page.evaluate(() => window.__qaFake?.hangUp());
+    await expect(state(page)).toHaveAttribute("data-state", "paused");
+    await expect(page.getByTestId("ask-panel")).toHaveAttribute(
+      "data-phase",
+      "idle",
+    );
     await expect(notice(page)).toHaveCount(0);
   });
 

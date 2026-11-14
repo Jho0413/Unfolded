@@ -100,6 +100,14 @@ describe("FakeConversation", () => {
     expect(cb.onDisconnect.mock.calls).toEqual([["error"], ["user"]]);
   });
 
+  it("reports hangUp as agent", async () => {
+    const { fake, cb } = setup();
+    await fake.start({ conversationToken: "t", textOnly: false });
+    fake.hangUp();
+    expect(cb.onDisconnect.mock.calls).toEqual([["agent"]]);
+    expect(fake.status).toBe("disconnected");
+  });
+
   it("sends no answer after the session drops mid-question", async () => {
     const { fake, messages } = setup();
     await fake.start({ conversationToken: "t", textOnly: false });

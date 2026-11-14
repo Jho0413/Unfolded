@@ -6,6 +6,7 @@ import type { ClientToolName } from "@/shared/tools";
 import { callTool } from "./callTool";
 import type {
   ConversationCallbacks,
+  DisconnectReason,
   QaMessage,
   QaTools,
   StartOptions,
@@ -126,7 +127,12 @@ export class FakeConversation {
     this.micMuted = this.textOnly || muted;
   }
 
-  private close(reason: "user" | "error"): void {
+  /** Test hook: the agent ends the session normally. */
+  hangUp(): void {
+    this.close("agent");
+  }
+
+  private close(reason: DisconnectReason): void {
     if (this.status !== "connected") return;
     this.status = "disconnected";
     this.callbacks.onDisconnect?.(reason);
