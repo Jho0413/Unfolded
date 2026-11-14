@@ -108,7 +108,7 @@ test.describe("Ask with the fake conversation", () => {
       (await page.evaluate(() => window.__qaFake?.contextUpdates)) ?? [];
     expect(ctx).toHaveLength(1);
     expect(ctx[0]).toContain("1. Matrices (current step)");
-    expect(ctx[0]).toContain("Objects on the board (ids for highlight): a");
+    expect(ctx[0]).toContain("Objects on the board (ids for highlight): q, a");
     expect(ctx[0]).toContain("Narration of step 1 so far");
     expect(await page.evaluate(() => window.__qaFake?.micMuted)).toBe(false);
     await page.getByLabel("Type your question").pressSequentially("Why");
@@ -125,7 +125,9 @@ test.describe("Ask with the fake conversation", () => {
     await toPlaying(page);
     await askAndConnect(page);
     await typeQuestion(page, "go to step 3");
-    await expect(page.getByTestId("tool-log")).toContainText("go_to_step 3");
+    await expect(page.getByTestId("tool-log")).toContainText(
+      'go_to_step {"step":3} -> ok',
+    );
     await expect
       .poll(() => page.evaluate(() => window.__qaFake?.contextUpdates.length))
       .toBe(2);
@@ -134,21 +136,46 @@ test.describe("Ask with the fake conversation", () => {
     );
     expect(last).toContain("1. Matrices (current step)");
     expect(last).toContain("3. Attention (next, after this question)");
-    expect(last).toContain("Objects on the board (ids for highlight): a");
+    expect(last).toContain("Objects on the board (ids for highlight): q, a");
     expect(last).toContain("- go to step 3");
     await page.getByRole("button", { name: "Close" }).click();
     await expect(state(page)).toHaveAttribute("data-state", "loading");
     await expect(state(page)).toHaveAttribute("data-step", "2");
   });
+});
 
-  test("the fake calls the tool handlers", async ({ page }) => {
+test.describe("client tools on /dev/ask (ROADMAP Q4)", () => {
+  test("highlight: ok, drawn on the board, thrown away when Ask closes", async ({
+    page,
+  }) => {
     await open(page);
     await toPlaying(page);
     await askAndConnect(page);
     await typeQuestion(page, "show me the first row");
     await expect(page.getByTestId("tool-log")).toContainText(
-      'highlight {"target_id":"q","row":0}',
+      'highlight {"target_id":"q","row":0} -> ok',
     );
+    await expect(
+      page.getByTestId("highlights").locator('[data-target="q,0,"]'),
+    ).toHaveCount(1);
+    await page.getByRole("button", { name: "Close" }).click();
+    await expect(page.getByTestId("highlights").locator("li")).toHaveCount(0);
+  });
+
+  test('go_to_step outside the plan: "no step n", still asking', async ({
+    page,
+  }) => {
+    await open(page);
+    await toPlaying(page);
+    await askAndConnect(page);
+    await typeQuestion(page, "go to step 9");
+    await expect(page.getByTestId("tool-log")).toContainText(
+      'go_to_step {"step":9} -> no step 9',
+    );
+    await expect(state(page)).toHaveAttribute("data-state", "asking");
+    await page.getByRole("button", { name: "Close" }).click();
+    await expect(state(page)).toHaveAttribute("data-state", "paused");
+    await expect(state(page)).toHaveAttribute("data-step", "0");
   });
 });
 
