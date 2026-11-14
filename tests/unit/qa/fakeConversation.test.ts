@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   FAKE_CONNECT_FAIL_TOKEN,
+  FAKE_CONNECT_HANG_TOKEN,
   FAKE_GREETING,
   FakeConversation,
 } from "@/qa/fakeConversation";
@@ -31,16 +32,36 @@ describe("FakeConversation", () => {
     expect(messages).toEqual([{ role: "agent", text: FAKE_GREETING }]);
   });
 
-  it("fails to connect with the fail token", async () => {
+  it("rejects with the fail token, like the SDK (no onError, no onDisconnect)", async () => {
     const { fake, cb } = setup();
-    await fake.start({
-      transport: "webrtc",
-      conversationToken: FAKE_CONNECT_FAIL_TOKEN,
-      textOnly: false,
-    });
+    await expect(
+      fake.start({
+        transport: "webrtc",
+        conversationToken: FAKE_CONNECT_FAIL_TOKEN,
+        textOnly: false,
+      }),
+    ).rejects.toThrow();
     expect(cb.onConnect).not.toHaveBeenCalled();
-    expect(cb.onError).toHaveBeenCalledOnce();
-    expect(cb.onDisconnect).toHaveBeenCalledWith("error");
+    expect(cb.onError).not.toHaveBeenCalled();
+    expect(cb.onDisconnect).not.toHaveBeenCalled();
+  });
+
+  it("a hung start doesn't block the next one", async () => {
+    const { fake, cb } = setup();
+    void fake.start({
+      transport: "webrtc",
+      conversationToken: FAKE_CONNECT_HANG_TOKEN,
+      textOnly: true,
+    });
+    fake.end();
+    await fake.start({
+      transport: "websocket",
+      signedUrl: "wss://signed",
+      textOnly: true,
+    });
+    expect(cb.onConnect).toHaveBeenCalledOnce();
+    expect(fake.transport).toBe("websocket");
+    expect(fake.starts).toEqual(["webrtc", "websocket"]);
   });
 
   it("replays a canned answer to a typed question", async () => {
@@ -127,7 +148,7 @@ describe("FakeConversation", () => {
     expect(fake.micMuted).toBe(true);
   });
 
-  it("reports end as user and drop as error, once", async () => {
+  it("reports a drop as error, once; our own end() reports nothing", async () => {
     const { fake, cb } = setup();
     await fake.start({
       transport: "webrtc",
@@ -143,7 +164,8 @@ describe("FakeConversation", () => {
       textOnly: false,
     });
     fake.end();
-    expect(cb.onDisconnect.mock.calls).toEqual([["error"], ["user"]]);
+    expect(cb.onDisconnect.mock.calls).toEqual([["error"]]);
+    expect(fake.status).toBe("disconnected");
   });
 
   it("reports hangUp as agent", async () => {

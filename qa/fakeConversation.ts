@@ -13,12 +13,12 @@ import type {
   StartOptions,
 } from "./types";
 
-/** A token that makes a WebRTC `start` fail as if WebRTC were blocked (tests). */
+/** A token whose WebRTC `start` rejects, as the SDK's does when WebRTC is blocked (tests). */
 export const FAKE_CONNECT_FAIL_TOKEN = "fake-connect-fail";
-/** A signed URL that makes a websocket `start` fail too (tests). */
+/** A signed URL whose websocket `start` rejects too (tests). */
 export const FAKE_CONNECT_FAIL_SIGNED_URL = "wss://fake-connect-fail";
-/** A token whose `start` rejects instead of reporting an error (tests). */
-export const FAKE_START_REJECT_TOKEN = "fake-start-reject";
+/** A token whose WebRTC `start` never settles, as on venue Wi-Fi that drops it (tests). */
+export const FAKE_CONNECT_HANG_TOKEN = "fake-connect-hang";
 
 /** One canned agent turn: the first whose `match` fits the question answers it. */
 export type FakeTurn = {
@@ -73,7 +73,7 @@ export class FakeConversation {
   readonly transcript: QaMessage[] = [];
   readonly toolCalls: FakeToolCall[] = [];
   userActivity = 0;
-  /** Bumped by end(), so a start still in flight doesn't connect. */
+  /** Bumped by start() and end(), so a superseded start doesn't connect. */
   private session = 0;
 
   constructor(
@@ -88,26 +88,27 @@ export class FakeConversation {
     this.tools = tools;
   }
 
+  /**
+   * Like the real adapter (qa/sdkSessions.ts): a start supersedes any earlier session, pending
+   * or live, without waiting for it; it resolves once connected and rejects when the connection
+   * fails (the SDK reports no onError or onDisconnect then).
+   */
   async start(options: StartOptions): Promise<void> {
-    if (this.status === "connected") return;
+    this.end();
     const session = ++this.session;
     this.starts.push(options.transport);
-    await tick();
-    if (session !== this.session) return;
     if (
       options.transport === "webrtc" &&
-      options.conversationToken === FAKE_START_REJECT_TOKEN
+      options.conversationToken === FAKE_CONNECT_HANG_TOKEN
     )
-      throw new Error("fake: startSession rejected");
+      return new Promise<void>(() => {});
+    await tick();
+    if (session !== this.session) return;
     const blocked =
       options.transport === "webrtc"
         ? options.conversationToken === FAKE_CONNECT_FAIL_TOKEN
         : options.signedUrl === FAKE_CONNECT_FAIL_SIGNED_URL;
-    if (blocked) {
-      this.callbacks.onError?.("Could not connect to the agent");
-      this.callbacks.onDisconnect?.("error");
-      return;
-    }
+    if (blocked) throw new Error("fake: could not connect to the agent");
     this.status = "connected";
     this.transport = options.transport;
     const { textOnly } = options;
@@ -117,9 +118,10 @@ export class FakeConversation {
     this.emit({ role: "agent", text: FAKE_GREETING });
   }
 
+  /** Ends the session, live or connecting; like the real adapter, its callbacks stop. */
   end(): void {
     this.session++;
-    this.close("user");
+    this.status = "disconnected";
   }
 
   /** Test hook: the session drops, as a network failure would. */
