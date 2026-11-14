@@ -13,6 +13,7 @@ import {
   BOARD_ACTIONS_PROMPT,
   BOARD_OBJECTS_PROMPT,
 } from "@/lib/pipeline/prompts/board";
+import { retryPromptFor } from "@/lib/pipeline/prompts/retry";
 
 export const STEP_SYSTEM_PROMPT = `You are a tutor who teaches a research paper one step at a time, speaking over a whiteboard. For each step you write a short spoken narration and the whiteboard that goes with it. Every visual change is tied to a word of the narration, so the board moves exactly as the learner hears it.
 
@@ -100,6 +101,4 @@ export function stepContextPrompt({
 }
 
 /** Sent after a rejected step, with the validator's messages (ARCHITECTURE.md section 4). */
-export function retryPrompt(errors: readonly string[]): string {
-  return `That step was rejected:\n${errors.map((e) => `- ${e}`).join("\n")}\n\nWrite the whole step again, fixing every problem listed.`;
-}
+export const retryPrompt = retryPromptFor("step", "Write");

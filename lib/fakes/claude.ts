@@ -5,7 +5,7 @@ import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
 import { config } from "@/lib/config";
 import { readFixture } from "@/lib/fakes";
-import type { ClaudeMessages } from "@/lib/pipeline/generate";
+import type { ClaudeFiles, ClaudeMessages } from "@/lib/pipeline/generate";
 
 /** A reply the fake gives: a message, or an error it throws (as the SDK would). */
 export type FakeReply = Anthropic.Message | Error;
@@ -81,6 +81,33 @@ export function fakeMessage(
       server_tool_use: null,
       service_tier: "standard",
       speed: null,
+    },
+  };
+}
+
+export interface FakeFiles extends ClaudeFiles {
+  /** Every upload, in order, with its request options. */
+  readonly calls: {
+    params: Anthropic.FileUploadParams;
+    options?: Anthropic.RequestOptions;
+  }[];
+}
+
+/**
+ * A fake Files API: every upload gets `reply` (an error is thrown, as the SDK would), or by
+ * default the recorded upload response `fixture` (config.plan.uploadFixture).
+ */
+export function fakeFiles(
+  fixture: string = config.plan.uploadFixture,
+  reply?: Anthropic.FileMetadata | Error,
+): FakeFiles {
+  const calls: FakeFiles["calls"] = [];
+  return {
+    calls,
+    async upload(params, options) {
+      calls.push({ params, options });
+      if (reply instanceof Error) throw reply;
+      return reply ?? readFixture<Anthropic.FileMetadata>(fixture);
     },
   };
 }

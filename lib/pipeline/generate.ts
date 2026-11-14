@@ -6,7 +6,7 @@ import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import type { ValidationResult } from "@/shared/validate";
 import { getEnv } from "@/lib/env";
-import { fakeClaude } from "@/lib/fakes/claude";
+import { fakeClaude, fakeFiles } from "@/lib/fakes/claude";
 
 /**
  * The part of the SDK client the generators use, so tests and FAKE_APIS=1 can pass a fake.
@@ -150,20 +150,35 @@ async function attempt<T>(
   return { result: gen.validate(json), content: message.content };
 }
 
-/**
- * Real Claude, or the recorded response `fixture` (in lib/fakes/fixtures/) when FAKE_APIS=1.
- * Replay mode serves saved runs and never calls it.
- */
-export function claudeMessages(fixture: string): ClaudeMessages {
+/** The part of the SDK client that uploads the paper (Files API), so tests can pass a fake. */
+export interface ClaudeFiles {
+  upload(
+    params: Anthropic.FileUploadParams,
+    options?: Anthropic.RequestOptions,
+  ): Promise<Anthropic.FileMetadata>;
+}
+
+/** The real client in real mode; undefined in fake mode. Replay mode never calls Claude. */
+function realClient(): Anthropic | undefined {
   const env = getEnv();
   switch (env.mode) {
     case "real":
       // A key passed in code is the client's only credential: the SDK then reads no other
       // env var or login profile.
-      return new Anthropic({ apiKey: env.ANTHROPIC_API_KEY }).messages;
+      return new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
     case "fake":
-      return fakeClaude(undefined, fixture);
+      return undefined;
     case "replay":
       throw new Error("replay mode serves saved runs and never calls Claude");
   }
+}
+
+/** Real Claude, or the recorded response `fixture` (in lib/fakes/fixtures/) when FAKE_APIS=1. */
+export function claudeMessages(fixture: string): ClaudeMessages {
+  return realClient()?.messages ?? fakeClaude(undefined, fixture);
+}
+
+/** The real Files API, or the recorded upload `fixture` when FAKE_APIS=1. */
+export function claudeFiles(fixture: string): ClaudeFiles {
+  return realClient()?.files ?? fakeFiles(fixture);
 }
