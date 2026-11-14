@@ -5,6 +5,7 @@
 import type { CueTimes } from "@/shared/lesson";
 import type { CuedAction } from "@/shared/scene";
 import {
+  MESSAGES,
   type PlayerContext,
   type PlayerEvent,
   type PlayerState,
@@ -47,16 +48,18 @@ export function playRejectionEvent(error: unknown): PlayerEvent | null {
 }
 
 /**
- * Whether a key press is the Space play/pause shortcut. Not while typing or
- * on a button (Space already presses a focused button), and not on key
- * repeat, so holding Space doesn't flicker.
+ * Whether a key press is the Space play/pause shortcut. Not with a modifier
+ * (Shift+Space and friends belong to the browser), not on key repeat (so
+ * holding Space doesn't flicker), and not on an interactive element: a text
+ * field types the space, and Space already presses a focused button or link.
  */
 export function isPlayPauseKey(key: {
   key: string;
   repeat: boolean;
+  modified: boolean;
   target: { tagName: string; isContentEditable: boolean } | null;
 }): boolean {
-  if (key.key !== " " || key.repeat) return false;
+  if (key.key !== " " || key.repeat || key.modified) return false;
   if (key.target === null) return true;
   if (key.target.isContentEditable) return false;
   return !INTERACTIVE_TAGS.has(key.target.tagName.toUpperCase());
@@ -92,4 +95,24 @@ export function lastFiredCue(
     }
   }
   return last;
+}
+
+/** The line under the board: one message at a time, the most urgent first. */
+export type PlayerStatus = {
+  /** `error` is announced at once (an alert); the others politely. */
+  tone: "error" | "notice" | "info";
+  text: string;
+} | null;
+
+export function statusFor(
+  state: PlayerState,
+  notice: string | null,
+): PlayerStatus {
+  if (state.kind === "failed") return { tone: "error", text: state.message };
+  if (notice !== null) return { tone: "notice", text: notice };
+  if (state.kind === "loading")
+    return { tone: "info", text: MESSAGES.loading(state.step) };
+  if (state.kind === "finished")
+    return { tone: "info", text: MESSAGES.finished };
+  return null;
 }

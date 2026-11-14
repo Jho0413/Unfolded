@@ -8,9 +8,10 @@ import {
   lastFiredCue,
   playPauseEvent,
   playRejectionEvent,
+  statusFor,
   stepOnScreen,
 } from "@/player/controls";
-import type { PlayerState } from "@/player/machine";
+import { MESSAGES, type PlayerState } from "@/player/machine";
 import type { CuedAction } from "@/shared/scene";
 
 const ctx = { stepCount: 2 };
@@ -96,45 +97,62 @@ describe("isPlayPauseKey", () => {
   const cases: [string, Parameters<typeof isPlayPauseKey>[0], boolean][] = [
     [
       "Space on the page",
-      { key: " ", repeat: false, target: on("BODY") },
+      { key: " ", repeat: false, modified: false, target: on("BODY") },
       true,
     ],
-    ["Space with no target", { key: " ", repeat: false, target: null }, true],
+    [
+      "Space with no target",
+      { key: " ", repeat: false, modified: false, target: null },
+      true,
+    ],
     [
       "Space on the board",
-      { key: " ", repeat: false, target: on("svg") },
+      { key: " ", repeat: false, modified: false, target: on("svg") },
       true,
     ],
     [
       "a held Space (repeat)",
-      { key: " ", repeat: true, target: on("BODY") },
+      { key: " ", repeat: true, modified: false, target: on("BODY") },
       false,
     ],
-    ["another key", { key: "a", repeat: false, target: on("BODY") }, false],
+    [
+      "Shift+Space (or another modifier)",
+      { key: " ", repeat: false, modified: true, target: on("BODY") },
+      false,
+    ],
+    [
+      "another key",
+      { key: "a", repeat: false, modified: false, target: on("BODY") },
+      false,
+    ],
     [
       "Space in a text input",
-      { key: " ", repeat: false, target: on("INPUT") },
+      { key: " ", repeat: false, modified: false, target: on("INPUT") },
       false,
     ],
     [
       "Space in a textarea",
-      { key: " ", repeat: false, target: on("TEXTAREA") },
+      { key: " ", repeat: false, modified: false, target: on("TEXTAREA") },
       false,
     ],
     [
       "Space in a select",
-      { key: " ", repeat: false, target: on("SELECT") },
+      { key: " ", repeat: false, modified: false, target: on("SELECT") },
       false,
     ],
     [
       "Space on a button (it presses the button)",
-      { key: " ", repeat: false, target: on("BUTTON") },
+      { key: " ", repeat: false, modified: false, target: on("BUTTON") },
       false,
     ],
-    ["Space on a link", { key: " ", repeat: false, target: on("A") }, false],
+    [
+      "Space on a link",
+      { key: " ", repeat: false, modified: false, target: on("A") },
+      false,
+    ],
     [
       "Space in contenteditable",
-      { key: " ", repeat: false, target: on("DIV", true) },
+      { key: " ", repeat: false, modified: false, target: on("DIV", true) },
       false,
     ],
   ];
@@ -185,5 +203,39 @@ describe("lastFiredCue", () => {
   });
   it("no actions → none", () => {
     expect(lastFiredCue([], cueTimes, 5000)).toBeNull();
+  });
+});
+
+describe("statusFor (the line under the board)", () => {
+  it("failed → the failure message, as an error", () => {
+    expect(
+      statusFor({ kind: "failed", step: 0, message: "server words" }, null),
+    ).toEqual({ tone: "error", text: "server words" });
+  });
+  it("a notice (Press play to start) → the notice", () => {
+    expect(statusFor({ kind: "paused", step: 0 }, MESSAGES.pressPlay)).toEqual({
+      tone: "notice",
+      text: MESSAGES.pressPlay,
+    });
+  });
+  it("a failure wins over a notice", () => {
+    expect(
+      statusFor({ kind: "failed", step: 0, message: "x" }, "notice")?.tone,
+    ).toBe("error");
+  });
+  it("loading → which step is loading (1-based)", () => {
+    expect(
+      statusFor({ kind: "loading", step: 1, autoplay: true }, null),
+    ).toEqual({ tone: "info", text: "Loading step 2…" });
+  });
+  it("finished → the end of the lesson", () => {
+    expect(statusFor({ kind: "finished", step: 1 }, null)).toEqual({
+      tone: "info",
+      text: MESSAGES.finished,
+    });
+  });
+  it("playing, paused or stepEnded with no notice → nothing", () => {
+    for (const kind of ["playing", "paused", "stepEnded"] as const)
+      expect(statusFor({ kind, step: 0 }, null)).toBeNull();
   });
 });

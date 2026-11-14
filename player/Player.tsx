@@ -4,13 +4,12 @@
 // machine for tests. `debug` adds an overlay with the clock and the last cue
 // (pages turn it on with `?debug=1`).
 import type { CSSProperties } from "react";
-import { MUTED } from "./primitives/style";
+import { CANVAS } from "@/shared/scene";
+import { playPauseEvent, statusFor } from "./controls";
+import { FRAME_BORDER, MUTED, PAGE_BG } from "./primitives/style";
+import type { FetchStep } from "./stepLoader";
+import { type Player as PlayerApi, usePlayer } from "./usePlayer";
 import { Whiteboard } from "./Whiteboard";
-import {
-  type FetchStep,
-  type Player as PlayerApi,
-  usePlayer,
-} from "./usePlayer";
 
 export function Player({
   stepCount,
@@ -48,77 +47,46 @@ export function Player({
   );
 }
 
+const STATUS_TEST_ID = {
+  error: "player-error",
+  notice: "player-notice",
+  info: "player-status",
+} as const;
+
 function Status({ player }: { player: PlayerApi }) {
-  const { state } = player;
-  if (state.kind === "failed")
-    return (
-      <p role="alert" data-testid="player-error" style={STATUS}>
-        {state.message}
-      </p>
-    );
-  if (player.notice !== null)
-    return (
-      <p role="status" data-testid="player-notice" style={STATUS}>
-        {player.notice}
-      </p>
-    );
-  if (state.kind === "loading")
-    return (
-      <p role="status" data-testid="player-status" style={STATUS}>
-        Loading step {state.step + 1}…
-      </p>
-    );
-  if (state.kind === "finished")
-    return (
-      <p role="status" data-testid="player-status" style={STATUS}>
-        End of the lesson.
-      </p>
-    );
-  return null;
+  const status = statusFor(player.state, player.notice);
+  if (status === null) return null;
+  return (
+    <p
+      role={status.tone === "error" ? "alert" : "status"}
+      data-testid={STATUS_TEST_ID[status.tone]}
+      style={STATUS}
+    >
+      {status.text}
+    </p>
+  );
 }
 
 function Controls({ player }: { player: PlayerApi }) {
   const { state, can, send } = player;
-  const playPause =
-    state.kind === "playing"
-      ? { label: "Pause", event: { type: "pause" } as const }
-      : { label: "Play", event: { type: "resume" } as const };
+  const playPause = playPauseEvent(state);
+  const button = (label: string, event: Parameters<typeof send>[0]) => (
+    <button
+      type="button"
+      onClick={() => send(event)}
+      disabled={!can(event)}
+      aria-keyshortcuts={event === playPause ? "Space" : undefined}
+    >
+      {label}
+    </button>
+  );
   return (
     <div role="toolbar" aria-label="Player controls" style={TOOLBAR}>
-      <button
-        type="button"
-        onClick={() => send({ type: "back" })}
-        disabled={!can({ type: "back" })}
-      >
-        Back
-      </button>
-      <button
-        type="button"
-        onClick={() => send({ type: "replay" })}
-        disabled={!can({ type: "replay" })}
-      >
-        Replay
-      </button>
-      <button
-        type="button"
-        aria-keyshortcuts="Space"
-        onClick={() => send(playPause.event)}
-        disabled={!can(playPause.event)}
-      >
-        {playPause.label}
-      </button>
-      <button
-        type="button"
-        onClick={() => send({ type: "next" })}
-        disabled={!can({ type: "next" })}
-      >
-        Next
-      </button>
-      {state.kind === "failed" && (
-        <button type="button" onClick={() => send({ type: "retry" })}>
-          Retry
-        </button>
-      )}
+      {button("Back", { type: "back" })}
+      {button("Replay", { type: "replay" })}
+      {button(playPause.type === "pause" ? "Pause" : "Play", playPause)}
+      {button("Next", { type: "next" })}
+      {state.kind === "failed" && button("Retry", { type: "retry" })}
     </div>
   );
 }
@@ -147,8 +115,8 @@ function DebugOverlay({
 
 const BOARD_FRAME: CSSProperties = {
   position: "relative",
-  maxWidth: 1600,
-  border: "1px solid #e2e8f0",
+  maxWidth: CANVAS.w,
+  border: `1px solid ${FRAME_BORDER}`,
   borderRadius: 8,
   overflow: "hidden",
 };
@@ -163,7 +131,7 @@ const DEBUG: CSSProperties = {
   right: 8,
   padding: "6px 10px",
   background: "rgba(15, 23, 42, 0.8)",
-  color: "#f8fafc",
+  color: PAGE_BG,
   font: "13px ui-monospace, monospace",
   borderRadius: 6,
   pointerEvents: "none",
