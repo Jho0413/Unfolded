@@ -1,49 +1,52 @@
-// Prefetch (ROADMAP L2, ARCHITECTURE.md section 5.1): while step n plays, step n + 1 is already
-// being requested, so pressing Next on it makes no new request and doesn't wait for generation.
+// Prefetch (ROADMAP L2, ARCHITECTURE.md section 5.1): once step n is on screen, step n + 1 is
+// requested in the background, so pressing Next on it makes no new step request and doesn't
+// wait for its generation.
 //
-// Wraps a FetchStep. A request for step n shares any request for n already made (prefetched or
-// in flight); once step n arrives, step n + 1 is requested in the background if the plan has
-// it. A step that arrived is kept, so going back to it costs nothing. A failed request (an
-// error reply or a rejection) is forgotten, so Retry, or reaching that step, asks again.
-// No React and no browser APIs.
+// Wraps a FetchStep. `prefetch(n)` requests step n ahead of time (the page calls it with
+// n + 1 when the player takes step n). The next request for step n gets that reply, or joins
+// it while it's in flight, and it is then handed over, not kept: any later request for n
+// (Retry, Back) asks the server again, which serves the saved step. A prefetch that fails is
+// forgotten, so reaching the step asks again. No React and no browser APIs.
 import type { FetchStep } from "./stepLoader";
 
 type Reply = Awaited<ReturnType<FetchStep>>;
 
-export function prefetchingFetcher(
+export interface Prefetcher {
+  /** The player's step request: a prefetched reply if there is one, otherwise a new request. */
+  fetchStep: FetchStep;
+  /** Requests step n ahead; nothing past the plan's last step, or already prefetched. */
+  prefetch: (n: number) => void;
+}
+
+export function createPrefetcher(
   fetchStep: FetchStep,
   stepCount: number,
   log: Pick<Console, "info"> = console,
-): FetchStep {
-  const requests = new Map<number, Promise<Reply>>();
+): Prefetcher {
+  const ahead = new Map<number, Promise<Reply>>();
 
-  function request(n: number): Promise<Reply> {
-    const known = requests.get(n);
-    if (known !== undefined) return known;
-    const reply = fetchStep(n).then(
-      (r) => {
-        if ("error" in r) requests.delete(n);
-        return r;
-      },
-      (error: unknown) => {
-        requests.delete(n);
-        throw error;
-      },
-    );
-    requests.set(n, reply);
-    return reply;
+  function forget(n: number, reply: Promise<Reply>) {
+    if (ahead.get(n) === reply) ahead.delete(n);
   }
 
-  function prefetch(n: number): void {
-    if (n >= stepCount || requests.has(n)) return;
-    log.info(`[player] prefetching step ${n}`);
-    // Its failure is forgotten in `request`; the player asks again when it reaches the step.
-    request(n).catch(() => {});
-  }
-
-  return async (n) => {
-    const reply = await request(n);
-    if (!("error" in reply)) prefetch(n + 1);
-    return reply;
+  return {
+    fetchStep: (n) => {
+      const reply = ahead.get(n);
+      if (reply === undefined) return fetchStep(n);
+      ahead.delete(n);
+      return reply;
+    },
+    prefetch: (n) => {
+      if (n < 0 || n >= stepCount || ahead.has(n)) return;
+      log.info(`[player] prefetching step ${n}`);
+      const reply = fetchStep(n);
+      ahead.set(n, reply);
+      reply.then(
+        (r) => {
+          if ("error" in r) forget(n, reply);
+        },
+        () => forget(n, reply),
+      );
+    },
   };
 }

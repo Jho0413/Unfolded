@@ -17,19 +17,22 @@ import { Whiteboard } from "./Whiteboard";
 export function Player({
   stepCount,
   fetchStep,
+  onStepReady,
   debug = false,
   renderAsk,
   renderBoard,
 }: {
   stepCount: number;
   fetchStep: FetchStep;
+  /** The player took step n (script and audio arrived): the lesson page prefetches n + 1. */
+  onStepReady?: (n: number) => void;
   debug?: boolean;
   /** The Ask panel, rendered under the controls (ROADMAP Q3). */
   renderAsk?: (player: PlayerApi) => ReactNode;
   /** The board; the default is `<Whiteboard state={player.board} />`. */
   renderBoard?: (player: PlayerApi) => ReactNode;
 }) {
-  const player = usePlayer({ stepCount, fetchStep });
+  const player = usePlayer({ stepCount, fetchStep, onStepReady });
   const { state } = player;
   return (
     <section

@@ -19,7 +19,7 @@ export function stepRouteFetcher(
   log: Pick<Console, "error"> = console,
 ): FetchStep {
   return async (n) => {
-    const url = `/api/lessons/${lessonId}/steps/${n}`;
+    const url = `/api/lessons/${encodeURIComponent(lessonId)}/steps/${n}`;
     const res = await fetchFn(url, { method: "POST" });
     const body: unknown = await res.json().catch(() => undefined);
     if (!res.ok) {

@@ -1,6 +1,6 @@
 // The lesson page on the step route (ROADMAP L2, L3): a freshly uploaded lesson's steps are
 // generated through POST /api/lessons/<id>/steps/<n> (the server's fake Claude and TTS), step
-// n + 1 is prefetched while step n plays, and a step the route can't give shows its
+// n + 1 is prefetched once step n is on screen, and a step the route can't give shows its
 // ARCHITECTURE.md section 7 message in the player's failed state, where Retry asks again.
 // Failing replies are browser-side fakes (page.route): the server's own failures are covered
 // by the route's unit tests. Replay mode (REPLAY_RUN) is in lesson-replay.spec.ts.
@@ -91,7 +91,7 @@ test("a fresh lesson's steps are generated through the step route and play", asy
   );
 });
 
-test("L2: step 1 is prefetched while step 0 plays, and Next on it makes no new request", async ({
+test("L2: step 1 is prefetched once step 0 is on screen, and Next on it makes no new request", async ({
   page,
 }) => {
   await using run = await freshLesson("e2e-live-prefetch", 3);
@@ -217,8 +217,11 @@ test(`L3 Player: the step's audio fails to load -> "${MESSAGES.audioFailed}", Re
   );
   await control(page, "Retry").click();
   await expectPlays(page, 0);
-  // The step itself arrived the first time: Retry reuses it instead of asking the route.
-  expect(requests.filter((r) => r === "POST 0")).toHaveLength(1);
+  // Retry is a new request; the route serves the step it saved the first time.
+  expect(requests.filter((r) => r === "POST 0")).toHaveLength(2);
+  expect(await readdir(path.join(RUNS_DIR, run.lessonId))).not.toContain(
+    "step-0.v2.json",
+  );
 });
 
 test("L3: a prefetch that failed is asked again when Next reaches the step", async ({
