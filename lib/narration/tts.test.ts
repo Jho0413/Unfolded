@@ -114,10 +114,21 @@ describe("real mode", () => {
     expect((err as Error).message).toBe("no alignment");
   });
 
-  it("a malformed alignment counts as none", async () => {
-    stubFetch(async () =>
-      json({ ...fixture, alignment: { characters: "nope" } }),
-    );
+  it("a malformed alignment fails with `no alignment`, keeping the raw value", async () => {
+    const bad = { characters: "nope" };
+    stubFetch(async () => json({ ...fixture, alignment: bad }));
+    const err = (await synthesize("x", real).catch(
+      (e: unknown) => e,
+    )) as NoAlignmentError;
+    expect(err).toBeInstanceOf(NoAlignmentError);
+    expect(err.message).toBe("no alignment");
+    expect(err.reason).toBe("alignment is malformed");
+    expect(err.alignment).toEqual(bad);
+    expect(err.text).toBe("x");
+  });
+
+  it("a missing alignment counts as none (narrate then fails)", async () => {
+    stubFetch(async () => json({ audio_base64: fixture.audio_base64 }));
     expect((await synthesize("x", real)).alignment).toBeNull();
   });
 

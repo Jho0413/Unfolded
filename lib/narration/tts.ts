@@ -11,7 +11,12 @@ import type { CueTimes } from "@/shared/lesson";
 import { config } from "@/lib/config";
 import { getEnv, type EnvFor } from "@/lib/env";
 import { readFixture } from "@/lib/fakes";
-import { cueTimes, stripMarkers, type Alignment } from "@/lib/narration/cues";
+import {
+  NoAlignmentError,
+  cueTimes,
+  stripMarkers,
+  type Alignment,
+} from "@/lib/narration/cues";
 
 /** Every mode of Env, where real mode only needs the ElevenLabs keys. */
 export type TtsEnv = EnvFor<"ELEVENLABS_API_KEY" | "ELEVENLABS_VOICE_ID">;
@@ -31,7 +36,7 @@ export class TtsError extends Error {
   }
 }
 
-/** The /with-timestamps body, checked where it enters. A malformed alignment counts as none. */
+/** The /with-timestamps body, checked where it enters. */
 const TtsBody = z.object({
   audio_base64: z.string().min(1),
   alignment: z.unknown().optional(),
@@ -50,7 +55,10 @@ export interface Speech {
   alignment: Alignment | null;
 }
 
-/** TTS with timestamps for `text` (already stripped of markers). Throws TtsError. */
+/**
+ * TTS with timestamps for `text` (already stripped of markers). Throws TtsError, or
+ * NoAlignmentError when the alignment is there but malformed.
+ */
 export async function synthesize(
   text: string,
   env: TtsEnv = getEnv(),
@@ -62,10 +70,18 @@ export async function synthesize(
   const body = TtsBody.safeParse(await requestSpeech(text, env));
   if (!body.success)
     throw new TtsError("provider", "ElevenLabs TTS response has no audio");
-  const alignment = AlignmentShape.safeParse(body.data.alignment);
+  const raw = body.data.alignment;
+  let alignment: Alignment | null = null;
+  if (raw !== null && raw !== undefined) {
+    const parsed = AlignmentShape.safeParse(raw);
+    // Keep the raw value: ARCHITECTURE.md section 5.2 logs the text and the response.
+    if (!parsed.success)
+      throw new NoAlignmentError(text, raw, "alignment is malformed");
+    alignment = parsed.data;
+  }
   return {
     audio: new Uint8Array(Buffer.from(body.data.audio_base64, "base64")),
-    alignment: alignment.success ? alignment.data : null,
+    alignment,
   };
 }
 
@@ -78,7 +94,7 @@ export interface Narrated extends Speech {
 
 /**
  * A step's narration (with [[cue]] markers) -> its audio and cue times. Throws TtsError, or
- * NoAlignmentError when the alignment is missing or doesn't match the text.
+ * NoAlignmentError when the alignment is missing, malformed or doesn't match the text.
  */
 export async function narrate(
   narration: string,
