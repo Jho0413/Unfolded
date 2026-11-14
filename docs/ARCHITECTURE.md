@@ -8,7 +8,7 @@ Any change to a decision, a contract or a state machine in this file goes in the
 
 | Decision | Choice | Why |
 |---|---|---|
-| App | One **Next.js 16 (App Router) + TypeScript** app. The API routes are the backend. | One language. The scene contract is written once and imported by both sides. |
+| App | One **Next.js 16.4 (App Router) + TypeScript** app, on **Node 22** (pinned in `.nvmrc`, matching the laptops). The API routes are the backend. `cacheComponents` is off (create-next-app turns it on; we don't use it), and `next.config` sets `agentRules: false` so `next dev` doesn't rewrite `AGENTS.md`. | One language. The scene contract is written once and imported by both sides. |
 | Runs on | **A local laptop**, as a production build (`npm run build && npm start`). | No serverless time limits on long generations. Local disk is the store. |
 | Lesson LLM | **Claude Sonnet 5.5** (`claude-sonnet-5-5`) for the plan and every step. | Fast enough for live step generation. Set once in `lib/config.ts`. |
 | Voice | **ElevenLabs** TTS with timestamps for narration. An **ElevenLabs agent** for Q&A, using the same voice. | Word-level timing for the lesson, and an interruptible agent for questions. |
@@ -316,7 +316,7 @@ stateDiagram-v2
   loading --> paused: stepReady (no autoplay)
   loading --> failed: stepFailed
   loading --> asking: ask
-  playing --> playing: replay
+  playing --> playing: replay / back on step 0
   playing --> stepEnded: audioEnded
   playing --> paused: pause / playBlocked
   playing --> failed: audioError
@@ -342,7 +342,7 @@ stateDiagram-v2
   failed --> loading: retry / back / goToStep
 ```
 
-`loading` carries the step it's loading and whether to **autoplay**: yes for Next, Back and goToStep; no after a Q&A jump. `stepReady(i)` and `stepFailed(i)` carry their step index. Entering `loading` requests the step, so Retry from `failed` is just a new request, which generates the step again on the server (section 6.2). An event for a step other than the one being loaded is a late reply to an earlier request: it's ignored and logged. Ask can open while a step loads (a step that wasn't prefetched can take a while, which is when the learner wants to ask). The step keeps loading, and the result is remembered for when Ask closes.
+`loading` carries the step it's loading and whether to **autoplay**: yes for Next, Back and goToStep; no after a Q&A jump. `stepReady(i)` and `stepFailed(i)` carry their step index. Entering `loading` requests the step, so Retry from `failed` is just a new request: the server returns the saved step, or generates it again if it failed (section 6.2). An event for a step other than the one being loaded is a late reply to an earlier request: it's ignored and logged. Ask can open while a step loads (a step that wasn't prefetched can take a while, which is when the learner wants to ask). The step keeps loading, and the result is remembered for when Ask closes.
 
 Every state × event pair has a defined result, and each cell gets a test:
 - **ignored** means the state doesn't change and nothing is shown.
@@ -351,11 +351,11 @@ Every state × event pair has a defined result, and each cell gets a test:
 
 | State \ event | stepReady(i) / stepFailed(i) | audioEnded | playBlocked | audioError | pause | resume | replay | ask | closeAsk | agentDisconnected | next | back | goToStep(n) | retry |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| loading(k) | i = k: → playing (autoplay) or paused, or → failed ("Couldn't make this step. Retry?"). i ≠ k: ignored (late reply) | can't happen (no audio) | can't happen | can't happen | ignored | ignored | ignored | → asking (remembers loading(k); the step keeps loading) | can't happen (not asking) | can't happen | ignored | ignored | → loading(n) | ignored |
+| loading(k) | i = k: → playing (autoplay) or paused, or → failed with the server's message ("Couldn't make this step. Retry?", or in replay "This step isn't in the saved run."). i ≠ k: ignored (late reply) | can't happen (no audio) | can't happen | can't happen | ignored | ignored | ignored | → asking (remembers loading(k); the step keeps loading) | can't happen (not asking) | can't happen | ignored | ignored | → loading(n) | ignored |
 | playing | ignored (late reply) | → stepEnded | → paused, with "Press play to start" | → failed ("Couldn't play the audio. Retry?") | → paused | ignored | seek to 0, stays playing | → asking (narration paused) | can't happen | can't happen | ignored (Next only after the step ends) | → loading(prev), or seek to 0 on step 0 | → loading(n) | ignored |
 | paused | ignored (late reply) | can't happen (audio stopped) | can't happen | ignored | ignored | → playing | seek to 0 → playing | → asking | can't happen | can't happen | ignored | → loading(prev), or seek to 0 → playing on step 0 | → loading(n) | ignored |
 | stepEnded | ignored (late reply) | can't happen | can't happen | ignored | ignored | ignored | seek to 0 → playing | → asking | can't happen | can't happen | → loading(next), or → finished on the last step | → loading(prev), or seek to 0 → playing on step 0 | → loading(n) | ignored |
-| asking | Ask opened from loading(k) and i = k: remembered for closeAsk. Otherwise ignored (late reply) | can't happen (narration paused) | can't happen | ignored | ignored | ignored | ignored | ignored | → the state Ask was opened from (playing becomes paused; loading(k) becomes paused, or failed with "Couldn't make this step. Retry?", if step k's result arrived meanwhile, and otherwise stays loading(k)), or → loading(n, no autoplay) if the agent called goToStep(n). The Q&A drawing is discarded and the board is `sceneAt(step, pausedT)` again (or the arrived step at 0, from loading) | same as closeAsk, plus "Q&A ended unexpectedly." | ignored | ignored | stays asking, remembers n (agent tool) | ignored |
+| asking | Ask opened from loading(k) and i = k: remembered for closeAsk. Otherwise ignored (late reply) | can't happen (narration paused) | can't happen | ignored | ignored | ignored | ignored | ignored | → the state Ask was opened from (playing becomes paused; loading(k) becomes paused, or failed with the server's message, if step k's result arrived meanwhile, and otherwise stays loading(k)), or → loading(n, no autoplay) if the agent called goToStep(n). The Q&A drawing is discarded and the board is `sceneAt(step, pausedT)` again (or the arrived step at 0, from loading) | same as closeAsk, plus "Q&A ended unexpectedly." | ignored | ignored | stays asking, remembers n (agent tool) | ignored |
 | failed | ignored (late reply) | can't happen | can't happen | can't happen | ignored | ignored | ignored | rejected: nothing to ask about | can't happen | can't happen | ignored | → loading(prev), or ignored on step 0 | → loading(n) | → loading(same) |
 | finished | ignored (late reply) | can't happen | can't happen | ignored | ignored | ignored | seek to 0 → playing | → asking | can't happen | can't happen | ignored | → loading(last) | → loading(n) | ignored |
 
