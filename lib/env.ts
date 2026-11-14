@@ -76,6 +76,8 @@ export interface ParseEnvOptions {
    * in real mode. The reverse (FAKE_APIS=1 on a real build) only logs a warning.
    */
   builtWithBrowserFakes?: boolean;
+  /** A dev script (loadEnvFor): there is no browser, so neither browser check applies. */
+  noBrowser?: boolean;
 }
 
 /**
@@ -86,6 +88,38 @@ export function parseEnv(
   source: Record<string, string | undefined>,
   options: ParseEnvOptions = {},
 ): Env {
+  return parseEnvNeeding(source, options, REAL_REQUIRED) as Env;
+}
+
+/** The keys a real mode can require. */
+export type RequiredKey = (typeof REAL_REQUIRED)[number];
+
+/** Like Env, but real mode only guarantees the keys K (dev scripts that call one provider). */
+export type EnvFor<K extends RequiredKey> =
+  | (Keys & { mode: "real" } & { [P in K]: string })
+  | (Keys & { mode: "fake" })
+  | (Keys & { mode: "replay"; replayRun: string });
+
+/**
+ * Dev scripts only (scripts/): validates process.env like loadEnv, but real mode needs only
+ * `required`, e.g. `npm run make:m1` needs the ElevenLabs keys and not ANTHROPIC_API_KEY.
+ * Not cached, so it never stands in for the server's getEnv().
+ */
+export function loadEnvFor<K extends RequiredKey>(
+  required: readonly K[],
+): EnvFor<K> {
+  return parseEnvNeeding(
+    process.env,
+    { noBrowser: true },
+    required,
+  ) as EnvFor<K>;
+}
+
+function parseEnvNeeding(
+  source: Record<string, string | undefined>,
+  options: ParseEnvOptions,
+  required: readonly RequiredKey[],
+): EnvFor<never> {
   const parsed = RawEnv.safeParse(source);
   if (!parsed.success) {
     const problems = parsed.error.issues.map(
@@ -126,7 +160,7 @@ export function parseEnv(
   }
 
   if (raw.FAKE_APIS === "1") {
-    if (!options.builtWithBrowserFakes) {
+    if (!options.builtWithBrowserFakes && !options.noBrowser) {
       // Allowed (route tests, debugging), but Ask would try the real ElevenLabs agent.
       console.warn(
         "[env] FAKE_APIS=1, but this build's browser uses the real Q&A agent (built without NEXT_PUBLIC_FAKE_APIS=1).",
@@ -140,19 +174,14 @@ export function parseEnv(
       "NEXT_PUBLIC_FAKE_APIS=1 without FAKE_APIS=1: the browser would use the fake Q&A agent with real providers. Rebuild without NEXT_PUBLIC_FAKE_APIS (npm run build; e.g. after npm run e2e), or set FAKE_APIS=1.",
     );
   }
-  const missing = REAL_REQUIRED.filter((k) => keys[k] === undefined);
+  const missing = required.filter((k) => keys[k] === undefined);
   if (missing.length > 0) {
     throw new EnvError(
       `Missing required env var${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}. Set ${missing.length > 1 ? "them" : "it"} in .env.local (see .env.example), or run with FAKE_APIS=1.`,
     );
   }
-  return {
-    ...keys,
-    mode: "real",
-    ANTHROPIC_API_KEY: keys.ANTHROPIC_API_KEY!,
-    ELEVENLABS_API_KEY: keys.ELEVENLABS_API_KEY!,
-    ELEVENLABS_VOICE_ID: keys.ELEVENLABS_VOICE_ID!,
-  };
+  // Every key in `required` was checked above; the callers' casts rely on it.
+  return { ...keys, mode: "real" };
 }
 
 let cached: Env | undefined;

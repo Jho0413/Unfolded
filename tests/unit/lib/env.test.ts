@@ -3,7 +3,13 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { EnvError, getEnv, parseEnv, resetEnvForTests } from "@/lib/env";
+import {
+  EnvError,
+  getEnv,
+  loadEnvFor,
+  parseEnv,
+  resetEnvForTests,
+} from "@/lib/env";
 import { register } from "@/instrumentation";
 
 const REAL_KEYS = {
@@ -217,5 +223,40 @@ describe("getEnv", () => {
     for (const key of ALL_KEYS) vi.stubEnv(key, undefined);
     vi.stubEnv("FAKE_APIS", "1");
     expect(getEnv().mode).toBe("fake");
+  });
+});
+
+describe("loadEnvFor (dev scripts, e.g. npm run make:m1)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+  const stub = (values: Record<string, string>) => {
+    for (const key of ALL_KEYS) vi.stubEnv(key, undefined);
+    for (const [k, v] of Object.entries(values)) vi.stubEnv(k, v);
+  };
+
+  it("real mode needs only the keys asked for", () => {
+    stub({ ELEVENLABS_API_KEY: "el-test", ELEVENLABS_VOICE_ID: "voice-test" });
+    const env = loadEnvFor(["ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID"]);
+    expect(env.mode).toBe("real");
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+  });
+
+  it("a missing key it asked for stops it, named", () => {
+    stub({ ELEVENLABS_API_KEY: "el-test" });
+    expect(() =>
+      loadEnvFor(["ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID"]),
+    ).toThrow("Missing required env var: ELEVENLABS_VOICE_ID");
+  });
+
+  it("fake mode has no browser warning, and getEnv's cache is untouched", () => {
+    stub({ FAKE_APIS: "1" });
+    resetEnvForTests();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(loadEnvFor(["ELEVENLABS_API_KEY"]).mode).toBe("fake");
+    expect(warn).not.toHaveBeenCalled();
+    vi.stubEnv("FAKE_APIS", undefined);
+    expect(() => getEnv()).toThrow(EnvError);
   });
 });
