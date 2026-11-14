@@ -7,7 +7,8 @@
 //
 // The fake TTS audio is a recording cut to about 0.2 s, while its alignment puts the cues
 // 10 to 40 s in, so seeking to a cue would hit the end of the audio. The step's audio is
-// served here as silence long enough for every cue.
+// served to the player here as silence long enough for every cue; the spec still fetches
+// the route's own audio file once to check it's served (an mp3 from the runs route).
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
@@ -47,8 +48,16 @@ async function expectState(page: Page, state: string, step: number) {
 async function seek(page: Page, ms: number) {
   await page.getByTestId("player-audio").evaluate(
     (audio: HTMLAudioElement, t) =>
-      new Promise<void>((resolve) => {
-        audio.addEventListener("seeked", () => resolve(), { once: true });
+      new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("no seeked")), 5000);
+        audio.addEventListener(
+          "seeked",
+          () => {
+            clearTimeout(timer);
+            resolve();
+          },
+          { once: true },
+        );
         audio.currentTime = t;
       }),
     ms / 1000,
@@ -106,10 +115,10 @@ test("upload → plan → step plays → highlight at its cue → Next → Ask �
   });
   const lessonAnswer = page.waitForResponse("**/api/lessons");
   await page.getByRole("button", { name: "Make the lesson" }).click();
-  const { lessonId, plan } = CreateLessonResponse.parse(
-    await (await lessonAnswer).json(),
-  );
-  created.push(lessonId);
+  const raw = (await (await lessonAnswer).json()) as { lessonId?: string };
+  // Recorded first, so the run is removed even if the answer doesn't parse.
+  if (typeof raw.lessonId === "string") created.push(raw.lessonId);
+  const { lessonId, plan } = CreateLessonResponse.parse(raw);
   await expect(page.getByTestId("plan-steps").getByRole("listitem")).toHaveText(
     plan.steps.map((s) => s.title),
   );
@@ -131,6 +140,10 @@ test("upload → plan → step plays → highlight at its cue → Next → Ask �
   await page.getByTestId("start-lesson").click();
   await expect(page).toHaveURL(`/lesson/${lessonId}`);
   const step0 = StepResponse.parse(await (await step0Answer).json());
+  // The route's own audio file is served (the player gets the long silence above).
+  const audio = await page.request.get(step0.audioUrl);
+  expect(audio.ok()).toBe(true);
+  expect(audio.headers()["content-type"]).toBe("audio/mpeg");
   await expectState(page, "playing", 0);
   await expect(page.getByRole("heading", { level: 2 })).toHaveText(
     step0.step.title,
@@ -200,7 +213,10 @@ test("upload → plan → step plays → highlight at its cue → Next → Ask �
     await expect(board(page).locator(`[data-object-id="${o.id}"]`)).toHaveCount(
       1,
     );
-  await expect(page.getByTestId("ask-tool-notice")).toHaveCount(0);
+  // On top of the current board, not instead of it.
+  await expect(board(page).locator(`[data-object-id="${first}"]`)).toHaveCount(
+    1,
+  );
 
   // Close Ask: back to paused, the drawing gone, the board as before Ask.
   await page.getByRole("button", { name: "Close" }).click();
@@ -210,8 +226,16 @@ test("upload → plan → step plays → highlight at its cue → Next → Ask �
       0,
     );
   await expect.poll(() => boardAttributes(page)).toBe(before);
+  await expect(page.getByTestId("ask-tool-notice")).toHaveCount(0);
 
-  // Resume.
+  // Resume: playing again, and the clock moves on from where it paused.
   await control(page, "Play").click();
   await expectState(page, "playing", 1);
+  await expect
+    .poll(() =>
+      page
+        .getByTestId("player-audio")
+        .evaluate((a: HTMLAudioElement) => a.currentTime),
+    )
+    .toBeGreaterThan(0);
 });
