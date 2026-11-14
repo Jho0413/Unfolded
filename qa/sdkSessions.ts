@@ -31,6 +31,8 @@ export type SdkCallbacks = {
   onDisconnect: (details: { reason: DisconnectReason }) => void;
   onMessage: (message: { message: string; role: "user" | "agent" }) => void;
   onError: (message: string) => void;
+  onVadScore: (event: { vadScore: number }) => void;
+  onModeChange: (event: { mode: "speaking" | "listening" }) => void;
 };
 
 /** Starts one SDK conversation: resolves once connected, rejects when it can't connect. */
@@ -75,6 +77,12 @@ export class SdkSessions {
       },
       onError: (message) => {
         if (live()) cb().onError?.(message);
+      },
+      onVadScore: ({ vadScore }) => {
+        if (live()) cb().onVadScore?.(vadScore);
+      },
+      onModeChange: ({ mode }) => {
+        if (live()) cb().onAgentSpeaking?.(mode === "speaking");
       },
     }).catch((err: unknown) => {
       // A superseded start's failure is nobody's business.

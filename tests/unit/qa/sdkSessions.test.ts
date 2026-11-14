@@ -59,6 +59,8 @@ function setup() {
     onDisconnect: vi.fn(),
     onMessage: vi.fn(),
     onError: vi.fn(),
+    onVadScore: vi.fn(),
+    onAgentSpeaking: vi.fn(),
   } satisfies ConversationCallbacks;
   const log = { warn: vi.fn() };
   const sessions = new SdkSessions(startSdk, () => callbacks, log);
@@ -161,5 +163,20 @@ describe("SdkSessions", () => {
     });
     sessions.sendContextualUpdate("ctx");
     expect(log.warn).toHaveBeenCalledWith("[qa]", expect.any(Error));
+  });
+
+  it("passes on VAD scores and the agent's speaking mode (issue #93), not a stale session's", async () => {
+    const { sessions, calls, callbacks } = setup();
+    const start = sessions.start(WEBRTC);
+    calls[0].connect();
+    await start;
+    calls[0].cb.onVadScore({ vadScore: 0.9 });
+    calls[0].cb.onModeChange({ mode: "speaking" });
+    calls[0].cb.onModeChange({ mode: "listening" });
+    expect(callbacks.onVadScore).toHaveBeenCalledWith(0.9);
+    expect(callbacks.onAgentSpeaking.mock.calls).toEqual([[true], [false]]);
+    sessions.end();
+    calls[0].cb.onVadScore({ vadScore: 0.95 });
+    expect(callbacks.onVadScore).toHaveBeenCalledOnce();
   });
 });
