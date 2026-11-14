@@ -131,15 +131,27 @@ describe("REPLAY_RUN=<id>", () => {
   });
 });
 
+function clearKeys() {
+  for (const key of ALL_KEYS) vi.stubEnv(key, undefined);
+}
+
+function atServerStart() {
+  vi.stubEnv("NEXT_RUNTIME", "nodejs");
+  vi.stubEnv("NEXT_PHASE", "phase-production-server");
+}
+
+// Throws instead of exiting, so a test sees the call and the worker survives it.
+function stubExit() {
+  return vi.spyOn(process, "exit").mockImplementation(() => {
+    throw new Error("process.exit");
+  });
+}
+
 describe("next build", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     resetEnvForTests();
   });
-
-  function clearKeys() {
-    for (const key of ALL_KEYS) vi.stubEnv(key, undefined);
-  }
 
   it("needs no keys: register() skips validation in the build phase", async () => {
     clearKeys();
@@ -147,15 +159,20 @@ describe("next build", () => {
     vi.stubEnv("NEXT_PHASE", "phase-production-build");
     await expect(register()).resolves.toBeUndefined();
   });
+});
 
-  it("at server start, register() logs the missing key and exits with 1", async () => {
+describe("server start (register)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    resetEnvForTests();
+  });
+
+  it("a missing key logs the key and exits with 1", async () => {
     clearKeys();
-    vi.stubEnv("NEXT_RUNTIME", "nodejs");
-    vi.stubEnv("NEXT_PHASE", "phase-production-server");
+    atServerStart();
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    const exit = vi.spyOn(process, "exit").mockImplementation(() => {
-      throw new Error("process.exit");
-    });
+    const exit = stubExit();
     await expect(register()).rejects.toThrow("process.exit");
     expect(exit).toHaveBeenCalledWith(1);
     expect(error).toHaveBeenCalledWith(
@@ -163,40 +180,30 @@ describe("next build", () => {
         "Missing required env vars: ANTHROPIC_API_KEY, ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID",
       ),
     );
-    exit.mockRestore();
-    error.mockRestore();
   });
 
-  it("at server start, register() exits with 1 on a build made with NEXT_PUBLIC_FAKE_APIS=1", async () => {
+  it("a build made with NEXT_PUBLIC_FAKE_APIS=1 logs the rebuild hint and exits with 1", async () => {
     clearKeys();
     for (const [k, v] of Object.entries(REAL_KEYS)) vi.stubEnv(k, v);
     vi.stubEnv("BUILT_WITH_BROWSER_FAKES", "1");
-    vi.stubEnv("NEXT_RUNTIME", "nodejs");
-    vi.stubEnv("NEXT_PHASE", "phase-production-server");
+    atServerStart();
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    const exit = vi.spyOn(process, "exit").mockImplementation(() => {
-      throw new Error("process.exit");
-    });
+    const exit = stubExit();
     await expect(register()).rejects.toThrow("process.exit");
     expect(exit).toHaveBeenCalledWith(1);
     expect(error).toHaveBeenCalledWith(expect.stringContaining("Rebuild"));
-    exit.mockRestore();
-    error.mockRestore();
   });
 
-  it("at server start, register() starts on valid env without exiting", async () => {
+  it("a valid env starts without exiting and logs the mode", async () => {
     clearKeys();
     vi.stubEnv("FAKE_APIS", "1");
     vi.stubEnv("NEXT_PUBLIC_FAKE_APIS", "1");
-    vi.stubEnv("NEXT_RUNTIME", "nodejs");
-    vi.stubEnv("NEXT_PHASE", "phase-production-server");
+    atServerStart();
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    const exit = vi.spyOn(process, "exit");
+    const exit = stubExit();
     await register();
     expect(exit).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith("[env] mode: fake");
-    exit.mockRestore();
-    log.mockRestore();
   });
 });
 
