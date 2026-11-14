@@ -21,7 +21,8 @@ export default defineConfig({
       ? `npm run start -- -p ${PORT}`
       : `npm run build && npm run start -- -p ${PORT}`,
     url: `http://localhost:${PORT}`,
-    reuseExistingServer: !isCI,
+    // Never reuse a server: with several worktrees, one on this port may be running other code.
+    reuseExistingServer: false,
     timeout: 180_000,
     // e2e never calls paid APIs (ARCHITECTURE §10), locally as in CI.
     env: { FAKE_APIS: "1", NEXT_PUBLIC_FAKE_APIS: "1" },
