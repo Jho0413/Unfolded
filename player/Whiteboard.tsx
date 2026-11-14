@@ -4,6 +4,9 @@
 // and effects in progress (fades, highlights) come from `active` progress.
 // Moves are already interpolated by sceneAt, and arrows resolve their ends
 // on the state, so they follow what they point at.
+//
+// A Q&A sketch's objects (`sketchIds`) go in their own layer, drawn in the
+// answer blue; while there are any, the lesson's layer dims (player/theme.css).
 import type { BoardState } from "@/shared/scene";
 import { CANVAS } from "@/shared/scene";
 import { partKey } from "./sceneAt";
@@ -13,18 +16,26 @@ import { Copy, Matrix } from "./primitives/Matrix";
 import { Text } from "./primitives/Text";
 import { BOARD_BG, FONT } from "./primitives/style";
 
+type ObjectState = BoardState["objects"][number];
+
 export function Whiteboard({
   state,
   className,
+  sketchIds,
 }: {
   state: BoardState;
   className?: string;
+  /** Objects a Q&A sketch drew (ARCHITECTURE.md section 8). */
+  sketchIds?: ReadonlySet<string>;
 }) {
-  const { objects, copies, active } = state;
+  const { objects, copies } = state;
   const byId = new Map(objects.map((s) => [s.object.id, s]));
+  const inSketch = (id: string) => sketchIds?.has(id) ?? false;
+  const sketching = objects.some((s) => inSketch(s.object.id));
   return (
     <svg
       data-testid="whiteboard"
+      data-sketching={sketching}
       className={className}
       viewBox={`0 0 ${CANVAS.w} ${CANVAS.h}`}
       role="img"
@@ -33,6 +44,43 @@ export function Whiteboard({
       fontFamily={FONT}
     >
       <rect width={CANVAS.w} height={CANVAS.h} fill={BOARD_BG} />
+      <g data-layer="main">
+        <Layer
+          state={state}
+          byId={byId}
+          objects={objects.filter((s) => !inSketch(s.object.id))}
+          copies={copies.filter((c) => !inSketch(c.source.id))}
+        />
+      </g>
+      {sketching && (
+        <g data-layer="sketch">
+          <Layer
+            state={state}
+            byId={byId}
+            objects={objects.filter((s) => inSketch(s.object.id))}
+            copies={copies.filter((c) => inSketch(c.source.id))}
+          />
+        </g>
+      )}
+    </svg>
+  );
+}
+
+/** One layer: its objects, then their moved copies, then their arrows. */
+function Layer({
+  state,
+  byId,
+  objects,
+  copies,
+}: {
+  state: BoardState;
+  byId: ReadonlyMap<string, ObjectState>;
+  objects: readonly ObjectState[];
+  copies: BoardState["copies"];
+}) {
+  const { active } = state;
+  return (
+    <>
       {objects.map((s) => {
         const object = s.object;
         switch (object.kind) {
@@ -59,7 +107,7 @@ export function Whiteboard({
             return null; // arrives with E1
         }
       })}
-      {/* Copies are drawn last, so a sliding row passes over the board. */}
+      {/* Copies are drawn after the objects, so a sliding row passes over the board. */}
       {copies.map((copy) => {
         const source = byId.get(copy.source.id);
         if (source?.object.kind !== "matrix") return null;
@@ -85,6 +133,6 @@ export function Whiteboard({
           />
         ) : null,
       )}
-    </svg>
+    </>
   );
 }
