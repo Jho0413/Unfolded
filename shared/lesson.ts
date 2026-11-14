@@ -113,3 +113,17 @@ export const AgentTokenResponse = z.object({
   conversationToken: z.string().min(1),
 });
 export type AgentTokenResponse = z.infer<typeof AgentTokenResponse>;
+
+/**
+ * A saved step file, `runs/<id>/step-<n>.v<k>.json` (ARCHITECTURE.md section 5.1): the step and
+ * its cue times. Its version and audio (`step-<n>.v<k>.mp3`) come from the file name, so the
+ * lesson page can rebuild the StepResponse from the run folder alone.
+ */
+export const SavedStep = z.object({ step: Step, cueTimes: CueTimes });
+export type SavedStep = z.infer<typeof SavedStep>;
+
+/** A bad `lessonId`, or a lesson with no saved plan (ARCHITECTURE.md section 7). */
+export const NO_SUCH_LESSON = "No such lesson or step.";
+
+/** A step that has no saved file in the run (ARCHITECTURE.md sections 5.5 and 7). */
+export const STEP_NOT_IN_RUN = "This step isn't in the saved run.";
