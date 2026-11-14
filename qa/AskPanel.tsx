@@ -9,6 +9,7 @@ import {
   type FormEvent,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -32,8 +33,11 @@ export type AskPanelProps = {
   replay: boolean;
   /** What the agent is told on connect and on every step change. */
   context: Omit<QaContext, "earlierQuestions">;
-  /** Client tool handlers (Q4). */
-  tools?: QaTools;
+  /**
+   * Client tool handlers (qa/tools.ts), or a function making them from the
+   * panel's AskApi (to show a notice and tell the agent, e.g. a failed sketch).
+   */
+  tools?: QaTools | ((ask: AskApi) => QaTools);
   /** The learner pressed Ask or `A`: send the machine `ask`. */
   onAsk: () => void;
   /** The learner closed the panel: send the machine `closeAsk`. */
@@ -45,6 +49,25 @@ export type AskPanelProps = {
 /** "connecting" lives only in phaseRef; the render derives it from `open`. */
 /** How long a session may take to connect before Ask says it's unavailable. */
 const CONNECT_TIMEOUT_MS = 15_000;
+
+/** What tool handlers may ask of the panel. */
+export type AskApi = {
+  /** Shows a message in the panel (e.g. "Couldn't draw that."). */
+  showNotice: (message: string) => void;
+  /** Tells the agent something through sendContextualUpdate(). */
+  tellAgent: (text: string) => void;
+};
+
+/** Lets tools made before the conversation exists reach it once it does. */
+class AgentLink {
+  private send: ((text: string) => void) | null = null;
+  connect(send: (text: string) => void): void {
+    this.send = send;
+  }
+  tell(text: string): void {
+    this.send?.(text);
+  }
+}
 
 type Phase = "idle" | "connecting" | "connected" | "failed";
 
@@ -82,8 +105,17 @@ export function AskPanel({
     if (m.role === "user") setQuestions((qs) => [...qs, m.text]);
   }, []);
 
+  const [link] = useState(() => new AgentLink());
+  const resolvedTools = useMemo(
+    () =>
+      typeof tools === "function"
+        ? tools({ showNotice: setNotice, tellAgent: (t) => link.tell(t) })
+        : tools,
+    [tools, link],
+  );
+
   const conversation = useQaConversation({
-    tools,
+    tools: resolvedTools,
     onConnect: () => {
       // A connect that lands after Ask closed (or timed out) is ended at once.
       if (phaseRef.current !== "connecting") return conversation.end();
@@ -124,6 +156,10 @@ export function AskPanel({
     go("failed");
     setNotice(ASK_MESSAGES.unavailable);
   }, [go]);
+
+  useEffect(() => {
+    link.connect((text) => conversation.sendContextualUpdate(text));
+  }, [link, conversation]);
 
   // Opening Ask starts a session; closing it (from anywhere) ends it. In a
   // replay run there's no session: the panel says Q&A needs a connection.
