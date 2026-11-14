@@ -180,14 +180,14 @@ type Sketch = {                               // what /api/sketch returns for a 
 | A malformed marker (`[[Row 1]]`, a stray `[[` or `]]`) | rejected: `malformed marker "[[Row 1]]"` (otherwise it would be read aloud) |
 | A marker in `narration` that no action uses | allowed (it's ignored) |
 | A `target.id`, or an anchor's `id`, with no object | rejected: `unknown object "x"` |
-| `row` or `col` outside the matrix, or set on a non-matrix (in a target or an anchor) | rejected: `target out of range` |
+| `row` or `col` outside the matrix, or set on a non-matrix (in a target or an anchor) | rejected: `target out of range "x"` (x is the id the target or anchor names) |
 | `write` on a matrix without both `row` and `col` | rejected: `write needs a cell` |
 | `write` on a `latex`, `arrow` or `image` | rejected: `can't write to "x"` |
 | `show` with `row` or `col` | rejected: `show needs a whole object` |
 | `move` on an `arrow` | rejected: `can't move "x"` |
 | `show` on a visible object, `hide` on a hidden one, or `hide` on a part that hasn't moved | allowed (no change) |
 | `tex` that KaTeX can't parse | rejected: `invalid LaTeX in "x"` (the renderer also uses `throwOnError: false` as a safety net) |
-| An object, or an `{x, y}` point in an anchor, outside the 1600 × 900 canvas (for a matrix, its whole cell box; for `text` and `latex`, only their x,y) | rejected: `off canvas` |
+| An object, or an `{x, y}` point in an anchor, outside the 1600 × 900 canvas (for a matrix, its whole cell box; for `text` and `latex`, only their x,y) | rejected: `off canvas "x"` (x is the object, or for a point, the object that moves there) |
 | Two objects with the same id | rejected: `duplicate id "x"` |
 | Narration longer than `config.maxNarrationChars` after the markers are stripped | rejected: `narration too long` |
 | Narration with nothing left after the markers are stripped (only markers or spaces) | rejected: `narration empty` (TTS would fail after validation, too late to retry) |

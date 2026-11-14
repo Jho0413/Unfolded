@@ -68,13 +68,13 @@ export const errors = {
   duplicateCue: (cue: string) => `duplicate cue "${cue}"`,
   malformedMarker: (m: string) => `malformed marker "${m}"`,
   unknownObject: (id: string) => `unknown object "${id}"`,
-  targetOutOfRange: () => "target out of range",
+  targetOutOfRange: (id: string) => `target out of range "${id}"`,
   writeNeedsCell: () => "write needs a cell",
   cantWrite: (id: string) => `can't write to "${id}"`,
   showNeedsWhole: () => "show needs a whole object",
   cantMove: (id: string) => `can't move "${id}"`,
   invalidLatex: (id: string) => `invalid LaTeX in "${id}"`,
-  offCanvas: () => "off canvas",
+  offCanvas: (id: string) => `off canvas "${id}"`,
   duplicateId: (id: string) => `duplicate id "${id}"`,
   narrationTooLong: () => "narration too long",
   narrationEmpty: () => "narration empty",
@@ -150,14 +150,20 @@ function checkTarget(
       obj.kind === "matrix" &&
       (target.row === undefined || target.row < obj.rows.length) &&
       (target.col === undefined || target.col < obj.rows[0].length);
-    if (!inRange) out.push(errors.targetOutOfRange());
+    if (!inRange) out.push(errors.targetOutOfRange(target.id));
   }
   return obj;
 }
 
-function checkAnchor(anchor: Anchor, objects: Objects, out: string[]): void {
+/** `owner`: the id an off-canvas point is reported under (the moving object). */
+function checkAnchor(
+  anchor: Anchor,
+  owner: string,
+  objects: Objects,
+  out: string[],
+): void {
   if (isPoint(anchor)) {
-    if (!inCanvas(anchor.x, anchor.y)) out.push(errors.offCanvas());
+    if (!inCanvas(anchor.x, anchor.y)) out.push(errors.offCanvas(owner));
   } else {
     checkTarget(anchor, objects, out);
   }
@@ -178,7 +184,7 @@ export function checkAction(action: Action, objects: Objects): string[] {
       break;
     case "move":
       if (obj?.kind === "arrow") out.push(errors.cantMove(obj.id));
-      checkAnchor(action.to, objects, out);
+      checkAnchor(action.to, action.target.id, objects, out);
       break;
     case "write":
       if (
@@ -214,7 +220,7 @@ function checkObjects(
   for (const obj of newObjects) {
     if (seen.has(obj.id)) out.push(errors.duplicateId(obj.id));
     seen.add(obj.id);
-    if (!objectOnCanvas(obj)) out.push(errors.offCanvas());
+    if (!objectOnCanvas(obj)) out.push(errors.offCanvas(obj.id));
     if (obj.kind === "latex" && !latexParses(obj.tex))
       out.push(errors.invalidLatex(obj.id));
     if (obj.kind === "arrow") {
