@@ -219,11 +219,10 @@ sequenceDiagram
   - It's uploaded once with the Files API (`client.files.upload`).
   - Every plan and step request then references it by `file_id`, as a `document` block.
   - The upload size cap (`config.maxPdfMb`) is our own choice, not Claude's limit. We don't parse the PDF ourselves: when Claude rejects it (too many pages, encrypted, unreadable), we return the upload error in section 7.
-- **Caching.** The document block carries `cache_control`, so later step requests reuse the cached paper. For the cache to work:
+- **Caching.** The document block carries `cache_control: { type: "ephemeral", ttl: "1h" }`, so later step requests reuse the cached paper. The 1-hour cache outlasts long Q&A pauses and rehearsals. Its writes cost more than the 5-minute cache's, but each request type writes the paper only once. For the cache to work:
   - The step system prompt must be byte-identical for every step.
   - The plan, goal, signals and (for a sketch) the current board go *after* the document block.
   - The plan and sketch requests use a different output format, so they build their own cache.
-  - The cache expires after 5 minutes, so a long Q&A pause will miss it.
 - **Structured output.** Requests stream: `client.messages.stream({ output_config: { format: zodOutputFormat(Step) } })` (the helper is in `@anthropic-ai/sdk/helpers/zod`), then `(await stream.finalMessage()).parsed_output`.
   - Constraints the API can't enforce (number ranges, item counts) are checked by the SDK with zod after the response arrives, and a failure *throws*. The generator catches it as a rejection.
   - Effort per request type (plan, step, sketch) is set in `lib/config.ts`.
@@ -275,14 +274,15 @@ sceneAt(objects: BoardObject[], timed: { action; startMs; durationMs }[], tMs: n
 - **Recording signals.** The browser posts to `POST /api/lessons/<id>/signals`. The body is validated with zod and holds one of:
   - a question: the agent's user transcript (from `onMessage`) or typed text
   - a simplify request from `simplify_upcoming`
-  - `{ started: n }` when step n starts playing
+  - `{ started: n, version: k }` when version k of step n starts playing
 
   The server appends it to `runs/<id>/signals.json` and bumps the lesson's **signals version**.
 - Every step generation records the signals version it used.
 - When a question or simplify signal arrives, any step that **hasn't started playing** is out of date if it was generated (or is still generating) with an older version:
   - The server marks it stale and regenerates it as soon as the current generation finishes (section 6.2).
-  - The browser drops its own prefetched copy of N+1 and requests it again.
-- A step that has started playing is kept as it is.
+  - The browser keeps its prefetched copy of N+1 and requests the step again. When Next is pressed, it plays the new version if it has arrived, and otherwise the copy it already has, so Next never waits for a regeneration.
+- A step that has started playing is kept as it is. A regeneration still running for it is discarded when it finishes.
+- A regeneration that fails keeps the older version: the step stays playable.
 
 ### 5.5 Replay safety net
 
@@ -305,6 +305,7 @@ stateDiagram-v2
   loading --> playing: stepReady (autoplay)
   loading --> paused: stepReady (no autoplay)
   loading --> failed: stepFailed
+  loading --> asking: ask
   playing --> playing: replay
   playing --> stepEnded: audioEnded
   playing --> paused: pause / playBlocked
@@ -314,11 +315,12 @@ stateDiagram-v2
   paused --> asking: ask
   stepEnded --> asking: ask
   finished --> asking: ask
-  asking --> paused: closeAsk / agentDisconnected (came from playing or paused)
+  asking --> paused: closeAsk / agentDisconnected (came from playing or paused, or from loading once the step arrived)
   asking --> stepEnded: closeAsk / agentDisconnected (came from stepEnded)
   asking --> finished: closeAsk / agentDisconnected (came from finished)
-  asking --> asking: goToStep (tool, remembered)
-  asking --> loading: closeAsk after goToStep (no autoplay)
+  asking --> failed: closeAsk / agentDisconnected (came from loading, the step failed meanwhile)
+  asking --> asking: goToStep (tool, remembered) / stepReady or stepFailed (came from loading, remembered)
+  asking --> loading: closeAsk after goToStep (no autoplay) / closeAsk (came from loading, step not here yet)
   stepEnded --> loading: next
   stepEnded --> finished: next on last step
   stepEnded --> playing: replay / back on step 0
@@ -330,7 +332,7 @@ stateDiagram-v2
   failed --> loading: retry / back / goToStep
 ```
 
-`loading` carries the step it's loading and whether to **autoplay**: yes for Next, Back and goToStep; no after a Q&A jump. `stepReady(i)` and `stepFailed(i)` carry their step index. An event for a step other than the one being loaded is a late reply to an earlier request: it's ignored and logged.
+`loading` carries the step it's loading and whether to **autoplay**: yes for Next, Back and goToStep; no after a Q&A jump. `stepReady(i)` and `stepFailed(i)` carry their step index. An event for a step other than the one being loaded is a late reply to an earlier request: it's ignored and logged. Ask can open while a step loads (a step that wasn't prefetched can take a while, which is when the learner wants to ask). The step keeps loading, and the result is remembered for when Ask closes.
 
 Every state × event pair has a defined result, and each cell gets a test:
 - **ignored** means the state doesn't change and nothing is shown.
@@ -339,11 +341,11 @@ Every state × event pair has a defined result, and each cell gets a test:
 
 | State \ event | stepReady(i) / stepFailed(i) | audioEnded | playBlocked | audioError | pause | resume | replay | ask | closeAsk | agentDisconnected | next | back | goToStep(n) | retry |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| loading(k) | i = k: → playing (autoplay) or paused, or → failed ("Couldn't make this step. Retry?"). i ≠ k: ignored (late reply) | can't happen (no audio) | can't happen | can't happen | ignored | ignored | ignored | rejected: Ask disabled while loading | can't happen (not asking) | can't happen | ignored | ignored | → loading(n) | ignored |
+| loading(k) | i = k: → playing (autoplay) or paused, or → failed ("Couldn't make this step. Retry?"). i ≠ k: ignored (late reply) | can't happen (no audio) | can't happen | can't happen | ignored | ignored | ignored | → asking (remembers loading(k); the step keeps loading) | can't happen (not asking) | can't happen | ignored | ignored | → loading(n) | ignored |
 | playing | ignored (late reply) | → stepEnded | → paused, with "Press play to start" | → failed ("Couldn't play the audio. Retry?") | → paused | ignored | seek to 0, stays playing | → asking (narration paused) | can't happen | can't happen | ignored (Next only after the step ends) | → loading(prev), or seek to 0 on step 0 | → loading(n) | ignored |
 | paused | ignored (late reply) | can't happen (audio stopped) | can't happen | ignored | ignored | → playing | seek to 0 → playing | → asking | can't happen | can't happen | ignored | → loading(prev), or seek to 0 → playing on step 0 | → loading(n) | ignored |
 | stepEnded | ignored (late reply) | can't happen | can't happen | ignored | ignored | ignored | seek to 0 → playing | → asking | can't happen | can't happen | → loading(next), or → finished on the last step | → loading(prev), or seek to 0 → playing on step 0 | → loading(n) | ignored |
-| asking | ignored (late reply) | can't happen (narration paused) | can't happen | ignored | ignored | ignored | ignored | ignored | → the state Ask was opened from (playing becomes paused), or → loading(n, no autoplay) if the agent called goToStep(n). The Q&A drawing is discarded and the board is `sceneAt(step, pausedT)` again | same as closeAsk, plus "Q&A ended unexpectedly." | ignored | ignored | stays asking, remembers n (agent tool) | ignored |
+| asking | Ask opened from loading(k) and i = k: remembered for closeAsk. Otherwise ignored (late reply) | can't happen (narration paused) | can't happen | ignored | ignored | ignored | ignored | ignored | → the state Ask was opened from (playing becomes paused; loading(k) becomes paused, or failed with "Couldn't make this step. Retry?", if step k's result arrived meanwhile, and otherwise stays loading(k)), or → loading(n, no autoplay) if the agent called goToStep(n). The Q&A drawing is discarded and the board is `sceneAt(step, pausedT)` again | same as closeAsk, plus "Q&A ended unexpectedly." | ignored | ignored | stays asking, remembers n (agent tool) | ignored |
 | failed | ignored (late reply) | can't happen | can't happen | can't happen | ignored | ignored | ignored | rejected: nothing to ask about | can't happen | can't happen | ignored | → loading(prev), or ignored on step 0 | → loading(n) | → loading(same) |
 | finished | ignored (late reply) | can't happen | can't happen | ignored | ignored | ignored | seek to 0 → playing | → asking | can't happen | can't happen | ignored | → loading(last) | → loading(n) | ignored |
 
@@ -359,24 +361,27 @@ stateDiagram-v2
   notRequested --> generating: request
   generating --> generating: rejected (first time, retry with errors)
   generating --> ready: script valid + audio + cues saved
+  generating --> ready: a regeneration fails (the older version is kept, A1)
   generating --> failed: rejected twice / refusal / provider error / no alignment
   generating --> staleGenerating: newer signal
+  generating --> started: started n (an older version played, A1)
   staleGenerating --> generating: current attempt finishes (result discarded)
+  staleGenerating --> started: started n (an older version played, A1)
   ready --> generating: newer signal (not started)
   ready --> started: started n
   failed --> generating: retry
 ```
 
-| State \ event | request | rejected (zod or validate) | valid + audio + cues | refusal / Claude error after SDK retries / `max_tokens` cut-off | TTS or quota error, no alignment | newer signal | started n | retry |
+| State \ event | request | rejected (zod or validate) | valid + audio + cues | refusal / Claude error after SDK retries / `max_tokens` cut-off | TTS or quota error, no alignment | newer signal (A1) | started n (A1) | retry |
 |---|---|---|---|---|---|---|---|---|
 | notRequested | → generating | can't happen | can't happen | can't happen | can't happen | ignored (generates with the new version later) | can't happen (not served) | ignored |
-| generating | waits for this generation (no second one) | first time: retry with errors; second time: → failed | → ready | → failed | → failed | → staleGenerating | can't happen | ignored |
-| staleGenerating | waits | discarded → generating | discarded → generating | → generating (new version) | → generating (new version) | stays (the latest version is used) | can't happen | ignored |
+| generating | waits for this generation (no second one) | first time: retry with errors; second time: → failed, or → ready with the older version if this is a regeneration (A1) | → ready | → failed, or → ready with the older version if this is a regeneration (A1) | → failed, or → ready with the older version if this is a regeneration (A1) | → staleGenerating | → started if an older version played (the browser didn't wait for this one); the running attempt is discarded when it finishes. On a first generation, can't happen (nothing served) | ignored |
+| staleGenerating | waits | discarded → generating | discarded → generating | → generating (new version) | → generating (new version) | stays (the latest version is used) | → started, as in generating | ignored |
 | ready | returns it from `runs/` | can't happen | can't happen | can't happen | can't happen | → generating (new version) | → started | ignored |
-| started | returns the played version | can't happen | can't happen | can't happen | can't happen | ignored (already heard) | ignored | ignored |
-| failed | returns "Couldn't make this step." | can't happen | can't happen | can't happen | can't happen | ignored | can't happen | → generating |
+| started | returns the played version | discarded: an attempt still running when an older version started (A1) | discarded (A1) | discarded (A1) | discarded (A1) | ignored (already heard) | ignored | ignored |
+| failed | returns "Couldn't make this step." | can't happen | can't happen | can't happen | can't happen | ignored | can't happen (not served) | → generating |
 
-A fal error doesn't fail the step: the image object is hidden (section 7). In replay mode this machine doesn't run, and a step missing from the folder is a `failed` step.
+Cells marked A1 can only happen once adaptation (A1) is built: G2 tests the others, and A1 tests those. A fal error doesn't fail the step: the image object is hidden (section 7). In replay mode this machine doesn't run, and a step missing from the folder is a `failed` step.
 
 ## 7. Errors and rejections
 
@@ -403,7 +408,7 @@ The developer gets the full error in the server log, tagged with the route, less
 ## 8. Q&A mode
 
 - **Starting a session:** the learner presses **Ask**, or presses the `A` key (Space stays play/pause).
-  1. The player moves to `asking` and pauses the narration.
+  1. The player moves to `asking` and pauses the narration. Ask also works while a step is loading (section 6.1).
   2. The browser calls `GET /api/agent/token`, and the server gets a WebRTC conversation token with `ELEVENLABS_API_KEY`.
   3. `startSession({ conversationToken })` starts the session through `qa/conversation.ts`.
      - That adapter is the only file that imports `@elevenlabs/react`, which also needs a `ConversationProvider` around the lesson page.
@@ -413,7 +418,7 @@ The developer gets the full error in the server log, tagged with the route, less
   - If mic permission is denied, the session starts text-only and answers appear as text. Spike S2 confirms that text-only answers aren't spoken.
 - **Context:** when the session connects, and on every step change, the browser calls `sendContextualUpdate()`. It sends:
   - the plan titles
-  - the current step's narration up to the point where it was paused
+  - the current step's narration up to the point where it was paused (or, while a step is loading, that step's goal from the plan)
   - the ids of the objects on the board
   - the questions asked earlier in this lesson
 
