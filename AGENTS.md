@@ -37,5 +37,5 @@ Every agent checks this before editing a file. The shared files anyone may edit 
 
 | Area | Owner (GitHub login) | Folders |
 |---|---|---|
-| Contract, player and Q&A browser side (A) | @Maverick-Chow | `shared/`, `player/` (incl. whiteboard components), `qa/`, `app/lesson/` |
-| Server, pipeline, voice and fal (B) | @Jho0413 | `lib/narration/`, `lib/runs/`, `lib/pipeline/`, `lib/media/`, `app/api/` (incl. `/api/sketch`), `app/` upload page, `agent/`, `scripts/` |
+| Contract, player and Q&A browser side (A) | @Maverick-Chow | `shared/`, `player/` (incl. whiteboard components), `qa/`, `app/lesson/`, `app/dev/` |
+| Server, pipeline, voice and fal (B) | @Jho0413 | `lib/narration/`, `lib/runs/`, `lib/pipeline/`, `lib/media/`, `app/api/` (incl. `/api/sketch`), `app/page.tsx` (upload page), `agent/`, `scripts/` |

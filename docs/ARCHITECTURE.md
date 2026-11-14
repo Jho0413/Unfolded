@@ -73,7 +73,7 @@ app/
   dev/board/page.tsx                dev only: renders a fixed BoardState (renderer tests)
 instrumentation.ts                  register(): validates env once at server start (not at build)
 shared/                             imported by server and browser (the contract)
-  scene.ts                          zod schemas: board objects, actions, step, sketch
+  scene.ts                          zod schemas: board objects, actions, step, sketch, board state
   lesson.ts                         zod schemas: lesson plan, API responses
   validate.ts                       checks that zod can't express (ids, cues, bounds)
   tools.ts                          the client tool names and parameter schemas (one list for the agent config and qa/tools.ts)
@@ -95,6 +95,7 @@ qa/                                 browser
   conversation.ts                   adapter over @elevenlabs/react useConversation; a scripted fake when NEXT_PUBLIC_FAKE_APIS=1
   AskPanel.tsx                      voice + typed input, through conversation.ts
   tools.ts                          client tool handlers, typed by shared/tools.ts
+scripts/                            dev scripts: make:m1, seed:m2
 agent/                              ElevenLabs CLI config: the agent (prompt, voice, LLM) and its client tools, plus the CLI's tracking file
 runs/                               gitignored: one folder per lesson (store + replay)
 tests/e2e/                          Playwright, with FAKE_APIS=1 and NEXT_PUBLIC_FAKE_APIS=1
@@ -117,7 +118,7 @@ This is the one contract between the step generator, the renderer and the Q&A to
 type ObjectId = string;                       // /^[a-z][a-z0-9_]{0,31}$/
 
 type BoardObject = (                          // discriminated on `kind`
-  | { kind: "matrix"; id; x; y; rows: string[][]; label?: string }   // 1..8 x 1..8 cells; x,y is the top-left corner
+  | { kind: "matrix"; id; x; y; rows: string[][]; label?: string }   // 1..8 x 1..8 cells ("" is an empty cell); x,y is the top-left corner
   | { kind: "text";   id; x; y; text: string; size?: "s" | "m" | "l" }   // x,y is the centre of the text
   | { kind: "latex";  id; x; y; tex: string }                        // x,y is the centre
   | { kind: "arrow";  id; from: Anchor; to: Anchor; label?: string }
@@ -149,9 +150,10 @@ type Sketch = {                               // what /api/sketch returns for a 
 
 - `mediaUrl` isn't part of the schema Claude fills in. The server adds it after fal returns and the image is saved to `runs/`. The page never loads a URL that a model wrote.
 - When several actions start at the same time, `sceneAt` applies them in their array order.
-- **Geometry.** Cell (r, c) of a matrix at x,y has its centre at (x + 64c + 32, y + 48r + 24). Brackets and the label are drawn outside that box. The centre of a row or column is the centre of its cells, an arrow's is the midpoint of its ends, and an image's is the middle of its box. `CELL` is exported from `shared/scene.ts`, and the renderer and the prompts both use it.
+- **Geometry.** Cell (r, c) of a matrix at x,y has its centre at (x + 64c + 32, y + 48r + 24). Brackets and the label are drawn outside that box. A whole matrix's centre is the centre of its cell box. The centre of a row or column is the centre of its cells, an arrow's is the midpoint of its ends, and an image's is the middle of its box. `CELL` is exported from `shared/scene.ts`, and the renderer and the prompts both use it.
 - **Hidden objects.** An object with `hidden: true` is on the board from the start but isn't drawn until a `show`. That's how product terms and sums appear partway through a step.
-- **Moving part of a matrix.** `move` on a whole object moves it. `move` on a row, column or cell slides a **copy** of those cells (same values and highlight), so the source matrix stays whole, with no gap. A later `move` of the same part moves that copy on, and `hide` on the part removes the copy. The source cells are never hidden on their own.
+- **Moving part of a matrix.** `move` on a whole object moves it. `move` on a row, column or cell slides a **copy** of those cells (same values and highlight), so the source matrix stays whole, with no gap. Each row, column or cell gets its own copy the first time it moves. After that, an anchor or a later `move` naming that part uses the copy, `hide` on the part removes the copy, and `highlight`, `unhighlight` and `write` change the source cells and the copy together. The source cells are never hidden on their own.
+- **Arrows** are drawn between their anchors where they are now, so an arrow follows an object that moves. An arrow itself can't be moved.
 - **Writing.** `write` replaces a matrix cell's value or a text object's text, so a text showing `1·5 + 2·7` can become `19` and then move into a cell.
 
 **The M1 demo in this contract** (`lib/fakes/fixtures/demo-m1.step.json`, hand-written in F3 as the contract's acceptance test). Matrices `a` and `b` and an empty result `c` are visible; `p1` (`1·5`), `p2` (`2·7`) and `sum` are hidden `text` objects.
@@ -175,12 +177,14 @@ type Sketch = {                               // what /api/sketch returns for a 
 | `write` on a matrix without both `row` and `col` | rejected: `write needs a cell` |
 | `write` on a `latex`, `arrow` or `image` | rejected: `can't write to "x"` |
 | `show` with `row` or `col` | rejected: `show needs a whole object` |
+| `move` on an `arrow` | rejected: `can't move "x"` |
 | `show` on a visible object, `hide` on a hidden one, or `hide` on a part that hasn't moved | allowed (no change) |
 | `tex` that KaTeX can't parse | rejected: `invalid LaTeX in "x"` (the renderer also uses `throwOnError: false` as a safety net) |
 | An object, or an `{x, y}` point in an anchor, outside the 1600 × 900 canvas (for a matrix, its whole cell box; for `text` and `latex`, only their x,y) | rejected: `off canvas` |
 | Two objects with the same id | rejected: `duplicate id "x"` |
 | Narration longer than `config.maxNarrationChars` after the markers are stripped | rejected: `narration too long` |
-| A sketch action or anchor uses an id from the board the sketch draws on | valid. With `fresh: true` the board is empty, so it's `unknown object "x"` |
+| A sketch action or anchor uses an id from the board the sketch draws on | valid |
+| The same, with `fresh: true` (the board is empty) | rejected: `unknown object "x"` |
 | A sketch object reuses an id from the board it draws on | rejected: `duplicate id "x"` |
 
 For a sketch, the known ids are its own objects plus those of the board it draws on (section 8).
@@ -232,9 +236,9 @@ sequenceDiagram
   - the plan and the step's goal
   - the previous step's narration if it has been generated, otherwise that step's goal from the plan (needed after a jump)
   - the learner signals (section 5.4)
-- **Cover illustration (fal).** The plan includes a `coverPrompt`. After the plan is saved, the server asks fal for **one** image and saves it as `runs/<id>/cover.<ext>`. The plan page shows it, and the lesson page shows it as a header.
+- **Cover illustration (fal).** The plan includes a `coverPrompt`. After the plan is saved, the server asks fal for **one** image and saves it in the run folder, recording its file name as `cover` in `plan.json` and in the plan response. The upload page's plan view shows it, and the lesson page shows it as a header.
   - It sits outside the scene contract and `sceneAt`: it's page chrome, not a board object.
-  - The plan route waits for it up to `config.coverTimeoutMs`. If fal is slow, fails or has no `FAL_KEY`, the plan is returned and saved without a cover, and the pages show no image.
+  - The plan route waits for it up to `config.coverTimeoutMs`. If fal is slow, fails or has no `FAL_KEY`, the plan is returned and saved without `cover`, and the pages show no image. The timeout is kept to a few seconds, since step 0 is requested after the plan returns.
   - Budget: about 25 US dollars of fal credits per teammate. So it's one image per lesson plan, a saved cover is never regenerated, replay never calls fal, and tests use the fal fake.
 - **Files reach the browser through `GET /api/runs/<lessonId>/<file>`.** `runs/` is outside `public/`, and `next start` won't serve files added after the build.
   - The player fetches each step's audio as a blob and plays it from a `blob:` URL. That keeps seeking reliable without HTTP Range support in the route.
@@ -268,7 +272,7 @@ Property-based tests (fast-check) check three things:
 sceneAt(objects: BoardObject[], timed: { action; startMs; durationMs }[], tMs: number): BoardState
 ```
 
-- `BoardState` is every object with its visibility, highlight, position and value at `tMs`, plus the moved copies of matrix parts. For each action in progress, it also includes how far along it is (0..1).
+- `BoardState` (a zod schema in `shared/scene.ts`, since `/api/sketch` receives it) is every object with its visibility, highlight, position and value at `tMs`, plus the moved copies of matrix parts. For each action in progress, it also includes how far along it is (0..1).
 - **Lesson mode:** `timed` comes from `cueTimes`, and `tMs` is `audio.currentTime * 1000`.
 - **Q&A mode:** the lesson board stays at `pausedT`, with the Q&A drawing on top (section 8). `objects` is the step's objects plus each sketch's objects. `timed` is the step's actions that started by `pausedT`, plus each Q&A action at `pausedT` + the time since Ask opened when it arrived (+ `atMs` for a sketch). `tMs` is `pausedT` + the time since Ask opened. After a `fresh` sketch, the step and earlier sketches are left out.
 - Back, Replay and scrubbing are just seeks on the audio element. There's no animation state to undo.
@@ -351,7 +355,7 @@ Every state × event pair has a defined result, and each cell gets a test:
 | playing | ignored (late reply) | → stepEnded | → paused, with "Press play to start" | → failed ("Couldn't play the audio. Retry?") | → paused | ignored | seek to 0, stays playing | → asking (narration paused) | can't happen | can't happen | ignored (Next only after the step ends) | → loading(prev), or seek to 0 on step 0 | → loading(n) | ignored |
 | paused | ignored (late reply) | can't happen (audio stopped) | can't happen | ignored | ignored | → playing | seek to 0 → playing | → asking | can't happen | can't happen | ignored | → loading(prev), or seek to 0 → playing on step 0 | → loading(n) | ignored |
 | stepEnded | ignored (late reply) | can't happen | can't happen | ignored | ignored | ignored | seek to 0 → playing | → asking | can't happen | can't happen | → loading(next), or → finished on the last step | → loading(prev), or seek to 0 → playing on step 0 | → loading(n) | ignored |
-| asking | Ask opened from loading(k) and i = k: remembered for closeAsk. Otherwise ignored (late reply) | can't happen (narration paused) | can't happen | ignored | ignored | ignored | ignored | ignored | → the state Ask was opened from (playing becomes paused; loading(k) becomes paused, or failed with "Couldn't make this step. Retry?", if step k's result arrived meanwhile, and otherwise stays loading(k)), or → loading(n, no autoplay) if the agent called goToStep(n). The Q&A drawing is discarded and the board is `sceneAt(step, pausedT)` again | same as closeAsk, plus "Q&A ended unexpectedly." | ignored | ignored | stays asking, remembers n (agent tool) | ignored |
+| asking | Ask opened from loading(k) and i = k: remembered for closeAsk. Otherwise ignored (late reply) | can't happen (narration paused) | can't happen | ignored | ignored | ignored | ignored | ignored | → the state Ask was opened from (playing becomes paused; loading(k) becomes paused, or failed with "Couldn't make this step. Retry?", if step k's result arrived meanwhile, and otherwise stays loading(k)), or → loading(n, no autoplay) if the agent called goToStep(n). The Q&A drawing is discarded and the board is `sceneAt(step, pausedT)` again (or the arrived step at 0, from loading) | same as closeAsk, plus "Q&A ended unexpectedly." | ignored | ignored | stays asking, remembers n (agent tool) | ignored |
 | failed | ignored (late reply) | can't happen | can't happen | can't happen | ignored | ignored | ignored | rejected: nothing to ask about | can't happen | can't happen | ignored | → loading(prev), or ignored on step 0 | → loading(n) | → loading(same) |
 | finished | ignored (late reply) | can't happen | can't happen | ignored | ignored | ignored | seek to 0 → playing | → asking | can't happen | can't happen | ignored | → loading(last) | → loading(n) | ignored |
 
@@ -387,7 +391,7 @@ stateDiagram-v2
 | started | returns the played version | discarded: an attempt still running when an older version started (A1) | discarded (A1) | discarded (A1) | discarded (A1) | ignored (already heard) | ignored | ignored |
 | failed | returns "Couldn't make this step." | can't happen | can't happen | can't happen | can't happen | ignored | can't happen (not served) | → generating |
 
-Cells marked A1 can only happen once adaptation (A1) is built: G2 tests the others, and A1 tests those. A fal error doesn't fail the step: the image object is hidden (section 7). In replay mode this machine doesn't run, and a step missing from the folder is a `failed` step.
+The two columns marked (A1), and the cells marked A1, can only happen once adaptation (A1) is built: A1 tests those, and G2 tests the rest. A fal error doesn't fail the step: the image object is hidden (section 7). In replay mode this machine doesn't run, and a step missing from the folder is a `failed` step.
 
 ## 7. Errors and rejections
 
@@ -440,10 +444,10 @@ The developer gets the full error in the server log, tagged with the route, less
 
 - `draw_scene` doesn't wait, because a Claude request can't finish inside a natural pause. The agent's prompt tells it to describe the sketch out loud while it appears. A failed sketch is logged and shows "Couldn't draw that". Spike S2 measures the sketch's latency.
 - `draw_scene` takes plain words, not scene JSON. The voice model only describes what to draw, and Claude writes the validated sketch, so the scene schema stays in one place and out of the agent's prompt.
-- **A sketch builds on the board the learner is looking at.** The request body is `{ description, fresh, board }`, where `board` is the current `BoardState`. The route checks the body with zod. Claude sees the board, so an answer to "why does the row go with the column?" can highlight and draw over the matrix on screen.
-  - The sketch's ids are checked against its own objects plus the board's (section 4). With `fresh: true` the sketch starts from an empty board, and so do later sketches in this Ask.
+- **A sketch builds on the board the learner is looking at.** The request body is `{ description, fresh, board }`, where `board` is the current `BoardState`. The route checks the body with zod, including a cap on the board's size. Claude sees the board, so an answer to "why does the row go with the column?" can highlight and draw over the matrix on screen.
+  - The sketch's ids are checked against its own objects plus the board's (section 4). With `fresh: true` the sketch starts from an empty board, and later sketches in this Ask build on that new board, not the lesson board.
   - The browser validates the sketch again against the board it has when the sketch arrives, since the board may have changed while Claude worked.
-- **The board during Ask.** Ask freezes the lesson board at `pausedT`: the audio time when Ask opened, the end of the step from `stepEnded` or `finished`, or an empty board from `loading`. `highlight` and sketches draw on top of it, each timed from when it arrives. **Closing Ask throws all of that away**: the board goes back to `sceneAt(step, pausedT)`, and the narration carries on from there.
+- **The board during Ask.** Ask freezes the lesson board at `pausedT`: the audio time when Ask opened, the end of the step from `stepEnded` or `finished`, or an empty board from `loading`. `highlight` and sketches draw on top of it, each timed from when it arrives. **Closing Ask throws all of that away**: the board goes back to `sceneAt(step, pausedT)` and the player is paused there (section 6.1), so Play carries on from the same point. If Ask was opened while loading and the step arrived meanwhile, the board is that step at 0.
 - **Agent config in the repo.** We use the official **ElevenLabs CLI** (`@elevenlabs/cli`) rather than writing our own sync script.
   - The agent and its client tools are config files in `agent/`, pushed with the CLI's agent and tool `push` commands.
   - The CLI tracks the agent's id. Its tracking file is committed, so the team shares **one** agent.
@@ -477,7 +481,7 @@ The developer gets the full error in the server log, tagged with the route, less
 
 - `lib/env.ts` validates the env once, at server start, from `instrumentation.ts` `register()`, with zod. Code behind it trusts the values. A missing required key stops the server, and the error names the key.
 - Keys are only read in `lib/` and the API routes, which import `"server-only"`. The browser never sees a key.
-- All of these live in `lib/config.ts`: model ids, effort per request type, `maxNarrationChars`, `maxPdfMb`, `coverTimeoutMs` and the `runs/` path.
+- All of these live in `lib/config.ts`: model ids, effort per request type, `maxNarrationChars`, `maxPdfMb`, `coverTimeoutMs`, the image cap per lesson (E1) and the `runs/` path.
 
 ## 10. Testing: how we prove it works
 
