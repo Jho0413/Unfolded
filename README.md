@@ -13,6 +13,12 @@ What we're building: [`PROJECT_BRIEF.md`](PROJECT_BRIEF.md). How it runs: [`docs
 3. Run `tools/board whoami` in the repo. It should print your GitHub login.
 4. Start your agent in the repo. Claude Code picks up the board through the hooks in `.claude/`; other agents read `AGENTS.md` and run `tools/board unread` before each task.
 
+## Running the app
+
+Copy `.env.example` to `.env.local` and fill in the keys (which ones are required depends on the mode: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#9-configuration-and-secrets) §9). Then `npm run build && npm start`. A missing key stops the server, and the error names it.
+
+`npm run e2e` builds `.next` with `NEXT_PUBLIC_FAKE_APIS=1` baked in. A later `npm start` without `FAKE_APIS=1` refuses to start on that build, so run `npm run build` again first.
+
 ## Commands
 
 | Command | What it does |
