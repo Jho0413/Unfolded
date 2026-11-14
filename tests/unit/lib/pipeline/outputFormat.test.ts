@@ -1,6 +1,7 @@
 // lib/pipeline/outputFormat.ts: the wire format Claude fills in (#57, ARCHITECTURE.md
 // sections 4 and 5.1). One test per conversion row, named after it, plus round trips: every
-// valid shared Step or Sketch read as wire comes back identical, so the two can't drift.
+// valid shared Step or Sketch, parsed as wire, comes back identical, and every field of every
+// contract action is on the wire, so the two can't drift apart.
 import type Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import fc from "fast-check";
@@ -18,12 +19,22 @@ import {
   wireToSketch,
   wireToStep,
 } from "@/lib/pipeline/outputFormat";
-import { type BoardState, MAX_DURATION_MS, Sketch, Step } from "@/shared/scene";
+import {
+  type BoardState,
+  CuedAction,
+  MAX_DURATION_MS,
+  Sketch,
+  Step,
+  TimedSketchAction,
+} from "@/shared/scene";
 import { errors } from "@/shared/validate";
 
 const LIMITS = { maxNarrationChars: config.maxNarrationChars };
 
-/** A contract step read as wire: a compile error here means the contract outgrew the wire. */
+/**
+ * A parsed contract step read as wire. This compiles only while every contract action kind
+ * and field type fits the wire; a new field is caught by the field-coverage tests below.
+ */
 const stepToWire = (step: Step): WireStep => step;
 const sketchToWire = (sketch: Sketch): WireSketch => sketch;
 
@@ -276,7 +287,7 @@ describe("round trip: contract -> wire -> contract", () => {
   it("every schema-valid Step comes back identical, with no errors (property)", () => {
     fc.assert(
       fc.property(step, (s) => {
-        expect(wireToStep(stepToWire(s))).toStrictEqual({
+        expect(wireToStep(WireStep.parse(stepToWire(s)))).toStrictEqual({
           value: s,
           errors: [],
         });
@@ -287,7 +298,7 @@ describe("round trip: contract -> wire -> contract", () => {
   it("every schema-valid Sketch comes back identical, with no errors (property)", () => {
     fc.assert(
       fc.property(sketch, (s) => {
-        expect(wireToSketch(sketchToWire(s))).toStrictEqual({
+        expect(wireToSketch(WireSketch.parse(sketchToWire(s)))).toStrictEqual({
           value: s,
           errors: [],
         });
@@ -317,6 +328,45 @@ describe("round trip: contract -> wire -> contract", () => {
         // What converts is a contract step.
         expect(Step.safeParse(value).success).toBe(true);
       }),
+    );
+  });
+});
+
+// ------------------------------------------------------------ field coverage
+
+/** Every field of every member of a contract action union. */
+function contractFields(union: typeof CuedAction | typeof TimedSketchAction) {
+  return new Set(union.options.flatMap((o) => Object.keys(o.shape)));
+}
+function contractKinds(union: typeof CuedAction | typeof TimedSketchAction) {
+  return new Set(union.options.map((o) => o.shape.do.value));
+}
+
+describe("field coverage: the wire has every contract action field and kind", () => {
+  it("every field of every contract step action is a wire step action field", () => {
+    const wire = WireStep.shape.actions.element;
+    expect(new Set(Object.keys(wire.shape))).toEqual(
+      contractFields(CuedAction),
+    );
+    expect(new Set(wire.shape.do.options)).toEqual(contractKinds(CuedAction));
+  });
+
+  it("every field of every contract sketch action is a wire sketch action field", () => {
+    const wire = WireSketch.shape.actions.element;
+    expect(new Set(Object.keys(wire.shape))).toEqual(
+      contractFields(TimedSketchAction),
+    );
+    expect(new Set(wire.shape.do.options)).toEqual(
+      contractKinds(TimedSketchAction),
+    );
+  });
+
+  it("the wire step and sketch have the contract's top-level fields", () => {
+    expect(Object.keys(WireStep.shape).sort()).toEqual(
+      Object.keys(Step.shape).sort(),
+    );
+    expect(Object.keys(WireSketch.shape).sort()).toEqual(
+      Object.keys(Sketch.shape).sort(),
     );
   });
 });
@@ -467,17 +517,36 @@ describe("validateWireStep / validateWireSketch", () => {
     });
   });
 
-  it("the contract's rules still apply after conversion (a range the wire doesn't check)", () => {
-    const wire = wireStepWith({
-      do: "show",
-      target: { id: "a" },
-      durationMs: MAX_DURATION_MS + 1,
-      cue: "go",
-    });
+  it("a field error is reported under the action's wire index, even after an action that can't convert", () => {
+    const wire = wireStepWith(
+      { do: "move", target: { id: "a" }, durationMs: 400, cue: "go" },
+      {
+        do: "show",
+        target: { id: "a" },
+        durationMs: MAX_DURATION_MS + 1,
+        cue: "Not_a_cue",
+      },
+    );
     const result = validateWireStep(wire, LIMITS);
     expect(result.ok).toBe(false);
     if (!result.ok)
-      expect(result.errors[0]).toMatch(/^actions\.0\.durationMs:/);
+      expect(result.errors).toEqual([
+        expect.stringMatching(/^actions\.1\.durationMs: /),
+        expect.stringMatching(/^actions\.1\.cue: /),
+      ]);
+  });
+
+  it("a wire action without durationMs is a schema rejection: the contract's default doesn't apply on the wire", () => {
+    const noDuration = { do: "show", target: { id: "a" }, cue: "go" };
+    const result = validateWireStep(
+      { ...wireStepWith(), actions: [noDuration] },
+      LIMITS,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok)
+      expect(result.errors).toEqual([
+        expect.stringMatching(/^actions\.0\.durationMs: /),
+      ]);
   });
 
   it("output that fails the wire schema is a rejection with path: message errors", () => {

@@ -19,6 +19,8 @@ import {
   BoardObject,
   type CuedAction,
   HighlightColor,
+  MAX_DURATION_MS,
+  OBJECT_ID_RE,
   type Sketch,
   type Step,
   Target,
@@ -33,8 +35,9 @@ import {
 } from "@/shared/validate";
 
 /**
- * Every action kind's fields in one object. Ranges and the cue's format aren't checked here:
- * validateStep / validateSketch check them on the converted action.
+ * Every action kind's fields in one object. Each field has the contract's own constraints, so
+ * an error in it is reported here, under the action's index on the wire: once an action that
+ * can't convert is dropped, the contract would number the later ones differently.
  */
 const wireAction = {
   do: z.enum([
@@ -46,7 +49,7 @@ const wireAction = {
     "write",
   ] satisfies Action["do"][]),
   target: Target,
-  durationMs: z.number().int(),
+  durationMs: z.number().int().min(0).max(MAX_DURATION_MS),
   /** highlight and unhighlight only. */
   color: HighlightColor.optional(),
   /** move only, and required there. */
@@ -59,13 +62,15 @@ export const WireStep = z.object({
   title: z.string(),
   narration: z.string(),
   objects: z.array(BoardObject),
-  actions: z.array(z.object({ ...wireAction, cue: z.string() })),
+  actions: z.array(
+    z.object({ ...wireAction, cue: z.string().regex(OBJECT_ID_RE) }),
+  ),
 });
 export type WireStep = z.infer<typeof WireStep>;
 
 export const WireSketch = z.object({
   objects: z.array(BoardObject),
-  actions: z.array(z.object({ ...wireAction, atMs: z.number().int() })),
+  actions: z.array(z.object({ ...wireAction, atMs: z.number().int().min(0) })),
 });
 export type WireSketch = z.infer<typeof WireSketch>;
 
