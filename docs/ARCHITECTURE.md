@@ -79,6 +79,7 @@ shared/                             imported by server and browser (the contract
   scene.ts                          zod schemas: board objects, actions, step, sketch, board state
   lesson.ts                         zod schemas: lesson plan, API responses
   validate.ts                       checks that zod can't express (ids, cues, bounds)
+  latex.ts                          KaTeX options for untrusted tex (validator and renderer)
   tools.ts                          the client tool names and parameter schemas (one list for the agent config and qa/tools.ts)
 lib/                                server-only (import "server-only")
   config.ts                         model ids, effort, limits, paths: one place
@@ -301,6 +302,7 @@ sceneAt(objects: BoardObject[], timed: { action; startMs; durationMs }[], tMs: n
   - `player/sceneAt.ts` also exports `timeline(actions, cueTimes)`, which builds `timed` in lesson mode, and `resolveAnchor(board, anchor)`, which gives the renderer arrow ends. The renderer reuses its target helpers (`partKey`, `isPart`, `coversCell`, `highlightColor`) rather than copying them.
 - Back, Replay and scrubbing are just seeks on the audio element. There's no animation state to undo.
 - `Whiteboard.tsx` renders `BoardState` as SVG on each animation frame. Positions (moves included) come from `sceneAt`; the renderer only fades shows, hides, highlights and writes by each action's progress, and exposes state as `data-*` attributes for tests.
+- **Latex and arrows on the board.** `latex` is KaTeX's HTML in a `foreignObject` centred on x,y, rendered with `shared/latex.ts`'s `KATEX_OPTIONS` (trust off, `maxSize` and `maxExpand` capped; `validate.ts` uses the same options) and `throwOnError: false`, so tex that slips through shows as KaTeX's red source text instead of breaking the board (if KaTeX fails outright, the source shows as plain text). An arrow resolves its ends with `resolveAnchor` on every frame. An end on a point is exact; an end on a target stops just outside the target's box (cells, text box, image; for latex, a box estimated from KaTeX's output, since its real size is only known after layout), so the head doesn't cover what it points at. The label sits beside the middle of the line, far enough out that its box clears it. `data-from-*`/`data-to-*` are the resolved anchors.
 - Motion is only used for UI chrome, such as panels and buttons, not for board objects, so the board always matches the clock.
 
 ### 5.4 Adaptation

@@ -4,6 +4,7 @@
 //   /dev/board                              the fixed BoardState
 //   /dev/board?scene=m1&t=3400              demo-m1 at 3400 ms, via sceneAt
 //   /dev/board?scene=m1-late-highlight&t=…  demo-m1 with a highlight after the slide
+//   /dev/board?scene=arrows&t=…             arrows following moving objects
 //
 // Production servers answer 404 unless in fake mode (app/dev/devOnly.ts).
 import type { Metadata } from "next";
@@ -15,7 +16,7 @@ import { CANVAS } from "@/shared/scene";
 import { DevShell } from "../DevShell";
 import { devPagesEnabled } from "../devOnly";
 import { first, type SearchParams } from "../query";
-import { M1_CUE_TIMES, SCENES, isScene, sceneState } from "./scenes";
+import { SCENES, SCENE_TIMES, isScene, sceneState } from "./scenes";
 
 export const metadata: Metadata = {
   title: "Dev: board",
@@ -35,14 +36,14 @@ export default async function DevBoardPage({
   const parsedT = Number(first(params.t) ?? 0);
   const tMs = Number.isFinite(parsedT) && parsedT >= 0 ? parsedT : 0;
   const state = sceneState(scene, tMs);
-  const timed = scene !== "fixed";
+  const times = scene === "fixed" ? undefined : SCENE_TIMES[scene];
 
   return (
     <DevShell
       note="Dev only: renderer test page, not part of the product."
       data-testid="dev-board"
       data-scene={scene}
-      data-t={timed ? tMs : undefined}
+      data-t={times ? tMs : undefined}
     >
       <nav
         style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 8 }}
@@ -59,7 +60,7 @@ export default async function DevBoardPage({
           </Link>
         ))}
       </nav>
-      {timed && (
+      {times && (
         <nav
           aria-label="Cue times"
           style={{
@@ -70,7 +71,7 @@ export default async function DevBoardPage({
           }}
         >
           <span>t = {tMs} ms. Cues:</span>
-          {Object.entries(M1_CUE_TIMES).map(([cue, ms]) => (
+          {Object.entries(times).map(([cue, ms]) => (
             <Link key={cue} href={`/dev/board?scene=${scene}&t=${ms}`}>
               {cue} ({ms})
             </Link>

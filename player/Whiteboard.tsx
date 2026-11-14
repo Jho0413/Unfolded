@@ -2,10 +2,13 @@
 // the 1600 x 900 canvas. It is a pure function of the state, with no Motion
 // and no animation state: the caller passes sceneAt(..., t) on each frame,
 // and effects in progress (fades, highlights) come from `active` progress.
-// Moves are already interpolated by sceneAt.
+// Moves are already interpolated by sceneAt, and arrows resolve their ends
+// on the state, so they follow what they point at.
 import type { BoardState } from "@/shared/scene";
 import { CANVAS } from "@/shared/scene";
 import { partKey } from "./sceneAt";
+import { Arrow } from "./primitives/Arrow";
+import { Latex } from "./primitives/Latex";
 import { Copy, Matrix } from "./primitives/Matrix";
 import { Text } from "./primitives/Text";
 import { BOARD_BG, FONT } from "./primitives/style";
@@ -46,9 +49,14 @@ export function Whiteboard({
             return (
               <Text key={object.id} text={object} state={s} active={active} />
             );
-          default:
-            // latex, arrow and image arrive with P7 and E1.
-            return null;
+          case "latex":
+            return (
+              <Latex key={object.id} latex={object} state={s} active={active} />
+            );
+          case "arrow":
+            return null; // drawn last, below
+          case "image":
+            return null; // arrives with E1
         }
       })}
       {/* Copies are drawn last, so a sliding row passes over the board. */}
@@ -65,6 +73,18 @@ export function Whiteboard({
           />
         );
       })}
+      {/* Arrows are drawn over everything, so one into a sliding copy stays visible. */}
+      {objects.map((s) =>
+        s.object.kind === "arrow" ? (
+          <Arrow
+            key={s.object.id}
+            arrow={s.object}
+            state={s}
+            board={state}
+            active={active}
+          />
+        ) : null,
+      )}
     </svg>
   );
 }
