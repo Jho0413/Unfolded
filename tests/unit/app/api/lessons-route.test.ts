@@ -501,10 +501,7 @@ describe("POST /api/lessons with FAKE_APIS=1", () => {
 });
 
 describe("POST /api/lessons: the cover (L4)", () => {
-  const JPEG = {
-    bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xe0]),
-    contentType: "image/jpeg",
-  };
+  const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
 
   /** A 200 whose plan, answered and saved, has no cover, and no cover file in the run. */
   async function expectNoCover(res: Response) {
@@ -526,7 +523,7 @@ describe("POST /api/lessons: the cover (L4)", () => {
     expect(plan).toEqual({ ...PLAN, cover: config.cover.file });
     expect(state.images.prompts).toEqual([PLAN.coverPrompt]);
     await expect(readFile(coverPath(lessonId))).resolves.toEqual(
-      Buffer.from(JPEG.bytes),
+      Buffer.from(JPEG),
     );
     await expect(readRunJson(lessonId, PLAN_FILE, LessonPlan)).resolves.toEqual(
       plan,
@@ -551,7 +548,7 @@ describe("POST /api/lessons: the cover (L4)", () => {
     expect(logs.warned()).toContain("no cover after 50 ms");
   });
 
-  it("a missing FAL_KEY still returns the plan without a cover, and fal isn't called", async () => {
+  it("a missing FAL_KEY still returns the plan without a cover: there's no fal to call", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     vi.stubEnv("FAKE_APIS", undefined);
     vi.stubEnv("REPLAY_RUN", undefined);
@@ -566,11 +563,12 @@ describe("POST /api/lessons: the cover (L4)", () => {
     expect(info.mock.calls.flat().join(" ")).toContain("no FAL_KEY");
   });
 
-  it("an image that isn't a JPEG still returns the plan without a cover", async () => {
+  it("an image that isn't a JPEG (by its bytes) still returns the plan without a cover", async () => {
     const logs = quietLogs();
     script(reply(PLAN));
-    state.images = fakeImages([{ ...JPEG, contentType: "image/png" }]);
+    // A PNG's first bytes.
+    state.images = fakeImages([new Uint8Array([0x89, 0x50, 0x4e, 0x47])]);
     await expectNoCover(await postFile(pdfs["tiny.pdf"]));
-    expect(logs.warned()).toContain("not a JPEG");
+    expect(logs.warned()).toContain("aren't a JPEG");
   });
 });

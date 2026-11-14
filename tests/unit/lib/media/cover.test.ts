@@ -1,11 +1,17 @@
 // The cover (ROADMAP L4, ARCHITECTURE.md section 5.1): the rows the plan route can't reach,
 // since it always makes a new lesson. fal is the fake in lib/fakes/fal.ts, never the real one.
 import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { setTimeout as sleep } from "node:timers/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeImages } from "@/lib/fakes/fal";
-import { addCover, CoverTimeoutError, withDeadline } from "@/lib/media/cover";
+import {
+  addCover,
+  CoverTimeoutError,
+  isJpeg,
+  withDeadline,
+} from "@/lib/media/cover";
 import type { LessonPlan } from "@/shared/lesson";
 
 const state = vi.hoisted(() => ({ runs: "" }));
@@ -26,7 +32,7 @@ const PLAN: LessonPlan = {
   coverPrompt: "a simple cover",
   steps: [{ title: "One", goal: "Teach one idea." }],
 };
-const JPEG = { bytes: new Uint8Array([0xff, 0xd8]), contentType: "image/jpeg" };
+const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xdb]);
 
 beforeEach(async () => {
   state.runs = await mkdtemp(path.join(tmpdir(), "l4-cover-"));
@@ -47,7 +53,7 @@ describe("addCover", () => {
 
   it("an empty image is no cover", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    const images = fakeImages([{ ...JPEG, bytes: new Uint8Array() }]);
+    const images = fakeImages([new Uint8Array()]);
     await expect(addCover("lesson-1", PLAN, images)).resolves.toEqual(PLAN);
   });
 
@@ -57,6 +63,30 @@ describe("addCover", () => {
     const images = fakeImages([JPEG]);
     await expect(addCover("../bad", PLAN, images)).resolves.toEqual(PLAN);
     expect(warn).toHaveBeenCalled();
+  });
+
+  it("an image that arrives after the deadline writes nothing", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const late = {
+      make: async () => {
+        await sleep(60);
+        return JPEG;
+      },
+    };
+    await expect(addCover("lesson-1", PLAN, late, 20)).resolves.toEqual(PLAN);
+    await sleep(100);
+    expect(await readdir(state.runs)).toEqual([]);
+  });
+});
+
+describe("isJpeg", () => {
+  it.each([
+    ["a JPEG's first bytes", JPEG, true],
+    ["empty", new Uint8Array(), false],
+    ["too short", new Uint8Array([0xff, 0xd8]), false],
+    ["a PNG", new Uint8Array([0x89, 0x50, 0x4e, 0x47]), false],
+  ])("%s", (_, bytes, expected) => {
+    expect(isJpeg(bytes)).toBe(expected);
   });
 });
 

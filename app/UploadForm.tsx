@@ -1,7 +1,8 @@
 "use client";
 // The upload page's form (ROADMAP L1, ARCHITECTURE.md sections 5.1 and 7): pick a PDF, send it
 // to POST /api/lessons, then show the plan (its fal cover if it has one, ROADMAP L4, and its
-// step titles) with the way into the lesson. Failures show the server's plain words, with the form still there to try again.
+// step titles) with the way into the lesson. Failures show the server's plain words, with the
+// form still there to try again.
 import Link from "next/link";
 import { type CSSProperties, type FormEvent, useState } from "react";
 import { BOARD_BG, INK, MUTED } from "@/player/primitives/style";

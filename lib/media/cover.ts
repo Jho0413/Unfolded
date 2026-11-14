@@ -11,6 +11,14 @@ import { writeRunFile } from "@/lib/runs/store";
 
 const TAG = "[cover]";
 
+/** Every JPEG starts with these bytes (an SOI marker, then the next marker's FF). */
+const JPEG_MAGIC = [0xff, 0xd8, 0xff];
+
+/** True when `bytes` are a JPEG by their first bytes: fal's answer is untrusted. */
+export function isJpeg(bytes: Uint8Array): boolean {
+  return JPEG_MAGIC.every((b, i) => bytes[i] === b);
+}
+
 export class CoverTimeoutError extends Error {
   override name = "CoverTimeoutError";
 }
@@ -61,11 +69,9 @@ export async function addCover(
       timeoutMs,
     );
     // The file is named .jpg and served as image/jpeg: anything else would be served wrongly.
-    if (!image.contentType.startsWith("image/jpeg") || image.bytes.length === 0)
-      throw new Error(
-        `fal sent ${image.bytes.length} bytes of "${image.contentType}", not a JPEG`,
-      );
-    await writeRunFile(lessonId, config.cover.file, image.bytes);
+    if (!isJpeg(image))
+      throw new Error(`fal sent ${image.length} bytes that aren't a JPEG`);
+    await writeRunFile(lessonId, config.cover.file, image);
     return { ...plan, cover: config.cover.file };
   } catch (err) {
     console.warn(TAG, `lesson ${lessonId}: no cover:`, err);

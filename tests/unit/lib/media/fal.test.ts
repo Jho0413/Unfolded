@@ -84,10 +84,7 @@ describe("falImages() by mode", () => {
       "anything",
       new AbortController().signal,
     );
-    expect(image.contentType).toBe("image/jpeg");
-    expect(image.bytes).toEqual(
-      await readFixtureBytes(config.fal.fixtureImage),
-    );
+    expect(image).toEqual(await readFixtureBytes(config.fal.fixtureImage));
     expect(fal.subscribe).not.toHaveBeenCalled();
   });
 });
@@ -144,10 +141,7 @@ describe("the real maker (mocked client)", () => {
       }),
     );
     expect(fetch).toHaveBeenCalledWith(URL_, { signal });
-    expect(image).toEqual({
-      bytes: new Uint8Array([1, 2, 3]),
-      contentType: "image/jpeg",
-    });
+    expect(image).toEqual(new Uint8Array([1, 2, 3]));
     expect(fal.cancel).not.toHaveBeenCalled();
   });
 

@@ -1,5 +1,6 @@
-// The upload page (ROADMAP L1): a PDF in, the plan shown as a list of step titles, then into
-// the lesson. FAKE_APIS=1 serves the recorded upload and plan, so no provider is called. Each
+// The upload page (ROADMAP L1, L4): a PDF in, the plan shown with its cover and a list of step
+// titles, then into the lesson. FAKE_APIS=1 serves the recorded upload, plan and fal cover, so
+// no provider is called. Each
 // lesson this writes goes to the e2e runs folder and is removed afterwards.
 import { readFileSync } from "node:fs";
 import { rm } from "node:fs/promises";

@@ -9,18 +9,13 @@ import { config } from "@/lib/config";
 import { getEnv } from "@/lib/env";
 import { fakeImages } from "@/lib/fakes/fal";
 
-/** A finished image, already downloaded. */
-export interface Image {
-  bytes: Uint8Array;
-  contentType: string;
-}
-
 /**
- * Makes one image from a prompt. The caller owns the deadline: it aborts `signal` when it
- * gives up, and the maker stops what it can (and asks fal to cancel).
+ * Makes one image from a prompt and returns its bytes, already downloaded. The caller owns
+ * the deadline: it aborts `signal` when it gives up, and the maker stops what it can (and
+ * asks fal to cancel a queued request).
  */
 export interface ImageMaker {
-  make(prompt: string, signal: AbortSignal): Promise<Image>;
+  make(prompt: string, signal: AbortSignal): Promise<Uint8Array>;
 }
 
 /** The part of a FLUX result we use. fal's answer is checked here, where it enters. */
@@ -56,10 +51,13 @@ function realImages(key: string): ImageMaker {
     async make(prompt, signal) {
       let requestId: string | undefined;
       // fal.subscribe's abortSignal stops the client but leaves the request queued at fal,
-      // still to be charged: cancel it (fal can't cancel one that's already running).
+      // still to be charged: cancel it (fal can't cancel one that's already running). An
+      // abort before fal answers the submit has no request id, so there's nothing to cancel.
       const cancel = () => {
-        if (requestId !== undefined)
-          fal.queue.cancel(model, { requestId }).catch(() => {});
+        if (requestId === undefined) return;
+        fal.queue.cancel(model, { requestId }).catch((err: unknown) => {
+          console.warn("[fal]", `couldn't cancel request ${requestId}:`, err);
+        });
       };
       signal.addEventListener("abort", cancel, { once: true });
       try {
@@ -83,11 +81,8 @@ function realImages(key: string): ImageMaker {
   };
 }
 
-async function download(url: string, signal: AbortSignal): Promise<Image> {
+async function download(url: string, signal: AbortSignal): Promise<Uint8Array> {
   const res = await fetch(url, { signal });
   if (!res.ok) throw new Error(`fal image download: HTTP ${res.status}`);
-  return {
-    bytes: new Uint8Array(await res.arrayBuffer()),
-    contentType: res.headers.get("content-type") ?? "",
-  };
+  return new Uint8Array(await res.arrayBuffer());
 }
