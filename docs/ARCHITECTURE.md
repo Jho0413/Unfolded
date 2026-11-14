@@ -85,7 +85,7 @@ shared/                             imported by server and browser (the contract
 lib/                                server-only (import "server-only")
   config.ts                         model ids, effort, limits, paths: one place
   env.ts                            reads and validates env vars once
-  pipeline/plan.ts, step.ts, sketch.ts, prompts/, outputFormat.ts (the step's structured-output schema)
+  pipeline/plan.ts, step.ts, sketch.ts, prompts/, outputFormat.ts (the wire format Claude fills in for steps and sketches, and its converters)
   narration/cues.ts                 pure: strip markers, cue offsets -> times
   narration/tts.ts                  ElevenLabs TTS with timestamps -> audio + cue times (S1 fixture when FAKE_APIS=1)
   narration/makeM1.ts               npm run make:m1: demo-m1.step.json -> runs/demo-m1/ (plan.json, step-0.v<k>.json + .mp3)
@@ -108,7 +108,7 @@ qa/                                 browser
   context.ts                        pure: the sendContextualUpdate() message, and the narration heard by time t
   AskPanel.tsx                      voice + typed input, through conversation.ts; shows the Ask messages of section 7
   tools.ts                          client tool handlers, typed by shared/tools.ts
-scripts/                            dev scripts, run with tsx: make:m1 (make-m1.ts), seed:m2
+scripts/                            dev scripts, run with tsx: make:m1 (make-m1.ts), seed:m2, spike:s3
 agent/                              ElevenLabs CLI config: the agent (prompt, voice, LLM) and its client tools, plus the CLI's tracking file
 runs/                               gitignored: one folder per lesson (store + replay)
 tests/e2e/                          Playwright, with FAKE_APIS=1 and NEXT_PUBLIC_FAKE_APIS=1
@@ -201,8 +201,13 @@ type Sketch = {                               // what /api/sketch returns for a 
 | A sketch action or anchor uses an id from the board the sketch draws on | valid |
 | The same, with `fresh: true` (the board is empty) | rejected: `unknown object "x"` |
 | A sketch object reuses an id from the board it draws on | rejected: `duplicate id "x"` |
+| (wire format) A `move` with no `to` | rejected: `move needs to "x"` (x is the target's id; the action is dropped and the rest is still checked) |
+| (wire format) A `write` with no `value` | rejected: `write needs value "x"` (as above) |
+| (wire format) A field the action's kind doesn't take (`to` on a `show`, `color` on a `write`) | allowed (dropped, as zod drops unknown keys) |
 
 For a sketch, the known ids are its own objects plus those of the board it draws on (section 8).
+
+**The wire format (`lib/pipeline/outputFormat.ts`, #57).** Claude doesn't fill in this contract's schema directly: the API rejects `zodOutputFormat(Step)` and `zodOutputFormat(Sketch)` with "The compiled grammar is too large", because of the object union times the action union (S3, #27). So Claude fills in `WireStep` or `WireSketch`: the same objects, but every action is one flat object with `do` an enum of the six kinds and `color`, `to` and `value` optional. `validateWireStep` / `validateWireSketch` parse the wire, convert it with `wireToStep` / `wireToSketch` (pure), then run `validateStep` / `validateSketch` unchanged, and return the conversion's errors and the contract's in one list for the one retry. A parsed contract `Step` or `Sketch` is already a valid wire value, and converting it back gives the same value (a round-trip property test). The wire gives each action field the contract's own constraints, so a schema error names the action's index on the wire, and it requires `durationMs`, which the contract defaults to 400. `shared/` and the player never see the wire format. Neither wire schema has headroom (S3: one more object kind is rejected), so a new primitive needs a real request with the bigger schema before it merges; a size-budget test catches a schema that grows.
 
 When generation is rejected (output that isn't JSON, a zod schema error or a `validate.ts` rejection), the generator retries **once**, with the error messages added to the prompt. If the retry also fails, the step fails (section 6.2).
 
@@ -243,11 +248,11 @@ sequenceDiagram
   - The step system prompt must be byte-identical for every step.
   - The plan, goal, signals and (for a sketch) the current board go *after* the document block.
   - The plan and sketch requests use a different output format, so they build their own cache.
-- **Structured output.** Requests stream: `client.messages.stream({ output_config: { format } })`, then `await stream.finalMessage()`. For a step, `format` is `lib/pipeline/outputFormat.ts`'s JSON schema (today `zodOutputFormat(Step).schema`, from `@anthropic-ai/sdk/helpers/zod`), kept in its own file so it can be swapped for a simpler one.
-  - The generator checks `stop_reason` first: `refusal`, `max_tokens` and `model_context_window_exceeded` fail the step (section 6.2). Each attempt has a total deadline (`config.step.timeoutMs`, an abort signal), since the SDK's own `timeout` stops counting once a stream's headers arrive. Otherwise it parses the text itself with `validateStep`, not the SDK's `parsed_output` (whose parser throws before a refusal can be seen). So a schema failure, including constraints the API can't enforce (number ranges, item counts), and a `validate.ts` rejection give the same error list for the one retry.
+- **Structured output.** Requests stream: `client.messages.stream({ output_config: { format } })`, then `await stream.finalMessage()`. For a step, `format` is `lib/pipeline/outputFormat.ts`'s JSON schema for the wire format (`zodOutputFormat(WireStep).schema`, from `@anthropic-ai/sdk/helpers/zod`; section 4), and a sketch uses `WireSketch`.
+  - The generator checks `stop_reason` first: `refusal`, `max_tokens` and `model_context_window_exceeded` fail the step (section 6.2). Each attempt has a total deadline (`config.step.timeoutMs`, an abort signal), since the SDK's own `timeout` stops counting once a stream's headers arrive. Otherwise it parses the text itself with `validateWireStep` (the wire schema, the conversion, then `validateStep`), not the SDK's `parsed_output` (whose parser throws before a refusal can be seen). So a schema failure, including constraints the API can't enforce (number ranges, item counts), a conversion error and a `validate.ts` rejection give the same error list for the one retry.
   - The retry resends the first request, then Claude's rejected answer (unchanged, thinking included) and the errors, so it reuses the cached paper.
   - Effort per request type (plan, step, sketch) is set in `lib/config.ts`.
-  - The full `Step` schema is currently rejected with "The compiled grammar is too large" (found in S3 and G1); S3 is simplifying it. The rest of the step request (document by `file_id`, 1-hour cache, effort) was accepted on 2026-11-14.
+  - The contract's own `Step` schema is rejected with "The compiled grammar is too large" (S3, G1, #27), so requests send the wire format (section 4). On 2026-11-14 a real request accepted both `WireStep` and `WireSketch`, and one real step (Attention paper, scaled dot-product scores, `medium` effort) was valid on the first try in 9.3 s with 926 output tokens. That response is the `FAKE_APIS=1` step fixture (`lib/fakes/fixtures/claude-step.message.json`).
 - **Prompts are generic.** No paper-specific logic, hard-coded concept lists or examples taken from the demo paper, in prompts or code. Paper-specific content lives only in fixtures and demo checks.
 - **Prompts** live in `lib/pipeline/prompts/`. A step prompt receives:
   - the plan and the step's goal
@@ -459,6 +464,7 @@ The developer gets the full error in the server log, tagged with the route, less
 | Ask | Microphone permission denied | "Mic is off. Type your question; the answer will appear as text." | Typed input (text-only session) |
 | Tool | `draw_scene` sketch invalid, or the sketch request fails | The Ask panel shows "Couldn't draw that." The agent is told through `sendContextualUpdate()` (it doesn't wait for a result, section 8) | The agent answers in words |
 | Tool | `highlight` on an unknown id | Agent told `unknown object "x"` | None needed |
+| Tool | `highlight` or `go_to_step` arrives after Ask closed (tool calls are asynchronous) | Agent told "Ask is closed"; the board and the step don't change | None needed |
 | Server start | Missing required env var for the mode (section 9) | The server refuses to start and names the missing var | Fix `.env.local` |
 
 ## 8. Q&A mode
@@ -486,8 +492,8 @@ The developer gets the full error in the server log, tagged with the route, less
 
 | Tool | Parameters | Waits for result? | Effect | Returns to the agent |
 |---|---|---|---|---|
-| `highlight` | `target_id`, `row?`, `col?` | yes | Highlights part of the current board | `"ok"`, or the validation error |
-| `go_to_step` | `step` (1-based, as spoken) | yes | `goToStep(step - 1)`, which loads once Ask closes | `"ok"`, or `"no step n"` |
+| `highlight` | `target_id`, `row?`, `col?` | yes | Highlights part of the current board | `"ok"`, the validation error, or `"Ask is closed"` |
+| `go_to_step` | `step` (1-based, as spoken) | yes | `goToStep(step - 1)`, which loads once Ask closes | `"ok"`, `"no step n"`, or `"Ask is closed"` |
 | `draw_scene` | `description` (plain words), `fresh?` (default false) | **no** | Browser → `POST /api/sketch` (low effort) with the current board → `Sketch` → validated → drawn on top of the current board when it arrives, or on an empty board with `fresh: true` | nothing, so the agent keeps talking while the sketch is made |
 | `simplify_upcoming` | `reason` | no | Posts a signal (section 5.4) | nothing |
 
@@ -571,7 +577,43 @@ Each spike is time-boxed to 60 minutes, and its answer is written back into this
   - **Latency** (one call each, warm): 1.2–1.8 s for the 274-character M1 narration (about 19 s of audio), 0.46 s for 45 characters, and 0.25 s for 1 character. TTS is small next to the Claude step call.
   - **`cues.ts` on the real response:** no fix needed. On all three voices, every M1 cue time equals the direct alignment-index start (Alice: row 2601, col 3994, slide 5213, pair1 8498, pair2 9787, add 11146, total 12318, drop 14222, done 16718 ms). On the Unicode probe, cues after the emoji, at CJK, at a combining accent and at the end all land on the right entry. This hasn't been checked by ear: C1's ±100 ms check against the audio still applies.
 - **S2:** the Q&A agent's LLM, comparing two candidates on latency and tool-calling. Also: whether text-only sessions speak, and how long a `draw_scene` sketch takes.
+  - **Answer (2026-11-14, #53): `claude-haiku-5-5`.** It called `highlight` correctly every time. `gemini-3.5-flash` is about 0.3 s faster but highlighted the wrong target.
+  - **Method:** `agent/spikes/s2-llm.mjs` (`node --env-file=.env.local agent/spikes/s2-llm.mjs <llm> [--voice]`). It opens the real agent's conversation WebSocket through a signed URL (`GET /v1/convai/conversation/get-signed-url`) and overrides `prompt.llm` and `conversation.text_only` per session. It sends one `contextual_update` shaped like `qa/context.ts` for M1, with the narration so far and the ids `a, times, b, equals, c, p1, p2, sum`, then 4 typed questions. Each `client_tool_call` is answered with `"ok"`. The overrides work because the agent config allows them (`platform_settings.overrides`). Each model had 2 runs, so 8 turns per model, in `text_only` sessions with the draft prompt in `agent/agent_configs/tutor.json`.
+  - **Latency**, measured from `user_message` to the first agent event (a tool call or text) and to the final `agent_response`, over the 8 turns, as median (range):
+
+    | LLM | first event | full answer |
+    |---|---|---|
+    | `gemini-3.5-flash` | 0.97 s (0.68–1.09) | 1.56 s (1.08–1.97) |
+    | `claude-haiku-5-5` | 1.26 s (0.79–1.69) | 1.89 s (1.34–2.59) |
+
+  - **Tool calls:** the questions were "highlight the row of A we're using" (expected `{a, row 0}`), "which number in B gets multiplied by the two" (expected `{b, row 1, col 0}`), "where does the nineteen go" (expected `{c, row 0, col 0}`), and "why a row and a column" (no tool needed).
+    - **Haiku** was right 6 of 6 times. In one run it also highlighted the `2` in A (`{a, row 0, col 1}`) next to the `7` in B, which is a sensible extra.
+    - **Gemini** was right 4 of 6 times. Both times it answered "the row of A" with `{a, row 0, col 0}`, a single cell rather than the row.
+    - Both models called the tool before or as they started answering. Neither invented an id or sent a malformed parameter, and neither called a tool for the "why" question. Haiku's explanations were better: they gave the reason, not just the rule.
+  - **Text-only sessions don't speak.** None of the 16 `text_only: true` turns sent any `audio` event: there were only `agent_response`, `agent_chat_response_part`, `client_tool_call` and `agent_tool_response`. A **typed** question in a **voice** session *is* spoken: 27 audio chunks, with first audio at 1.96 s and the text at 2.19 s, for Haiku. So mic-denied sessions must start with `textOnly` (the override is allowed in the config), and typed questions in a voice session are answered aloud.
+  - **Not measured:** how long a `draw_scene` sketch takes. It needs `/api/sketch` (SK1), so SK1 measures it.
+  - **For Q1:** set `prompt.llm` to `claude-haiku-5-5`. Keep the `conversation.text_only` override (the React SDK's `textOnly` needs it). Drop the `prompt.llm` override unless we want to switch models live.
 - **S3:** whether Sonnet 5.5 writes valid, good `Step` scripts from the Attention paper and from a second, different paper (non-ML or math-heavy), and the effort level needed for steps, plans and sketches.
+  - **Answer (2026-11-14, #11, #27).** Script: `npm run spike:s3` (`scripts/s3-spike.ts`; it uses the one-action schema below by default; the concepts are in `scripts/s3-spike.lessons.json`, and results go to `evidence/s3/`). Second paper: *Newton's Method in Three Precisions* (Kelley, arXiv 2307.16051, math.NA, 10 pages). Three concepts per paper: scaled dot-product scores, softmax over scores, and multi-head (Attention); the Newton step, iterative refinement, and why three precisions (Kelley). Each request sends the PDF from the Files API as a `document` block with a 1-hour `cache_control`, then the step goal, with the generic step system prompt in the script.
+  - **The contract schema is rejected (#27).** `zodOutputFormat(Step)` and `zodOutputFormat(Sketch)` both get a 400: "The compiled grammar is too large". This isn't the documented 24-optional-parameter limit. With every property made required, the schema still gets the same 400. The cause is the 5-kind object union combined with the 6-kind action union: either union alone is accepted. Two changes were tested, and both get `Step` and `Sketch` accepted (`npm run spike:s3 -- --probe` checks them; a rejected request costs nothing):
+    - **One action object (recommended):** a single object with `do` as an enum of the six kinds, `target`, `durationMs` and the cue (or `atMs`) required, and `color`, `to` and `value` optional. This makes 19 optional properties counted per use. `validate.ts` would then need two new rows, "`move` needs `to`" and "`write` needs `value`". It keeps `image`.
+    - **Four branches, no image:** merge `show|hide` and `highlight|unhighlight` into one branch each, and leave `image` out of the model's schema. This keeps the action types tight, but it is at the edge: the same merge with `image` kept is rejected, so it breaks again at E1.
+    - Neither has headroom: one more object kind on top of the one-action schema is rejected too (checked once by hand, like "either union alone is accepted"; `--probe` reruns the four variants in the script). A new primitive needs `--probe` before it merges. A guard test that counts optional properties can't catch this limit. `shared/` is area A, so this is a proposal for its owner, not a change in this PR.
+  - **Validity:** every request in the spike used the one-action schema, and every output was then checked against the real contract with `validateStep`. **30 of 30 steps were valid on the first try** (5 runs × 6 concepts, at low, medium and high), so the retry never ran.
+  - **Valid isn't the same as good.** With the first prompt, one medium step had the wrong product (Q times K transpose didn't match its own matrices). Two narrations corrected themselves aloud, one at low and one at high ("wait, let's use round numbers", "or more precisely"). Two `text` objects held LaTeX, which shows as raw source. Three prompt lines fixed these in the medium rerun (6/6 correct, checked by hand), though a `text` object can still show `d_k` with a literal underscore: `text` is plain, so formulas go in `latex`; the narration is the final script, never think aloud; work out every number first and check the board matches the narration. At low effort with the same prompt, the dot-product step's arithmetic was still wrong, and one `text` still held LaTeX. Following S1, the prompt also spells maths out in words, and no narration had a maths symbol. After the runs, the prompt's examples of spoken maths were changed to neutral ones ("a times b", "the square root of n"), so they no longer come from the Attention paper. That edit wasn't re-measured.
+  - **Latency and tokens per step** (one request each, streamed, 6 steps per row; the paper read from the cache):
+
+    | Prompt | Effort | Valid first try | Latency (median, max) | Output tokens (median) |
+    |---|---|---|---|---|
+    | first | low | 6/6 | 10.0 s, 10.8 s | 1,098 |
+    | first | medium | 6/6 | 9.7 s, 11.6 s | 1,256 |
+    | first | high | 6/6 | 26.9 s, 34.4 s | 3,580 |
+    | final | low | 6/6 | 9.2 s, 10.8 s | 1,034 |
+    | final | **medium** | 6/6 | 19.1 s, 20.4 s | 2,019 |
+
+  - **Cache:** the Attention PDF is 42k input tokens, and Kelley's is 32k. The first step of each paper writes the cache, and every later step reads it, at any effort: changing effort didn't invalidate it. Uncached input per step is about 100 tokens. At $2 / $10 per MTok with $0.20 cache reads, a medium step costs about 3 cents. The 1-hour cache write is about 17 cents for Attention and 13 cents for Kelley.
+  - **Chosen effort.** **Steps: `medium`**, with the final prompt: it was the only setting with correct arithmetic and a clean board. Its 19 s is shorter than a step's 60–90 s of audio, so prefetching step n+1 while step n plays hides it, and only step 0 waits. `high` takes 27 s and writes 3,580 output tokens, against 19 s and 2,019 at final-prompt medium, with no gain in validity. **Plans: `medium`** and **sketches: `low`** stay as they were. S3 didn't measure them, beyond `Sketch` being accepted with the same schema change; L1 and Q4 measure them.
+  - **For G1:** move the prompt from `scripts/s3-spike.ts` into `lib/pipeline/prompts/` unchanged. Use `output_config.format` with the schema the area-A owner settles on, and keep `max_tokens` well above the 4.7k high-effort peak.
 - **S4:** which fal image model to use for the cover (M3) and for in-scene images (E1, stretch), and its latency. Download the images into `runs/`, in case fal's URLs expire. Keep the generations few: the budget is about 25 US dollars per teammate.
 - **S5:** the ElevenLabs CLI commands that push the agent and its client tools from `agent/`, and how its tracking file records the agent id.
 

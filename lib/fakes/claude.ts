@@ -20,9 +20,9 @@ export interface FakeClaude extends ClaudeMessages {
 
 /**
  * Serves `replies` in order, one per request; a request past the end fails the test. Without
- * `replies`, every request gets `config.step.fixture`: a Message in the API's shape whose step
- * is the demo-m1 fixture, until a recorded Sonnet 5.5 response replaces it (the full Step
- * schema is too large for structured output today, and S3 is simplifying it).
+ * `replies`, every request gets `config.step.fixture`: a real Sonnet 5.5 step response
+ * (Attention paper, scaled dot-product scores, recorded 2026-11-14) in the wire format of
+ * lib/pipeline/outputFormat.ts.
  */
 export function fakeClaude(replies?: readonly FakeReply[]): FakeClaude {
   const calls: FakeClaude["calls"] = [];

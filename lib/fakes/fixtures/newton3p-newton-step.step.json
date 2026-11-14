@@ -1,0 +1,146 @@
+{
+  "title": "One Newton step on a small system",
+  "narration": "Newton's method updates the current point x c like this: x plus equals x c minus the inverse Jacobian times F at x c. Let's try it on a tiny system. F has two parts: x one squared minus four, and x two squared minus sixteen. Our current point is x one equals four and x two equals eight. [[a]]First we evaluate F there. That gives twelve and forty eight. [[b]]Next comes the Jacobian, the matrix of derivatives. Here it is diagonal, with two times x one, which is eight, and two times x two, which is sixteen. [[c]]In practice we never form the inverse. Instead we solve the linear system J times s equals minus F. [[d]]Dividing minus twelve by eight gives minus one point five, and minus forty eight by sixteen gives minus three. That is the Newton step s. [[e]]Finally we add the step to the current point: four minus one point five is two point five, and eight minus three is five. That is x plus. The solution is two and four, so we are getting closer. The paper's trick is to do this linear solve cheaply, in low precision.",
+  "objects": [
+    {
+      "kind": "latex",
+      "id": "eq",
+      "x": 800,
+      "y": 90,
+      "tex": "x_+ = x_c - F'(x_c)^{-1}F(x_c)"
+    },
+    {
+      "kind": "latex",
+      "id": "sysf",
+      "x": 800,
+      "y": 190,
+      "tex": "F(x)=\\left(x_1^2-4,\\; x_2^2-16\\right)"
+    },
+    {
+      "kind": "matrix",
+      "id": "xc",
+      "x": 150,
+      "y": 300,
+      "rows": [["4"], ["8"]],
+      "label": "x current"
+    },
+    {
+      "kind": "matrix",
+      "id": "fm",
+      "x": 450,
+      "y": 300,
+      "rows": [["12"], ["48"]],
+      "label": "F at x current",
+      "hidden": true
+    },
+    {
+      "kind": "matrix",
+      "id": "jm",
+      "x": 720,
+      "y": 300,
+      "rows": [
+        ["8", "0"],
+        ["0", "16"]
+      ],
+      "label": "Jacobian J",
+      "hidden": true
+    },
+    {
+      "kind": "latex",
+      "id": "jsys",
+      "x": 800,
+      "y": 520,
+      "tex": "J\\,s = -F(x_c)",
+      "hidden": true
+    },
+    {
+      "kind": "matrix",
+      "id": "sm",
+      "x": 1100,
+      "y": 300,
+      "rows": [["-1.5"], ["-3"]],
+      "label": "step s",
+      "hidden": true
+    },
+    {
+      "kind": "matrix",
+      "id": "xn",
+      "x": 1400,
+      "y": 300,
+      "rows": [["2.5"], ["5"]],
+      "label": "x plus",
+      "hidden": true
+    },
+    {
+      "kind": "arrow",
+      "id": "addar",
+      "from": {
+        "id": "sm"
+      },
+      "to": {
+        "id": "xn"
+      },
+      "label": "add to x current",
+      "hidden": true
+    }
+  ],
+  "actions": [
+    {
+      "do": "show",
+      "target": {
+        "id": "fm"
+      },
+      "durationMs": 500,
+      "cue": "a"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "jm"
+      },
+      "durationMs": 500,
+      "cue": "b"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "jsys"
+      },
+      "durationMs": 500,
+      "cue": "c"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "sm"
+      },
+      "durationMs": 600,
+      "cue": "d"
+    },
+    {
+      "do": "highlight",
+      "target": {
+        "id": "sm"
+      },
+      "color": "accent",
+      "durationMs": 400,
+      "cue": "d"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "addar"
+      },
+      "durationMs": 500,
+      "cue": "e"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "xn"
+      },
+      "durationMs": 600,
+      "cue": "e"
+    }
+  ]
+}
