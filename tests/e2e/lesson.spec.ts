@@ -3,12 +3,12 @@
 // ./support/savedRun.ts (no provider is called). The controls themselves are covered on
 // /dev/player (player.spec.ts); here, what the page adds: loading a run, the ARCHITECTURE.md
 // section 7 messages for a missing lesson or step, and demo-m1.
-import { access, mkdir } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { MESSAGES } from "@/player/machine";
 import { NO_SUCH_LESSON, STEP_NOT_IN_RUN } from "@/shared/lesson";
-import { RUNS_DIR, savedRun, savedStepTitle } from "./support/savedRun";
+import { isRealRun, savedRun, savedStepTitle } from "./support/savedRun";
 
 test.use({
   launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
@@ -139,13 +139,9 @@ test("?debug=1 shows the player's clock overlay", async ({ page }) => {
 
 test("Real run stand-in: /lesson/demo-m1 plays", async ({ page }) => {
   // A real run (from `npm run make:m1`) is used as it is and never removed; otherwise a
-  // fake one is saved for this test only.
-  const real = await access(path.join(RUNS_DIR, "demo-m1")).then(
-    () => true,
-    () => false,
-  );
+  // fake one, marked as such, is saved for this test only.
+  const real = await isRealRun("demo-m1");
   await using run = real ? null : await savedRun("demo-m1");
-  expect(real || run !== null).toBe(true);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/lesson/demo-m1");
   await expectState(page, "playing", 0);
@@ -154,5 +150,29 @@ test("Real run stand-in: /lesson/demo-m1 plays", async ({ page }) => {
     audio.currentTime = Math.min(audio.duration, 7.5);
   });
   await expectState(page, "paused", 0);
-  await screenshot(page, real ? "demo-m1-real" : "demo-m1-fake-run");
+  await screenshot(page, run === null ? "demo-m1-real" : "demo-m1-fake-run");
+});
+
+test("the plan's cover shows as the page header", async ({ page }) => {
+  await using run = await savedRun("e2e-lesson-cover", {
+    cover: { name: "cover.png", saved: true },
+  });
+  await page.goto(`/lesson/${run.lessonId}`);
+  const cover = page.getByTestId("lesson-cover");
+  await expect(cover).toHaveAttribute(
+    "src",
+    `/api/runs/${run.lessonId}/cover.png`,
+  );
+  await expect
+    .poll(() => cover.evaluate((img: HTMLImageElement) => img.naturalWidth))
+    .toBe(1);
+});
+
+test("Plan or step: a cover that won't load is hidden", async ({ page }) => {
+  await using run = await savedRun("e2e-lesson-no-cover", {
+    cover: { name: "cover.png", saved: false },
+  });
+  await page.goto(`/lesson/${run.lessonId}`);
+  await expectState(page, "playing", 0);
+  await expect(page.getByTestId("lesson-cover")).toHaveCount(0);
 });

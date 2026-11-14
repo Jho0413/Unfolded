@@ -2,7 +2,7 @@
 // lib/runs/store.ts lays it out (plan.json, step-<n>.v<k>.json and step-<n>.v<k>.mp3), from
 // the demo-m1 step fixture and the dev board's cue times, with a silent MP3 of known length.
 // No provider is called: this stands in for a run made by `npm run make:m1` (C1).
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { M1_CUE_TIMES } from "@/app/dev/board/scenes";
 import demoM1 from "@/lib/fakes/fixtures/demo-m1.step.json";
@@ -11,6 +11,32 @@ import { Step } from "@/shared/scene";
 
 // The server's config.runsDir. lib/config.ts imports "server-only", so it can't be imported here.
 export const RUNS_DIR = path.join(process.cwd(), "runs");
+
+/**
+ * Marks a run folder as written by these tests. A leading dot is never a run file name, so
+ * the runs route can't serve it, and a fake folder left by an interrupted run is never taken
+ * for a real one.
+ */
+export const FAKE_RUN_MARKER = ".e2e-fake-run";
+
+/** True when runs/<lessonId>/ exists and these tests didn't write it. */
+export async function isRealRun(lessonId: string): Promise<boolean> {
+  const dir = path.join(RUNS_DIR, lessonId);
+  const exists = (p: string) =>
+    access(p).then(
+      () => true,
+      () => false,
+    );
+  return (
+    (await exists(dir)) && !(await exists(path.join(dir, FAKE_RUN_MARKER)))
+  );
+}
+
+/** A 1x1 PNG, for a saved cover. */
+const PNG_1PX = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64",
+);
 
 /** Long enough for every demo-m1 cue time, plus the last fade. */
 export const SAVED_AUDIO_MS = 9000;
@@ -45,6 +71,8 @@ export interface SavedRunOptions {
   unsaved?: number[];
   /** Saved versions per step (the page plays the latest); the default is 1. */
   versions?: number;
+  /** The plan's cover file name, and whether that file is saved. */
+  cover?: { name: string; saved: boolean };
 }
 
 /** Writes runs/<lessonId>/ and returns a handle that removes it. */
@@ -52,12 +80,17 @@ export async function savedRun(
   lessonId: string,
   options: SavedRunOptions = {},
 ) {
-  const { steps = 2, unsaved = [], versions = 1 } = options;
+  const { steps = 2, unsaved = [], versions = 1, cover } = options;
   const dir = path.join(RUNS_DIR, lessonId);
+  // A folder left by an interrupted run must not change the results.
+  await rm(dir, { recursive: true, force: true });
   await mkdir(dir, { recursive: true });
+  await writeFile(path.join(dir, FAKE_RUN_MARKER), "");
+  if (cover?.saved) await writeFile(path.join(dir, cover.name), PNG_1PX);
   const plan: LessonPlan = {
     title: "Matrix multiplication",
     coverPrompt: "a whiteboard with two matrices",
+    ...(cover && { cover: cover.name }),
     steps: Array.from({ length: steps }, (_, n) => ({
       title: savedStepTitle(n),
       goal: "Multiply two matrices",

@@ -65,7 +65,7 @@ describe("loadLesson", () => {
     });
   });
 
-  it("Route: a bad lessonId is missing, without touching the disk", async () => {
+  it("Route: a bad lessonId is missing", async () => {
     for (const id of ["Bad", "../x", "a".repeat(41), ""])
       expect(await loadLesson(id), id).toEqual({ kind: "missing" });
   });
