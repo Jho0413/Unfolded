@@ -1,0 +1,10 @@
+{
+  "title": "Multiplying two matrices",
+  "steps": [
+    {
+      "title": "Multiplying two matrices",
+      "goal": "Multiply two matrices, one entry at a time"
+    }
+  ],
+  "coverPrompt": "a whiteboard with two small matrices being multiplied"
+}

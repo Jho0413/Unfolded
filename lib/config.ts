@@ -3,7 +3,7 @@
 import "server-only";
 import path from "node:path";
 
-/** Claude effort levels we use, per request type (ARCHITECTURE.md section 5.1). S3 may widen it. */
+/** Claude effort levels we use, per request type (ARCHITECTURE.md section 5.1). */
 export type Effort = "low" | "medium" | "high";
 
 export const config = {
@@ -13,7 +13,7 @@ export const config = {
     step: "claude-sonnet-5-5",
     sketch: "claude-sonnet-5-5",
   },
-  /** Plan and step are placeholders until spike S3 records its choice in ARCHITECTURE.md section 11. */
+  /** Step: medium, chosen by spike S3 (ARCHITECTURE.md section 11). Plan and sketch are not measured yet (L1, Q4). */
   effort: {
     plan: "medium",
     step: "medium",
@@ -86,6 +86,22 @@ export const config = {
     maxLoggedErrorChars: 500,
     /** Served when FAKE_APIS=1, in ElevenLabs' response shape. */
     fixture: "elevenlabs-conversation-token.json",
+  },
+  /** Narration audio: ElevenLabs TTS with timestamps (ARCHITECTURE.md sections 5.2 and 11, S1). */
+  tts: {
+    /** POST <url>/<voice_id>/with-timestamps. The voice is ELEVENLABS_VOICE_ID (lib/env.ts). */
+    url: "https://api.elevenlabs.io/v1/text-to-speech",
+    /** S1: 1.2-1.8 s per M1 step; eleven_v4 took 5.4 s for the same text. */
+    modelId: "eleven_multilingual_v2",
+    outputFormat: "mp3_44100_128",
+    /** A step's TTS gives up after this, and the step fails (ARCHITECTURE.md section 6.2). */
+    timeoutMs: 30_000,
+    /** How much of an ElevenLabs error body goes to the server log. */
+    maxLoggedErrorChars: 500,
+    /** S1's real response for the demo-m1 narration (audio cut short), served when FAKE_APIS=1. */
+    fixture: "tts-demo-m1.json",
+    /** The fake's per-character duration for narration that isn't the fixture's. */
+    fakeCharMs: 60,
   },
   /**
    * One folder per lesson: the store and the replay set (ARCHITECTURE.md section 5.5).

@@ -1,6 +1,7 @@
 // Spike S2 (ARCHITECTURE.md section 11): compare agent LLMs on the M1 matrix
 // step over the real conversation WebSocket, typed questions only.
-//   node --env-file=.env.local agent/spikes/s2-llm.mjs <llm> [--voice]
+//   node --env-file=.env.local agent/spikes/s2-llm.mjs <llm|agent> [--voice]
+// "agent" keeps the agent's own LLM (Q1 removed the llm override).
 // Without --voice the session is text_only. Prints JSON results; never the key.
 const [llm, flag] = process.argv.slice(2);
 const voice = flag === "--voice";
@@ -22,6 +23,7 @@ const QUESTIONS = [
   "Which number in B gets multiplied by the two? Show me.",
   "Where does the nineteen go?",
   "Why do we use a row and a column, not two rows?",
+  "Can we go back to the first step?",
 ];
 
 const res = await fetch(
@@ -83,7 +85,7 @@ await new Promise((ok, fail) => {
 send({
   type: "conversation_initiation_client_data",
   conversation_config_override: {
-    agent: { prompt: { llm } },
+    ...(llm === "agent" ? {} : { agent: { prompt: { llm } } }),
     conversation: { text_only: !voice },
   },
 });
