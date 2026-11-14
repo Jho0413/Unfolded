@@ -1,0 +1,82 @@
+// One lesson's Ask session state, outside React (ARCHITECTURE.md section 8):
+// the Ask layer drawn on the frozen board, when Ask opened, and which Ask
+// session it is. The page opens and closes it as the player enters and leaves
+// `asking`; the client tools and the board read it. A small store, so tool
+// handlers can read it outside render.
+import type { TimedAction } from "@/player/sceneAt";
+import type { Action, BoardObject, BoardState, Sketch } from "@/shared/scene";
+import {
+  addAction,
+  addSketch,
+  type AskLayer,
+  askScene,
+  EMPTY_LAYER,
+  type FrozenBoard,
+} from "./askBoard";
+
+export type AskSession = ReturnType<typeof createAskSession>;
+
+export function createAskSession(now: () => number = () => performance.now()) {
+  let layer: AskLayer = EMPTY_LAYER;
+  let asking = false;
+  let openedAt = 0;
+  let askId = 0;
+  let frozen: FrozenBoard = { objects: [], timed: [], pausedT: 0 };
+  const listeners = new Set<() => void>();
+  const setLayer = (next: AskLayer) => {
+    layer = next;
+    for (const fn of listeners) fn();
+  };
+  const sinceOpen = () => now() - openedAt;
+
+  return {
+    subscribe(fn: () => void): () => void {
+      listeners.add(fn);
+      return () => void listeners.delete(fn);
+    },
+    /** Changes whenever the drawing does (for useSyncExternalStore). */
+    layer: () => layer,
+    open(): void {
+      if (asking) return;
+      asking = true;
+      openedAt = now();
+      askId++;
+      setLayer(EMPTY_LAYER);
+    },
+    /** Closing Ask throws the drawing away. */
+    close(): void {
+      if (!asking) return;
+      asking = false;
+      setLayer(EMPTY_LAYER);
+    },
+    isAsking: () => asking,
+    askId: () => askId,
+    /** The lesson board Ask draws on: the step at `pausedT`. */
+    setFrozen(next: FrozenBoard): void {
+      frozen = next;
+    },
+    addAction(action: Action): void {
+      if (asking) setLayer(addAction(layer, action, sinceOpen()));
+    },
+    addSketch(sketch: Sketch, fresh: boolean): void {
+      if (asking) setLayer(addSketch(layer, sketch, sinceOpen(), fresh));
+    },
+    /** The board on screen while asking: the frozen board plus the drawing. */
+    board(): BoardState {
+      return askScene(frozen, layer, asking ? sinceOpen() : 0);
+    },
+  };
+}
+
+/** The frozen board for a step at `tMs` (an empty board when no step is on screen). */
+export function frozenBoard(
+  step: {
+    objects: readonly BoardObject[];
+    timed: readonly TimedAction[];
+  } | null,
+  tMs: number,
+): FrozenBoard {
+  return step === null
+    ? { objects: [], timed: [], pausedT: 0 }
+    : { objects: step.objects, timed: step.timed, pausedT: tMs };
+}
