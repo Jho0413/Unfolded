@@ -94,7 +94,8 @@ lib/                                server-only (import "server-only")
   narration/tts.ts                  ElevenLabs TTS with timestamps -> audio + cue times (S1 fixture when FAKE_APIS=1)
   narration/makeM1.ts               npm run make:m1: demo-m1.step.json -> runs/demo-m1/ (plan.json, step-0.v<k>.json + .mp3)
   agent/token.ts                    the Q&A agent's conversation token (fixture when FAKE_APIS=1)
-  media/fal.ts
+  media/fal.ts                      fal (S4's model): one image from a prompt, downloaded at once; none without FAL_KEY or in replay, the fake when FAKE_APIS=1
+  media/cover.ts                    the lesson cover (L4): one image per plan, saved as cover.jpg, under its own deadline
   runs/store.ts                     read/write runs/<lessonId>/
   fakes/                            fake Claude/ElevenLabs/fal for tests (FAKE_APIS=1)
 player/                             browser
@@ -112,7 +113,7 @@ qa/                                 browser
   context.ts                        pure: the sendContextualUpdate() message, and the narration heard by time t
   AskPanel.tsx                      voice + typed input, through conversation.ts; shows the Ask messages of section 7
   tools.ts                          client tool handlers, typed by shared/tools.ts
-scripts/                            dev scripts, run with tsx: make:m1 (make-m1.ts), seed:m2 (seed-m2.ts, its lessons in seed-m2.lessons.json), spike:s3
+scripts/                            dev scripts, run with tsx: make:m1 (make-m1.ts), seed:m2 (seed-m2.ts, its lessons in seed-m2.lessons.json), spike:s3, spike:s4 (s4-spike.ts)
 agent/                              ElevenLabs CLI config: the agent (prompt, voice, LLM) and its client tools, plus the CLI's tracking file
 runs/                               gitignored: one folder per lesson (store + replay)
 tests/e2e/                          Playwright, with FAKE_APIS=1 and NEXT_PUBLIC_FAKE_APIS=1
@@ -264,9 +265,9 @@ sequenceDiagram
   - the plan and the step's goal
   - the previous step's narration if it has been generated, otherwise that step's goal from the plan (needed after a jump)
   - the learner signals (section 5.4)
-- **Cover illustration (fal).** The plan includes a `coverPrompt`. After the plan is saved, the server asks fal for **one** image and saves it in the run folder, recording its file name as `cover` in `plan.json` and in the plan response. The upload page's plan view shows it, and the lesson page shows it as a header.
+- **Cover illustration (fal).** The plan includes a `coverPrompt`. Once the plan is made, and before `plan.json` is saved, `lib/media/cover.ts` asks fal for **one** image (`config.fal.model`, S4), downloads it at once (fal's URLs expire) and saves it in the run folder as `cover.jpg` (`config.cover.file`). It records that name as `cover` in `plan.json` and in the plan response. The upload page's plan view shows it, and the lesson page shows it as a header. Both hide the image if it fails to load.
   - It sits outside the scene contract and `sceneAt`: it's page chrome, not a board object.
-  - The plan route waits for it up to `config.coverTimeoutMs`. If fal is slow, fails or has no `FAL_KEY`, the plan is returned and saved without `cover`, and the pages show no image. The timeout is kept to a few seconds, since step 0 is requested after the plan returns.
+  - The plan route waits for it up to `config.cover.timeoutMs` (6 s; S4 saw 4.4–4.6 s with the download). That deadline is the cover's own: a race against a timer around the fal call and the download, since `fal.subscribe`'s `timeout` doesn't cover the whole call. When it passes, the request is aborted and fal is asked to cancel it once it has a request id (fal can't cancel one already running, and an abort before fal answers the submit has no id, so a late image may still be charged). If fal is slow, fails, sends something that isn't a JPEG by its first bytes, or has no `FAL_KEY`, the plan is returned and saved without `cover`, the pages show no image, and the reason is logged. The timeout is kept to a few seconds, since step 0 is requested after the plan returns.
   - Budget: about 25 US dollars of fal credits per teammate. So it's one image per lesson plan, a saved cover is never regenerated, replay never calls fal, and tests use the fal fake.
 - **Files reach the browser through `GET /api/runs/<lessonId>/<file>`.** `runs/` is outside `public/`, and `next start` won't serve files added after the build.
   - The player fetches each step's audio as a blob and plays it from a `blob:` URL. That keeps seeking reliable without HTTP Range support in the route.
@@ -555,7 +556,7 @@ The developer gets the full error in the server log, tagged with the route, less
 - The mode is picked in this order: `REPLAY_RUN` set → replay; else `FAKE_APIS=1` → fake; else real. An empty value (`KEY=`, as copied from `.env.example`) counts as unset.
 - A build made with `NEXT_PUBLIC_FAKE_APIS=1` (for example, left over from a local `npm run e2e`) refuses to start in real mode, since the browser would use the fake agent: run `npm run build` again first. `next.config.ts` bakes that build-time value in as `BUILT_WITH_BROWSER_FAKES`, so the check never depends on the shell `npm start` runs in. The reverse, `FAKE_APIS=1` on a normal build, starts with a warning.
 - Keys are only read in `lib/` and the API routes, which import `"server-only"`. The browser never sees a key.
-- All of these live in `lib/config.ts`: model ids, effort per request type, `maxNarrationChars`, the step and sketch requests' output caps, total deadlines and fake-mode fixtures, `maxPdfMb`, `maxPdfPages`, the plan request's step minimum, output cap, deadline and fake-mode fixtures (the plan and the paper's upload), `coverTimeoutMs`, `maxBoardObjects` (the cap on the board a sketch request sends, section 8), the image cap per lesson (E1), the agent token's URL, timeout and fixture (section 8), TTS (`tts`: URL, model id, output format, timeout, fixture; section 11, S1), and the `runs/` path.
+- All of these live in `lib/config.ts`: model ids, effort per request type, `maxNarrationChars`, the step and sketch requests' output caps, total deadlines and fake-mode fixtures, `maxPdfMb`, `maxPdfPages`, the plan request's step minimum, output cap, deadline and fake-mode fixtures (the plan and the paper's upload), fal (`fal`: model, image size, fake-mode fixtures; section 11, S4), the cover (`cover`: timeout, file name), `maxBoardObjects` (the cap on the board a sketch request sends, section 8), the image cap per lesson (E1), the agent token's URL, timeout and fixture (section 8), TTS (`tts`: URL, model id, output format, timeout, fixture; section 11, S1), and the `runs/` path.
 
 ## 10. Testing: how we prove it works
 
@@ -630,6 +631,28 @@ Each spike is time-boxed to 60 minutes, and its answer is written back into this
   - **Chosen effort.** **Steps: `medium`**, with the final prompt: it was the only setting with correct arithmetic and a clean board. Its 19 s is shorter than a step's 60–90 s of audio, so prefetching step n+1 while step n plays hides it, and only step 0 waits. `high` takes 27 s and writes 3,580 output tokens, against 19 s and 2,019 at final-prompt medium, with no gain in validity. **Plans: `medium`** and **sketches: `low`** stay as they were. S3 didn't measure them, beyond `Sketch` being accepted with the same schema change; L1 and Q4 measure them.
   - **For G1:** move the prompt from `scripts/s3-spike.ts` into `lib/pipeline/prompts/` unchanged. Use `output_config.format` with the schema the area-A owner settles on, and keep `max_tokens` well above the 4.7k high-effort peak.
 - **S4:** which fal image model to use for the cover (M3) and for in-scene images (E1, stretch), and its latency. Download the images into `runs/`, in case fal's URLs expire. Keep the generations few: the budget is about 25 US dollars per teammate.
+  - **Answer (2026-11-14, #70): `fal-ai/flux-2`** (FLUX.2 [dev]) at `image_size: "landscape_16_9"` (1024 × 576), `output_format: "jpeg"`, everything else default, called with `fal.subscribe` from `@fal-ai/client` 1.11.0. It followed both prompts closely in about 3.5 s, for at most 1.2 cents an image.
+  - **Method:** `npm run spike:s4 -- --model <id> --prompt <name>` (`scripts/s4-spike.ts`). It reads `FAL_KEY` from `.env` or `.env.local` and never prints it. It times one generation, downloads the image into `evidence/70/` (gitignored) and appends a line to `evidence/70/log.jsonl`. It refuses to run past 8 generations, counted from the log, where a "started" line is written before each fal call (so a run that fails after fal has charged still counts). The first six runs predate the `--direct` and `--accel` flags. `--price` reads fal's price list (`GET https://api.fal.ai/v1/models/pricing?endpoint_id=…`, free). Two prompts, written as the plan prompt asks for a `coverPrompt` (a visual metaphor, no text in the image): `attention` is the `coverPrompt` of L1's recorded Attention plan, and `newton3p` is written to the same rule for Kelley's paper ("A bright arrow sliding down a smooth curve toward the point where it meets a horizontal line, shown three times through nested magnifying lenses, …").
+  - **Results:** 7 generations, about 0.10 US dollars in all. Latency is from the request to the result (`generated`), then with the image downloaded (`total`). Cost is fal's list price for one 1024 × 576 image, rounded up to a whole megapixel, so an upper bound: the key can't read fal's usage API, so the exact charge wasn't confirmed.
+
+    | Model | Price | Prompt | generated | total | Quality |
+    |---|---|---|---|---|---|
+    | `fal-ai/flux/schnell` | 0.003 USD / MP | attention | 1.7 s | 2.7 s | Pretty, but a generic glowing network: no necklace, no beads linked to each other |
+    | `fal-ai/flux/schnell` | | newton3p | 1.2 s | 2.7 s | An arrow and two rings: no curve meeting a line, two lenses not three |
+    | **`fal-ai/flux-2`** | 0.012 USD / MP | attention | 3.6 s | 4.4 s | A necklace of gold and blue beads with threads linking them across: the metaphor reads at a glance |
+    | **`fal-ai/flux-2`** | | newton3p | 3.5 s | 4.6 s | One large magnifying glass over three smaller lenses, arrows sliding down to a horizontal line: close to the prompt |
+    | `fal-ai/flux-2-pro` | 0.03 USD / processed MP | attention | 17.2 s | 18.2 s | The most polished: a bead string across a web of lines |
+    | `fal-ai/flux-2-pro` | | newton3p | 12.2 s | 13.1 s | Polished nested lenses, but the arrow climbs instead of sliding down |
+    | `fal-ai/flux-2`, `fal.run`, `acceleration: "high"` | | attention | **202.7 s** | 203.7 s | As good as the default run |
+
+  - **No image had text, letters or watermarks**, and none was blocked by the safety checker. Every one is dark and glowing, as both prompts asked; the plan prompt decides the style.
+  - **Why `flux-2`:** schnell is 4 times cheaper and 2 s faster but drops the metaphor, which is the point of the cover. `flux-2-pro` is a little more polished, 2.5 times the price, and 12–17 s, far past any timeout the plan route can wait.
+  - **Latency is not reliable.** The one direct `fal.run` call (no queue, with `acceleration: "high"`) took 203 s for an image the queue made in 3.5 s. One sample can't say whether `run`, the acceleration, a cold worker or `fal.run`'s own silent retries (up to 3, on 429 and 5xx) caused it, so it isn't worth a generation to find out. For L4:
+    - Use `fal.subscribe` with defaults (no `acceleration`).
+    - Keep **one overall deadline of our own** around the whole call and the download (a race against a timer, with an abort signal for the download). `fal.subscribe`'s `timeout` option doesn't bound it: it's armed only while polling the status, not during the submit or the result fetch, and `abortSignal` stops the client without asking fal to cancel. When the deadline passes, ask fal to cancel the request (`queue.cancel`, with the id from `onEnqueue`); fal can't cancel one already running, so a late image may still be charged.
+    - `config.cover.timeoutMs` (then 4000) was below the 4.4–4.6 s seen with the download, so the cover would almost always be dropped. **L4 raised it to 6000**, which covers what was seen with some margin. The cost: the cover starts only once the plan has its `coverPrompt`, so it adds its time (about 4.5 s, up to 6 s) to the wait before step 0 is requested.
+  - **Download into the run folder.** fal returns a URL on its CDN (`images[0].url`) that expires (the client's `storageSettings.expiresIn` can only set how soon). So the server fetches the bytes as soon as the result arrives and saves them with `writeRunFile` as `cover.jpg` in `runs/<lessonId>/`. The browser only ever gets `/api/runs/<lessonId>/cover.jpg`, never a fal URL, and replay works offline.
+  - **For E1 (whiteboard illustrations):** `flux-2` fits too. Images are made alongside TTS while a step is generated (about 19 s, section 11, S3), so 3.5–4.6 s is hidden, and `config.maxImagesPerLesson` = 4 caps a lesson at about 5 cents. A board image wants a plain light background to sit on the whiteboard, which the image prompt asks for: not measured here. schnell is the fallback if the budget runs short.
 - **S5:** the ElevenLabs CLI commands that push the agent and its client tools from `agent/`, and how its tracking file records the agent id.
 
 ### S5 findings: the ElevenLabs CLI (done 2026-11-14)

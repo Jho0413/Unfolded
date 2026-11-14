@@ -1,9 +1,10 @@
 "use client";
 // The upload page's form (ROADMAP L1, ARCHITECTURE.md sections 5.1 and 7): pick a PDF, send it
-// to POST /api/lessons, then show the plan as a list of step titles with the way into the
-// lesson. Failures show the server's plain words, with the form still there to try again.
+// to POST /api/lessons, then show the plan (its fal cover if it has one, ROADMAP L4, and its
+// step titles) with the way into the lesson. Failures show the server's plain words, with the
+// form still there to try again.
 import Link from "next/link";
-import { type FormEvent, useState } from "react";
+import { type CSSProperties, type FormEvent, useState } from "react";
 import { BOARD_BG, INK, MUTED } from "@/player/primitives/style";
 import {
   ApiError,
@@ -53,6 +54,9 @@ export function UploadForm() {
   if (state.kind === "planned")
     return (
       <section data-testid="plan" style={{ marginTop: 24 }}>
+        {state.plan.cover !== undefined && (
+          <Cover src={`/api/runs/${state.lessonId}/${state.plan.cover}`} />
+        )}
         <h2 style={{ margin: "0 0 12px" }}>{state.plan.title}</h2>
         <ol
           data-testid="plan-steps"
@@ -113,6 +117,32 @@ export function UploadForm() {
     </form>
   );
 }
+
+/** Page chrome, not a board object (ARCHITECTURE.md section 5.1). Hidden if it won't load. */
+function Cover({ src }: { src: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return null;
+  return (
+    // A run file served by our own route: next/image's optimiser would only add a copy.
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt=""
+      data-testid="plan-cover"
+      onError={() => setFailed(true)}
+      style={COVER}
+    />
+  );
+}
+
+const COVER: CSSProperties = {
+  display: "block",
+  width: "100%",
+  aspectRatio: "16 / 9",
+  objectFit: "cover",
+  borderRadius: 8,
+  marginBottom: 16,
+};
 
 const BUTTON = {
   display: "inline-block",

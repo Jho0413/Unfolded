@@ -1,7 +1,7 @@
 // Making a lesson (ARCHITECTURE.md sections 5.1 and 7): the paper is uploaded once with the
 // Files API, Claude plans the lesson from it with structured output (validated, retried once
-// by lib/pipeline/generate.ts), and the plan and the paper's file id are saved to the run
-// folder. The fal cover (L4) isn't made here.
+// by lib/pipeline/generate.ts), the fal cover is made from its coverPrompt (L4,
+// lib/media/cover.ts), and the plan and the paper's file id are saved to the run folder.
 import "server-only";
 import { randomUUID } from "node:crypto";
 import Anthropic, { toFile } from "@anthropic-ai/sdk";
@@ -22,6 +22,8 @@ import {
   generateWithRetry,
   providerError,
 } from "@/lib/pipeline/generate";
+import { addCover } from "@/lib/media/cover";
+import type { ImageMaker } from "@/lib/media/fal";
 import { PLAN_OUTPUT_FORMAT, schemaErrors } from "@/lib/pipeline/outputFormat";
 import {
   PLAN_REQUEST_PROMPT,
@@ -139,11 +141,14 @@ export function newLessonId(title: string, suffix: string): string {
 export interface Clients {
   files?: ClaudeFiles;
   messages?: ClaudeMessages;
+  /** fal for the cover; by default falImages() (none without FAL_KEY). */
+  images?: ImageMaker;
 }
 
 /**
- * Uploads the paper, plans the lesson and saves the run folder: paper.json, then plan.json
- * last, so a lesson the page can open is always complete. Throws GenerationError
+ * Uploads the paper, plans the lesson and saves the run folder: paper.json, the cover (waited
+ * for up to config.cover.timeoutMs, and left out if it fails), then plan.json last, so a
+ * lesson the page can open is always complete. Throws GenerationError
  * (`paperRejected` says when Claude refused the PDF itself), or a store error.
  */
 export async function createLesson(
@@ -152,15 +157,16 @@ export async function createLesson(
 ): Promise<{ lessonId: string; plan: LessonPlan }> {
   // A paper whose plan then fails stays in the Files API: a hackathon-sized cost, not cleaned up.
   const fileId = await uploadPaper(pdf.bytes, pdf.filename, clients.files);
-  const plan: LessonPlan = await generatePlan(fileId, clients.messages);
+  const output = await generatePlan(fileId, clients.messages);
   const lessonId = newLessonId(
-    plan.title,
+    output.title,
     randomUUID().slice(0, ID_SUFFIX_CHARS),
   );
   await writeRunJson(lessonId, PAPER_FILE, {
     fileId,
     filename: pdf.filename,
   } satisfies SavedPaper);
+  const plan = await addCover(lessonId, output, clients.images);
   await writeRunJson(lessonId, PLAN_FILE, plan);
   return { lessonId, plan };
 }

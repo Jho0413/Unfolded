@@ -18,3 +18,10 @@ export async function readFixture<T = unknown>(name: string): Promise<T> {
   const text = await readFile(path.join(config.fixturesDir, name), "utf8");
   return JSON.parse(text) as T;
 }
+
+/** A recorded binary file from lib/fakes/fixtures/ (e.g. the fal fake's image), as bytes. */
+export async function readFixtureBytes(name: string): Promise<Uint8Array> {
+  if (!/^[\w-][\w.-]*\.(jpg|png)$/.test(name))
+    throw new Error(`bad fixture name: ${name}`);
+  return new Uint8Array(await readFile(path.join(config.fixturesDir, name)));
+}

@@ -1,5 +1,6 @@
-// The upload page (ROADMAP L1): a PDF in, the plan shown as a list of step titles, then into
-// the lesson. FAKE_APIS=1 serves the recorded upload and plan, so no provider is called. Each
+// The upload page (ROADMAP L1, L4): a PDF in, the plan shown with its cover and a list of step
+// titles, then into the lesson. FAKE_APIS=1 serves the recorded upload, plan and fal cover, so
+// no provider is called. Each
 // lesson this writes goes to the e2e runs folder and is removed afterwards.
 import { readFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
@@ -29,7 +30,7 @@ test.afterAll(async () => {
     await rm(path.join(RUNS_DIR, id), { recursive: true, force: true });
 });
 
-test("a PDF becomes a plan of step titles, and Start opens the lesson", async ({
+test("a PDF becomes a plan with its cover and step titles, and Start opens the lesson", async ({
   page,
 }) => {
   await page.goto("/");
@@ -45,6 +46,12 @@ test("a PDF becomes a plan of step titles, and Start opens the lesson", async ({
   created.push(lessonId);
 
   const plan = page.getByTestId("plan");
+  // The fal fake's cover (L4), served from the run folder, loads.
+  const cover = page.getByTestId("plan-cover");
+  await expect(cover).toHaveAttribute("src", `/api/runs/${lessonId}/cover.jpg`);
+  await expect
+    .poll(() => cover.evaluate((img: HTMLImageElement) => img.naturalWidth))
+    .toBeGreaterThan(0);
   await expect(plan.getByRole("heading", { name: PLAN.title })).toBeVisible();
   await expect(page.getByTestId("plan-steps").getByRole("listitem")).toHaveText(
     PLAN.steps.map((s) => s.title),
@@ -56,6 +63,11 @@ test("a PDF becomes a plan of step titles, and Start opens the lesson", async ({
   await start.click();
   await expect(page).toHaveURL(href!);
   await expect(page.getByTestId("lesson")).toBeVisible();
+  // The lesson page's header shows the same cover (app/lesson, P6).
+  await expect(page.getByTestId("lesson-cover")).toHaveAttribute(
+    "src",
+    `/api/runs/${lessonId}/cover.jpg`,
+  );
 });
 
 test("a file that isn't a PDF says Please choose a PDF.", async ({ page }) => {
