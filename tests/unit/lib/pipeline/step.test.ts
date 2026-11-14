@@ -154,6 +154,39 @@ describe("generateStep (G1)", () => {
     expect(claude.calls).toHaveLength(1);
   });
 
+  it("context window cut-off: fails as cut-off, with no retry", async () => {
+    const { err, claude } = await failure([
+      fakeMessage('{"title": "cut', "model_context_window_exceeded"),
+    ]);
+    expect(err.reason).toBe("cut-off");
+    expect(claude.calls).toHaveLength(1);
+  });
+
+  it("narration over config.maxNarrationChars is a rejection, retried with narration too long", async () => {
+    const long = {
+      ...valid,
+      narration: `${valid.narration} ${"word ".repeat(config.maxNarrationChars / 5)}`,
+    };
+    const claude = fakeClaude([
+      fakeMessage(JSON.stringify(long)),
+      fakeMessage(JSON.stringify(valid)),
+    ]);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    await expect(generateStep(REQ, claude)).resolves.toEqual(valid);
+    expect(claude.calls[1].body.messages[2].content).toContain(
+      "narration too long",
+    );
+  });
+
+  it("an empty first answer is retried without an empty assistant turn", async () => {
+    const empty = { ...fakeMessage(""), content: [] };
+    const claude = fakeClaude([empty, fakeMessage(JSON.stringify(valid))]);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    await expect(generateStep(REQ, claude)).resolves.toEqual(valid);
+    const retry = claude.calls[1].body.messages;
+    expect(retry.map((m) => m.role)).toEqual(["user", "user"]);
+  });
+
   it("API error (after the SDK's retries): fails as provider, keeping the cause", async () => {
     const apiError = new Anthropic.InternalServerError(
       529,
@@ -168,16 +201,32 @@ describe("generateStep (G1)", () => {
     expect(claude.calls).toHaveLength(1);
   });
 
-  it("timeout: fails as provider, and each attempt has config.stepTimeoutMs", async () => {
+  it("timeout: config.step.timeoutMs passing (the request aborts) fails as provider, with no retry", async () => {
+    const { err, claude } = await failure([new Anthropic.APIUserAbortError()]);
+    expect(err.reason).toBe("provider");
+    expect(err.message).toContain(
+      `timed out after ${config.step.timeoutMs} ms`,
+    );
+    expect(claude.calls).toHaveLength(1);
+  });
+
+  it("each attempt gets an abort signal as its total deadline", async () => {
+    const claude = fakeClaude([fakeMessage(JSON.stringify(valid))]);
+    await generateStep(REQ, claude);
+    expect(claude.calls[0].options?.signal).toBeInstanceOf(AbortSignal);
+    expect(claude.calls[0].options?.signal?.aborted).toBe(false);
+  });
+
+  it("a connection timeout (after the SDK's retries) fails as provider", async () => {
     const { err, claude } = await failure([
       new Anthropic.APIConnectionTimeoutError(),
     ]);
     expect(err.reason).toBe("provider");
-    expect(err.message).toContain("timed out");
-    expect(claude.calls[0].options).toEqual({ timeout: config.stepTimeoutMs });
+    expect(err.message).toContain("APIConnectionTimeoutError");
+    expect(claude.calls).toHaveLength(1);
   });
 
-  it("an error that isn't the SDK's propagates as is (a bug, not a failed step)", async () => {
+  it("an error that isn't the SDK's propagates as is (a bug in a fake or our code, not a failed step)", async () => {
     const bug = new TypeError("boom");
     const claude = fakeClaude([bug]);
     await expect(generateStep(REQ, claude)).rejects.toBe(bug);
@@ -189,7 +238,9 @@ describe("generateStep (G1)", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     resetEnvForTests();
     const step = await generateStep(REQ);
-    expect(Step.safeParse(step).success).toBe(true);
+    const fixture = await readFixture<Anthropic.Message>(config.step.fixture);
+    const text = fixture.content.find((b) => b.type === "text");
+    expect(step).toEqual(Step.parse(JSON.parse(text!.text)));
   });
 });
 
@@ -198,7 +249,7 @@ describe("buildStepRequest", () => {
     const body = buildStepRequest(REQ);
     expect(body.model).toBe(config.models.step);
     expect(body.output_config?.effort).toBe(config.effort.step);
-    expect(body.max_tokens).toBe(config.stepMaxTokens);
+    expect(body.max_tokens).toBe(config.step.maxTokens);
   });
 
   it("asks for structured output with the step output format", () => {

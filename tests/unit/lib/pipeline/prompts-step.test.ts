@@ -75,6 +75,15 @@ describe("stepContextPrompt", () => {
 });
 
 describe("STEP_SYSTEM_PROMPT", () => {
+  it("doesn't offer image objects (the board draws none until E1)", () => {
+    expect(STEP_SYSTEM_PROMPT).not.toMatch(/^- image:/m);
+    expect(STEP_SYSTEM_PROMPT).toContain("there are no images");
+  });
+
+  it("asks for maths spelled out in the narration (TTS reads symbols badly, S1)", () => {
+    expect(STEP_SYSTEM_PROMPT).toContain("spell all maths out in words");
+  });
+
   it("states the narration cap from lib/config.ts", () => {
     expect(STEP_SYSTEM_PROMPT).toContain(`${config.maxNarrationChars}`);
   });

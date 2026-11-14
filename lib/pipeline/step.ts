@@ -42,7 +42,7 @@ export interface ClaudeMessages {
 /**
  * Why a step failed (the `failed` causes in section 6.2). `rejected`: invalid twice, with the
  * second attempt's errors. `refusal`: Claude declined. `cut-off`: the output hit
- * `config.stepMaxTokens`. `provider`: an API or network error, or a timeout, after the SDK's
+ * `config.step.maxTokens`. `provider`: an API or network error, or a timeout, after the SDK's
  * own retries. The message is for the server log; the learner sees "Couldn't make this step."
  */
 export class StepGenerationError extends Error {
@@ -63,7 +63,7 @@ export function buildStepRequest(
 ): Anthropic.MessageStreamParams {
   return {
     model: config.models.step,
-    max_tokens: config.stepMaxTokens,
+    max_tokens: config.step.maxTokens,
     system: STEP_SYSTEM_PROMPT,
     output_config: { effort: config.effort.step, format: STEP_OUTPUT_FORMAT },
     messages: [
@@ -95,12 +95,16 @@ export async function generateStep(
     `[step] step ${req.n} rejected, retrying once: ${firstTry.result.errors.join("; ")}`,
   );
   // The model sees what it wrote and why it was rejected. Its content (thinking included)
-  // goes back unchanged, after the same cached prefix.
+  // goes back unchanged, after the same cached prefix. The API rejects an empty assistant turn.
+  const answer: Anthropic.MessageParam[] =
+    firstTry.content.length > 0
+      ? [{ role: "assistant", content: firstTry.content }]
+      : [];
   const retry: Anthropic.MessageStreamParams = {
     ...first,
     messages: [
       ...first.messages,
-      { role: "assistant", content: firstTry.content },
+      ...answer,
       { role: "user", content: retryPrompt(firstTry.result.errors) },
     ],
   };
@@ -124,16 +128,22 @@ async function attempt(
 ): Promise<Attempt> {
   let message: Anthropic.Message;
   try {
+    // A total deadline: the SDK's `timeout` stops once headers arrive, and a stream then
+    // waits as long as the socket stays open.
     message = await messages
-      .stream(body, { timeout: config.stepTimeoutMs })
+      .stream(body, { signal: AbortSignal.timeout(config.step.timeoutMs) })
       .finalMessage();
   } catch (err) {
-    // APIError covers HTTP errors, connection errors and timeouts; the base class also covers
-    // a stream that ends without a message. Anything else is our bug and propagates as is.
+    // The real stream reports every failure as an AnthropicError: HTTP and connection errors
+    // (APIError), our deadline (APIUserAbortError), and anything else it wraps.
     if (!(err instanceof Anthropic.AnthropicError)) throw err;
+    const what =
+      err instanceof Anthropic.APIUserAbortError
+        ? `timed out after ${config.step.timeoutMs} ms`
+        : `failed: ${err.name}: ${err.message}`;
     throw new StepGenerationError(
       "provider",
-      `Claude step request failed: ${err.name}: ${err.message}`,
+      `Claude step request ${what}`,
       [],
       { cause: err },
     );
@@ -146,10 +156,13 @@ async function attempt(
       `Claude declined the step (category: ${category})`,
     );
   }
-  if (message.stop_reason === "max_tokens") {
+  if (
+    message.stop_reason === "max_tokens" ||
+    message.stop_reason === "model_context_window_exceeded"
+  ) {
     throw new StepGenerationError(
       "cut-off",
-      `Claude's step hit max_tokens (${config.stepMaxTokens})`,
+      `Claude's step was cut off (${message.stop_reason}, max_tokens ${config.step.maxTokens})`,
     );
   }
 

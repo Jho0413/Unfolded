@@ -3,15 +3,9 @@
 // and read back the requests it got.
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
+import { config } from "@/lib/config";
 import { readFixture } from "@/lib/fakes";
 import type { ClaudeMessages } from "@/lib/pipeline/step";
-
-/**
- * The step response served when FAKE_APIS=1: a Message in the API's shape whose step is the
- * demo-m1 fixture. To be replaced by a recorded Sonnet 5.5 response once real calls work
- * (the key needs a workspace id, and the full Step schema is being simplified in S3).
- */
-export const STEP_MESSAGE_FIXTURE = "claude-step.message.json";
 
 /** A reply the fake gives: a message, or an error it throws (as the SDK would). */
 export type FakeReply = Anthropic.Message | Error;
@@ -26,7 +20,9 @@ export interface FakeClaude extends ClaudeMessages {
 
 /**
  * Serves `replies` in order, one per request; a request past the end fails the test. Without
- * `replies`, every request gets the recorded fixture.
+ * `replies`, every request gets `config.step.fixture`: a Message in the API's shape whose step
+ * is the demo-m1 fixture, until a recorded Sonnet 5.5 response replaces it (the full Step
+ * schema is too large for structured output today, and S3 is simplifying it).
  */
 export function fakeClaude(replies?: readonly FakeReply[]): FakeClaude {
   const calls: FakeClaude["calls"] = [];
@@ -39,7 +35,7 @@ export function fakeClaude(replies?: readonly FakeReply[]): FakeClaude {
       return {
         async finalMessage() {
           if (replies === undefined)
-            return readFixture<Anthropic.Message>(STEP_MESSAGE_FIXTURE);
+            return readFixture<Anthropic.Message>(config.step.fixture);
           const reply = replies[i];
           if (reply === undefined)
             throw new Error(

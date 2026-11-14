@@ -23,20 +23,19 @@ The paper is attached. Teach from it: use its notation, definitions and numbers 
 # Narration
 
 - Spoken aloud by a text-to-speech voice, at most ${config.maxNarrationChars} characters once markers are removed. Aim for 30 to 90 seconds of speech.
-- Plain spoken English. No markdown, no LaTeX, no symbols the voice can't say: write "x squared", not "x^2".
-- Cue markers mark the word where an action fires: \`[[name]]\` placed directly before that word, as in "take the [[first]]first row". A name is lowercase letters, digits and underscores, starting with a letter. Each name appears once. Any other use of double square brackets is an error.
+- Plain spoken English. The voice reads symbols badly, so spell all maths out in words: "x squared", not "x²" or "x^2"; "the square root of d", not "√d"; "alpha", not "α". No markdown, no LaTeX, no maths symbols. Formulas belong on the board, in latex objects.
+- Cue markers mark the word where an action fires: \`[[name]]\` placed directly before that word, as in "take the [[first]]first row". A name is lowercase letters, digits and underscores, starting with a letter, at most 32 characters. Each name appears once. Any other use of double square brackets is an error.
 
 # The whiteboard
 
-The canvas is ${CANVAS.w} wide and ${CANVAS.h} high, origin at the top left. Every object needs a unique id (lowercase letters, digits and underscores, starting with a letter, at most 32 characters). Objects:
+The canvas is ${CANVAS.w} wide and ${CANVAS.h} high, origin at the top left. Every object needs a unique id (lowercase letters, digits and underscores, starting with a letter, at most 32 characters). Use only these kinds of object (there are no images):
 
 - matrix: x, y is the top-left corner. rows is 1 to ${MAX_MATRIX_DIM} rows of 1 to ${MAX_MATRIX_DIM} cells, all the same length; "" is an empty cell. Every cell is ${CELL.w} wide and ${CELL.h} high, so cell (r, c) has its centre at (x + ${CELL.w}c + ${CELL.w / 2}, y + ${CELL.h}r + ${CELL.h / 2}) and the whole matrix fits in its cell box. Optional label, drawn outside the box. Keep cell values short (a number or a symbol).
 - text: x, y is the centre. size is "s", "m" or "l".
 - latex: x, y is the centre. tex is KaTeX math (no \\href, \\url or other links).
 - arrow: from and to are each an object (its centre), a matrix row, column or cell, or a point {x, y}. Never another arrow. Optional label.
-- image: x, y is the top-left corner, w and h its size; prompt describes an illustration. Use one only when a picture genuinely helps.
 
-Every object, and every point, must be inside the canvas: a matrix's whole cell box, an image's whole box, the centre of a text or latex. Leave room around objects so nothing overlaps, including after moves.
+Every object, and every point, must be inside the canvas: a matrix's whole cell box, the centre of a text or latex. Leave room around objects so nothing overlaps, including after moves.
 
 An object with hidden: true is on the board from the start but not drawn until a show action. Use hidden objects for anything that appears partway through the step.
 
@@ -47,7 +46,7 @@ Each action has a cue (a marker name from the narration), a target and a duratio
 - show / hide: show or hide a whole object. show never takes row or col.
 - highlight / unhighlight: color "accent" (the default) or "warn".
 - move: the target's centre slides to the anchor in to (an object, a matrix part or a point). Moving a row, column or cell slides a copy of it and leaves the matrix whole; later actions on that part use the copy, and hide on the part removes the copy. Arrows can't move.
-- write: replaces a text object's text, or a matrix cell's value (needs both row and col). Not for latex, arrows or images.
+- write: replaces a text object's text, or a matrix cell's value (needs both row and col). Not for latex or arrows.
 
 Several actions may share a cue; they run in the order listed.
 
