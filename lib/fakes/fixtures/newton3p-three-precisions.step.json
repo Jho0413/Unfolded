@@ -1,0 +1,97 @@
+{
+  "title": "Why Three Precisions",
+  "narration": "Now let's see why the paper uses three precisions. Look at the table on the board. Each row is a job in one Newton step, and each column is a precision. [[show_res]]First, the residual F of x is computed in double precision. It is cheap, because a fast Fourier transform does it in about N log N work, and it sets the accuracy we finally reach. [[show_jac]]Second, the Jacobian is stored in single precision. Building it costs only about N squared work, and single precision roundoff is about six times ten to the minus eight, which is small enough to behave like double. [[show_fact]]Third, the factorization is done in half precision. This is the expensive part, about N cubed work, so it is the part where cheaper arithmetic saves the most. [[hl_fact]]Take N equal to 4096. N cubed is huge compared with N squared, so the factorization dominates the cost. [[show_ir]]Half precision alone is sloppy, so iterative refinement repairs the step, using the single precision Jacobian to compute residuals. The result matches Newton with a double precision Jacobian, except for very ill conditioned problems, where GMRES with the half precision factorization as a preconditioner rescues it.",
+  "objects": [
+    {
+      "kind": "matrix",
+      "id": "tbl",
+      "x": 500,
+      "y": 250,
+      "rows": [
+        ["Job", "Precision", "Work"],
+        ["Residual F", "double", "N log N"],
+        ["Jacobian J", "single", "N^2"],
+        ["Factor J", "half", "N^3"]
+      ],
+      "label": "One Newton step"
+    },
+    {
+      "kind": "text",
+      "id": "t_ir",
+      "x": 800,
+      "y": 600,
+      "text": "Iterative refinement fixes the half precision step",
+      "size": "m",
+      "hidden": true
+    }
+  ],
+  "actions": [
+    {
+      "do": "highlight",
+      "target": {
+        "id": "tbl",
+        "row": 1
+      },
+      "color": "accent",
+      "durationMs": 600,
+      "cue": "show_res"
+    },
+    {
+      "do": "unhighlight",
+      "target": {
+        "id": "tbl",
+        "row": 1
+      },
+      "durationMs": 300,
+      "cue": "show_jac"
+    },
+    {
+      "do": "highlight",
+      "target": {
+        "id": "tbl",
+        "row": 2
+      },
+      "color": "accent",
+      "durationMs": 600,
+      "cue": "show_jac"
+    },
+    {
+      "do": "unhighlight",
+      "target": {
+        "id": "tbl",
+        "row": 2
+      },
+      "durationMs": 300,
+      "cue": "show_fact"
+    },
+    {
+      "do": "highlight",
+      "target": {
+        "id": "tbl",
+        "row": 3
+      },
+      "color": "accent",
+      "durationMs": 600,
+      "cue": "show_fact"
+    },
+    {
+      "do": "highlight",
+      "target": {
+        "id": "tbl",
+        "row": 3,
+        "col": 2
+      },
+      "color": "warn",
+      "durationMs": 600,
+      "cue": "hl_fact"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "t_ir"
+      },
+      "durationMs": 600,
+      "cue": "show_ir"
+    }
+  ]
+}

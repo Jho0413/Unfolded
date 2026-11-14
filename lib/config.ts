@@ -3,7 +3,7 @@
 import "server-only";
 import path from "node:path";
 
-/** Claude effort levels we use, per request type (ARCHITECTURE.md section 5.1). S3 may widen it. */
+/** Claude effort levels we use, per request type (ARCHITECTURE.md section 5.1). */
 export type Effort = "low" | "medium" | "high";
 
 export const config = {
@@ -13,7 +13,7 @@ export const config = {
     step: "claude-sonnet-5-5",
     sketch: "claude-sonnet-5-5",
   },
-  /** Plan and step are placeholders until spike S3 records its choice in ARCHITECTURE.md section 11. */
+  /** Step: medium, chosen by spike S3 (ARCHITECTURE.md section 11). Plan and sketch are not measured yet (L1, Q4). */
   effort: {
     plan: "medium",
     step: "medium",
@@ -53,8 +53,11 @@ export const config = {
   sketch: {
     /** Output cap, thinking included. A cut-off fails the sketch. */
     maxTokens: 16_000,
-    /** Deadline for one attempt, the SDK's own retries included, until the whole answer is in. */
-    timeoutMs: 60_000,
+    /**
+     * Deadline for one attempt, the SDK's own retries included, until the whole answer is in.
+     * A real sketch takes 3 to 5 s; with the one retry, the browser hears back within 40 s.
+     */
+    timeoutMs: 20_000,
     /**
      * Cap on the request's `description`: the agent describes a drawing in a sentence or two,
      * and the route is unauthenticated, so a huge one never becomes a paid request.

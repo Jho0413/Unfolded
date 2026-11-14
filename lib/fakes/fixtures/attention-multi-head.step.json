@@ -1,0 +1,126 @@
+{
+  "title": "Multi-head attention",
+  "narration": "So far we built one attention head. The paper runs several in parallel. [[intro]]Here is a tiny example with two heads. Each token has a four number vector, and we split the work so each head gets its own projections, called W Q i, W K i and W V i. [[h1]]Head one produces a two number output for each of two tokens. Here token one gets one, zero, and token two gets zero, one. [[h2]]Head two attends differently, because its projections are different, and it produces three, three for token one and two, two for token two. [[cat]]Now we concatenate the head outputs side by side. Token one becomes one, zero, three, three, and token two becomes zero, one, two, two. The paper writes this as Concat of head one up to head h. [[proj]]Finally we multiply by one more learned matrix, W O, which mixes the heads and maps back to the model dimension. In the paper h is eight heads with d k equal to d v equal to 64, so the concatenation has 512 numbers, matching d model. [[end]]Each head can look at different positions, which a single averaged head cannot do.",
+  "objects": [
+    {
+      "kind": "matrix",
+      "id": "head1",
+      "x": 100,
+      "y": 200,
+      "rows": [
+        ["1", "0"],
+        ["0", "1"]
+      ],
+      "label": "head 1 output"
+    },
+    {
+      "kind": "matrix",
+      "id": "head2",
+      "x": 100,
+      "y": 450,
+      "rows": [
+        ["3", "3"],
+        ["2", "2"]
+      ],
+      "label": "head 2 output",
+      "hidden": true
+    },
+    {
+      "kind": "matrix",
+      "id": "concat",
+      "x": 600,
+      "y": 320,
+      "rows": [
+        ["1", "0", "3", "3"],
+        ["0", "1", "2", "2"]
+      ],
+      "label": "Concat",
+      "hidden": true
+    },
+    {
+      "kind": "latex",
+      "id": "formula",
+      "x": 1150,
+      "y": 200,
+      "tex": "\\mathrm{MultiHead}=\\mathrm{Concat}(\\mathrm{head}_1,\\dots,\\mathrm{head}_h)W^O",
+      "hidden": true
+    },
+    {
+      "kind": "latex",
+      "id": "wo",
+      "x": 1150,
+      "y": 420,
+      "tex": "W^O \\in \\mathbb{R}^{h d_v \\times d_{model}}",
+      "hidden": true
+    },
+    {
+      "kind": "text",
+      "id": "note",
+      "x": 1150,
+      "y": 600,
+      "text": "h = 8, d_k = d_v = 64, 8 x 64 = 512",
+      "size": "m",
+      "hidden": true
+    }
+  ],
+  "actions": [
+    {
+      "do": "highlight",
+      "target": {
+        "id": "head1"
+      },
+      "color": "accent",
+      "durationMs": 400,
+      "cue": "h1"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "head2"
+      },
+      "durationMs": 400,
+      "cue": "h2"
+    },
+    {
+      "do": "highlight",
+      "target": {
+        "id": "head2"
+      },
+      "color": "warn",
+      "durationMs": 400,
+      "cue": "h2"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "concat"
+      },
+      "durationMs": 500,
+      "cue": "cat"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "formula"
+      },
+      "durationMs": 500,
+      "cue": "cat"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "wo"
+      },
+      "durationMs": 500,
+      "cue": "proj"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "note"
+      },
+      "durationMs": 500,
+      "cue": "end"
+    }
+  ]
+}
