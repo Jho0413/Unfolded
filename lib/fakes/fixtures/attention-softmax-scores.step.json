@@ -1,0 +1,135 @@
+{
+  "title": "Softmax turns scores into weights",
+  "narration": "Here is one row of scaled scores from the last step, for one query against three keys. [[c1]]The scores are two, one and zero. Softmax, as in equation one of the paper, first raises e to each score. [[c2]]That gives about seven point four, two point seven, and one. Their sum is about eleven point one. [[c3]]Now divide each by that sum. The weights are about point six seven, point two four, and point zero nine. They add up to one, and the biggest score gets the biggest weight. [[c4]]Next we bring in V, which has one row per key. Each weight says how much of its row to take. [[c5]]The output is point six seven times ten, zero, plus point two four times zero, ten, plus point zero nine times ten, ten. That is seven point six and three point three. So the output is a blend of the value rows, leaning mostly on the first.",
+  "objects": [
+    {
+      "kind": "latex",
+      "id": "formula",
+      "x": 800,
+      "y": 80,
+      "tex": "\\mathrm{softmax}(z_i)=\\frac{e^{z_i}}{\\sum_j e^{z_j}}"
+    },
+    {
+      "kind": "matrix",
+      "id": "scores",
+      "x": 100,
+      "y": 200,
+      "rows": [["2", "1", "0"]],
+      "label": "scaled scores"
+    },
+    {
+      "kind": "matrix",
+      "id": "expo",
+      "x": 100,
+      "y": 330,
+      "rows": [["7.4", "2.7", "1.0"]],
+      "label": "e to the score",
+      "hidden": true
+    },
+    {
+      "kind": "matrix",
+      "id": "weights",
+      "x": 100,
+      "y": 460,
+      "rows": [["0.67", "0.24", "0.09"]],
+      "label": "weights, sum 1",
+      "hidden": true
+    },
+    {
+      "kind": "matrix",
+      "id": "vmat",
+      "x": 700,
+      "y": 200,
+      "rows": [
+        ["10", "0"],
+        ["0", "10"],
+        ["10", "10"]
+      ],
+      "label": "V",
+      "hidden": true
+    },
+    {
+      "kind": "matrix",
+      "id": "outm",
+      "x": 700,
+      "y": 500,
+      "rows": [["7.6", "3.3"]],
+      "label": "output",
+      "hidden": true
+    },
+    {
+      "kind": "arrow",
+      "id": "arr",
+      "from": {
+        "id": "weights"
+      },
+      "to": {
+        "id": "outm"
+      },
+      "label": "mix rows of V",
+      "hidden": true
+    }
+  ],
+  "actions": [
+    {
+      "do": "highlight",
+      "target": {
+        "id": "scores",
+        "row": 0
+      },
+      "color": "accent",
+      "durationMs": 400,
+      "cue": "c1"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "expo"
+      },
+      "durationMs": 600,
+      "cue": "c2"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "weights"
+      },
+      "durationMs": 600,
+      "cue": "c3"
+    },
+    {
+      "do": "highlight",
+      "target": {
+        "id": "weights",
+        "row": 0
+      },
+      "color": "accent",
+      "durationMs": 400,
+      "cue": "c3"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "vmat"
+      },
+      "durationMs": 600,
+      "cue": "c4"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "arr"
+      },
+      "durationMs": 500,
+      "cue": "c5"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "outm"
+      },
+      "durationMs": 600,
+      "cue": "c5"
+    }
+  ]
+}

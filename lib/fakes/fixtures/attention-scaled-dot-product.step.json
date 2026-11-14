@@ -1,0 +1,160 @@
+{
+  "title": "Scaled dot-product attention: scores",
+  "narration": "Let's compute the first half of scaled dot-product attention. The paper writes it as softmax of Q times K transpose over the square root of d k, times V. [[c_q]]Here is a tiny query matrix Q with two queries, each of length four, so d k is four. [[c_k]]Next is the key matrix K, with two keys, also of length four. [[c_row]]To score a query against a key, we take their dot product. Look at the first query and the second key. Multiply matching entries: two times zero, zero times one, two times zero, zero times one. That adds up to zero. [[c_s]]Doing this for every query and key pair is exactly Q times K transpose, and gives this two by two score matrix. The second query scores two with the first key, and four with the second key, so it matches the second key best. [[c_div]]Now we divide every score by the square root of d k. Since d k is four, that is divide by two. [[c_out]]The scaled scores are one, zero, one and two. This scaling stops the dot products growing too large when d k is big, which would push the softmax into regions with tiny gradients. Next, we will turn these scores into weights.",
+  "objects": [
+    {
+      "kind": "latex",
+      "id": "formula",
+      "x": 800,
+      "y": 90,
+      "tex": "\\mathrm{softmax}\\left(\\frac{QK^{T}}{\\sqrt{d_k}}\\right)V"
+    },
+    {
+      "kind": "matrix",
+      "id": "q",
+      "x": 100,
+      "y": 200,
+      "rows": [
+        ["2", "0", "2", "0"],
+        ["0", "2", "0", "2"]
+      ],
+      "label": "Q",
+      "hidden": true
+    },
+    {
+      "kind": "matrix",
+      "id": "k",
+      "x": 100,
+      "y": 450,
+      "rows": [
+        ["1", "1", "0", "0"],
+        ["0", "1", "0", "1"]
+      ],
+      "label": "K",
+      "hidden": true
+    },
+    {
+      "kind": "matrix",
+      "id": "s",
+      "x": 600,
+      "y": 200,
+      "rows": [
+        ["2", "0"],
+        ["2", "4"]
+      ],
+      "label": "Q K transpose",
+      "hidden": true
+    },
+    {
+      "kind": "text",
+      "id": "div",
+      "x": 864,
+      "y": 250,
+      "text": "divide by 2",
+      "size": "m",
+      "hidden": true
+    },
+    {
+      "kind": "matrix",
+      "id": "out",
+      "x": 1000,
+      "y": 200,
+      "rows": [
+        ["1", "0"],
+        ["1", "2"]
+      ],
+      "label": "scaled scores",
+      "hidden": true
+    },
+    {
+      "kind": "text",
+      "id": "note",
+      "x": 800,
+      "y": 700,
+      "text": "d_k = 4, so the square root of d_k is 2",
+      "size": "m",
+      "hidden": true
+    }
+  ],
+  "actions": [
+    {
+      "do": "show",
+      "target": {
+        "id": "q"
+      },
+      "durationMs": 500,
+      "cue": "c_q"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "k"
+      },
+      "durationMs": 500,
+      "cue": "c_k"
+    },
+    {
+      "do": "highlight",
+      "target": {
+        "id": "q",
+        "row": 0
+      },
+      "color": "accent",
+      "durationMs": 400,
+      "cue": "c_row"
+    },
+    {
+      "do": "highlight",
+      "target": {
+        "id": "k",
+        "row": 1
+      },
+      "color": "warn",
+      "durationMs": 400,
+      "cue": "c_row"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "s"
+      },
+      "durationMs": 600,
+      "cue": "c_s"
+    },
+    {
+      "do": "highlight",
+      "target": {
+        "id": "s",
+        "row": 1,
+        "col": 1
+      },
+      "color": "accent",
+      "durationMs": 400,
+      "cue": "c_s"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "div"
+      },
+      "durationMs": 400,
+      "cue": "c_div"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "note"
+      },
+      "durationMs": 400,
+      "cue": "c_div"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "out"
+      },
+      "durationMs": 600,
+      "cue": "c_out"
+    }
+  ]
+}

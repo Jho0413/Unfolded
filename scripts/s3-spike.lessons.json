@@ -1,0 +1,40 @@
+{
+  "papers": [
+    {
+      "slug": "attention",
+      "title": "Attention Is All You Need (arXiv 1706.03762)",
+      "concepts": [
+        {
+          "slug": "scaled-dot-product",
+          "goal": "Scaled dot-product attention: multiply Q by K transpose to get the scores, then divide by the square root of d_k. Work a small numeric example."
+        },
+        {
+          "slug": "softmax-scores",
+          "goal": "Softmax over the attention scores: turn one row of scores into weights that sum to one, then use them to mix the rows of V."
+        },
+        {
+          "slug": "multi-head",
+          "goal": "Multi-head attention: several heads attend in parallel with their own projections, then their outputs are concatenated and projected."
+        }
+      ]
+    },
+    {
+      "slug": "newton3p",
+      "title": "Newton's Method in Three Precisions (Kelley, arXiv 2307.16051)",
+      "concepts": [
+        {
+          "slug": "newton-step",
+          "goal": "The Newton iteration x+ = xc - F'(xc)^-1 F(xc): solve the Jacobian system for the step, then update. Work one step on a small 2x2 system."
+        },
+        {
+          "slug": "iterative-refinement",
+          "goal": "Iterative refinement: solve with a cheap low-precision factorization, compute the residual in higher precision, and correct, repeating until the residual is small."
+        },
+        {
+          "slug": "three-precisions",
+          "goal": "Why three precisions: residual in double, Jacobian stored in single, factorization in half, because the O(N^3) factorization dominates the cost."
+        }
+      ]
+    }
+  ]
+}
