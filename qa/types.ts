@@ -32,6 +32,14 @@ export type StartOptions = {
   textOnly: boolean;
 };
 
+/** What tool handlers may ask of the Ask panel. */
+export type AskApi = {
+  /** Shows a tool's message in the panel (e.g. "Couldn't draw that."), or clears it with null. */
+  showNotice: (message: string | null) => void;
+  /** Tells the agent something through sendContextualUpdate(). */
+  tellAgent: (text: string) => void;
+};
+
 /** What the Ask panel drives, real or fake. Every call is fire-and-forget. */
 export type QaConversation = {
   start: (options: StartOptions) => void;

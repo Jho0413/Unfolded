@@ -79,6 +79,11 @@ function harness(start: PlayerState) {
     highlight: (a) => highlights.push(a),
     send,
     isAsking: () => state.kind === "asking",
+    askId: () => 1,
+    drawSketch: () => {},
+    showNotice: () => {},
+    tellAgent: () => {},
+    fetch: vi.fn(() => new Promise<Response>(() => {})),
   });
   return { tools, highlights, send, state: () => state };
 }
@@ -239,7 +244,11 @@ describe("simplify_upcoming", () => {
 });
 
 describe("draw_scene", () => {
-  it("isn't handled until Q5", () => {
-    expect(harness(asking).tools.draw_scene).toBeUndefined();
+  it("doesn't wait: returns nothing at once (qa/drawScene.ts does the rest)", () => {
+    const result = harness(asking).tools.draw_scene?.({
+      description: "a box",
+      fresh: false,
+    });
+    expect(result).toBeUndefined();
   });
 });

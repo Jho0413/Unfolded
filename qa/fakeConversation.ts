@@ -37,6 +37,14 @@ export const DEFAULT_SCRIPT: readonly FakeTurn[] = [
     reply: "Here's the first row, highlighted.",
   },
   {
+    match: /\bdraw\b/i,
+    tool: {
+      name: "draw_scene",
+      params: { description: "Circle the first row of q", fresh: false },
+    },
+    reply: "Let me sketch that while I explain.",
+  },
+  {
     match: /.*/,
     reply: "Good question. Each output cell is a row times a column.",
   },

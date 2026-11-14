@@ -5,7 +5,7 @@
 //   highlight          checked against the board on screen; "ok" or the error
 //   go_to_step         goToStep(step - 1); "ok" or "no step n"
 //   simplify_upcoming  stub until A1 (returns nothing)
-//   draw_scene         Q5: not handled yet, so the agent is told it isn't available
+//   draw_scene         no wait: returns nothing, the sketch is drawn when it arrives (qa/drawScene.ts)
 import type { PlayerEvent, TransitionResult } from "@/player/machine";
 import {
   type Action,
@@ -14,6 +14,7 @@ import {
   DEFAULT_DURATION_MS,
 } from "@/shared/scene";
 import { checkAction } from "@/shared/validate";
+import { type DrawSceneDeps, drawScene } from "./drawScene";
 import type { QaTools } from "./types";
 
 export type HighlightAction = Extract<Action, { do: "highlight" }>;
@@ -27,7 +28,10 @@ export type ClientToolDeps = {
   send: (event: PlayerEvent) => TransitionResult;
   /** True while the player is `asking`. A tool call can land after Ask closed. */
   isAsking: () => boolean;
-};
+} & Pick<
+  DrawSceneDeps,
+  "askId" | "drawSketch" | "showNotice" | "tellAgent" | "fetch" | "timeoutMs"
+>;
 
 /** What a tool that changes the board or the step returns after Ask closed. */
 export const ASK_CLOSED = "Ask is closed";
@@ -53,6 +57,11 @@ export function createClientTools(deps: ClientToolDeps): QaTools {
       if (!deps.isAsking()) return ASK_CLOSED;
       const result = deps.send({ type: "goToStep", n: step - 1 });
       return result.outcome === "rejected" ? result.message : "ok";
+    },
+    // Doesn't wait: the agent keeps talking while the sketch is made.
+    draw_scene: ({ description, fresh }) => {
+      if (!deps.isAsking()) return;
+      void drawScene(deps, description, fresh);
     },
     // A1 replaces this with a signal to the server (section 5.4).
     simplify_upcoming: ({ reason }) => {
