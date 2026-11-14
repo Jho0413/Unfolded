@@ -1,0 +1,22 @@
+{
+  "type": "client",
+  "name": "draw_scene",
+  "description": "Sketch something on the board. Returns nothing: describe it aloud while it appears.",
+  "expects_response": false,
+  "parameters": {
+    "type": "object",
+    "description": "What to sketch",
+    "required": ["description"],
+    "properties": {
+      "description": {
+        "type": "string",
+        "description": "What to draw, in plain words"
+      },
+      "fresh": {
+        "type": "boolean",
+        "description": "True to draw on an empty board instead of the current one"
+      }
+    }
+  },
+  "dynamic_variables": { "dynamic_variable_placeholders": {} }
+}
