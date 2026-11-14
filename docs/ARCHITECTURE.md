@@ -290,6 +290,7 @@ sceneAt(objects: BoardObject[], timed: { action; startMs; durationMs }[], tMs: n
   - `player/sceneAt.ts` also exports `timeline(actions, cueTimes)`, which builds `timed` in lesson mode, and `resolveAnchor(board, anchor)`, which gives the renderer arrow ends.
 - Back, Replay and scrubbing are just seeks on the audio element. There's no animation state to undo.
 - `Whiteboard.tsx` renders `BoardState` as SVG on each animation frame. It interpolates from each action's progress, and exposes state as `data-*` attributes for tests.
+- **Latex and arrows on the board.** `latex` is KaTeX's HTML in a `foreignObject` centred on x,y, rendered with `shared/latex.ts`'s `KATEX_OPTIONS` (trust off, `maxSize` and `maxExpand` capped; `validate.ts` uses the same options) and `throwOnError: false`, so tex that slips through shows as KaTeX's red source text instead of breaking the board. An arrow resolves its ends with `resolveAnchor` on every frame. An end on a point is exact; an end on a target stops just outside the target's box (cells, text box, image; a short formula's box for latex, whose real size is only known after layout), so the head doesn't cover what it points at. `data-from-*`/`data-to-*` are the resolved anchors.
 - Motion is only used for UI chrome, such as panels and buttons, not for board objects, so the board always matches the clock.
 
 ### 5.4 Adaptation
