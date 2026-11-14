@@ -3,13 +3,15 @@
 // the audio element, the clock and the controls, and runs the effects of
 // player/machine.ts. The machine decides; this hook only does what it says.
 //
-// - Each step's audio is fetched as a blob and played from a `blob:` URL, so
-//   seeking works without HTTP Range support (section 5.1).
+// - Each step is loaded by player/stepLoader.ts: the step, then its audio as
+//   a blob played from a `blob:` URL (section 5.1).
 // - The clock is `audio.currentTime`: read on every animation frame while
 //   playing, and on the element's time events otherwise (a seek while
 //   paused). The board is `sceneAt(step, t)`, so Back, Replay and seeking
 //   are just seeks.
-// - Audio plays exactly while the machine is in `playing`.
+// - Audio plays exactly while the machine is in `playing`. A play or pause
+//   from outside the page (media keys, the browser's media controls) is sent
+//   to the machine as resume or pause, so the two never disagree.
 import {
   type ComponentProps,
   useCallback,
@@ -18,7 +20,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { ApiError, StepResponse } from "@/shared/lesson";
+import type { StepResponse } from "@/shared/lesson";
 import type { BoardState } from "@/shared/scene";
 import {
   canSend,
@@ -31,31 +33,19 @@ import {
 import {
   initialState,
   logResult,
-  MESSAGES,
   type PlayerEffect,
   type PlayerEvent,
   type PlayerState,
   transition,
   type TransitionResult,
 } from "./machine";
-import { sceneAt, type TimedAction, timeline } from "./sceneAt";
-
-/**
- * Requests step `n` (0-based). Resolves to the step, or to the server's
- * error body, whose message the learner sees. A rejection (network down) is
- * logged and shown as `MESSAGES.stepFailed`. The caller validates the
- * response at its boundary.
- */
-export type FetchStep = (n: number) => Promise<StepResponse | ApiError>;
-
-/** A step whose script and audio have both arrived. */
-interface LoadedStep {
-  step: number;
-  response: StepResponse;
-  timed: TimedAction[];
-  /** The audio as a `blob:` URL, revoked when another step replaces it. */
-  src: string;
-}
+import { sceneAt } from "./sceneAt";
+import {
+  createStepLoader,
+  type FetchStep,
+  fetchAudioBlob,
+  type LoadedStep,
+} from "./stepLoader";
 
 /** The clock reading, tagged with the audio it was read from. */
 interface Clock {
@@ -106,16 +96,15 @@ export function usePlayer({
   const stateRef = useRef(view.state);
   const ctxRef = useRef({ stepCount });
   const fetchStepRef = useRef(fetchStep);
-  /** Only the latest step request may change the player: older ones are late replies. */
-  const requestRef = useRef(0);
   useEffect(() => {
     ctxRef.current = { stepCount };
     fetchStepRef.current = fetchStep;
   }, [stepCount, fetchStep]);
 
-  // `send` and the effects it runs. Built once: they read the refs above, so
-  // they never go stale.
-  const { send, runEffects } = useMemo(() => {
+  // `send`, the effects it runs and the step loader. Built once per mount
+  // (state, not a memo, so nothing rebuilds them): they read the refs above,
+  // so they never go stale.
+  const [core] = useState(() => {
     function send(event: PlayerEvent): TransitionResult {
       const result = transition(stateRef.current, event, ctxRef.current);
       logResult(result);
@@ -130,11 +119,27 @@ export function usePlayer({
       return result;
     }
 
+    const loader = createStepLoader({
+      fetchStep: (n) => fetchStepRef.current(n),
+      fetchAudio: fetchAudioBlob,
+      createUrl: (blob) => URL.createObjectURL(blob),
+      revokeUrl: (url) => URL.revokeObjectURL(url),
+      // Keep the step only if the machine takes it, so audio never changes
+      // under a state that didn't ask for it.
+      ready: (step) => {
+        const result = send({ type: "stepReady", i: step.step });
+        if (result.outcome === "changed") setLoaded(step);
+        else URL.revokeObjectURL(step.src);
+      },
+      failed: (step, message) => send({ type: "stepFailed", i: step, message }),
+      log: console,
+    });
+
     function runEffects(effects: PlayerEffect[]) {
       for (const effect of effects) {
         switch (effect.type) {
           case "loadStep":
-            void load(effect.step);
+            void loader.load(effect.step);
             break;
           case "seekToStart":
             if (audioRef.current) audioRef.current.currentTime = 0;
@@ -148,58 +153,16 @@ export function usePlayer({
       }
     }
 
-    async function load(step: number) {
-      const request = ++requestRef.current;
-      const stale = () => request !== requestRef.current;
-      let response: StepResponse;
-      try {
-        const reply = await fetchStepRef.current(step);
-        if ("error" in reply) {
-          if (!stale())
-            send({ type: "stepFailed", i: step, message: reply.error });
-          return;
-        }
-        response = reply;
-      } catch (error) {
-        console.error(`[player] step ${step} request failed`, error);
-        if (!stale())
-          send({ type: "stepFailed", i: step, message: MESSAGES.stepFailed });
-        return;
-      }
-      let src: string;
-      try {
-        const audio = await fetch(response.audioUrl);
-        if (!audio.ok) throw new Error(`HTTP ${audio.status}`);
-        src = URL.createObjectURL(await audio.blob());
-      } catch (error) {
-        console.error(`[player] step ${step} audio failed to load`, error);
-        if (!stale())
-          send({ type: "stepFailed", i: step, message: MESSAGES.audioFailed });
-        return;
-      }
-      if (stale()) {
-        // A newer request replaced this one (the machine moved on).
-        URL.revokeObjectURL(src);
-        console.info(`[player] late reply for step ${step} ignored`);
-        return;
-      }
-      const timed = timeline(response.step.actions, response.cueTimes);
-      setLoaded({ step, response, timed, src });
-      send({ type: "stepReady", i: step });
-    }
+    return { send, runEffects, loader };
+  });
+  const { send } = core;
 
-    return { send, runEffects };
-  }, []);
-
-  // Start: the first state's effects load step 0. Unmounting makes every
-  // request in flight stale.
+  // Start: the first state's effects load step 0. Unmounting drops every
+  // request in flight.
   useEffect(() => {
-    runEffects(initialState().effects);
-    const requests = requestRef;
-    return () => {
-      requests.current++;
-    };
-  }, [runEffects]);
+    core.runEffects(initialState().effects);
+    return () => core.loader.cancel();
+  }, [core]);
 
   // Free each step's audio once another step replaces it, and on unmount.
   const src = loaded?.src;
@@ -232,7 +195,11 @@ export function usePlayer({
   const readClock = useCallback(() => {
     const audio = audioRef.current;
     if (audio === null || audio.src === "") return;
-    setClock({ src: audio.src, tMs: audio.currentTime * 1000 });
+    const next = { src: audio.src, tMs: audio.currentTime * 1000 };
+    // Same reading (play pending, stalled): keep the object, skip the render.
+    setClock((prev) =>
+      prev?.src === next.src && prev.tMs === next.tMs ? prev : next,
+    );
   }, []);
 
   // The clock while playing: one reading per animation frame.
@@ -249,12 +216,31 @@ export function usePlayer({
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const target = e.target instanceof HTMLElement ? e.target : null;
-      if (!isPlayPauseKey({ key: e.key, repeat: e.repeat, target })) return;
+      const modified = e.shiftKey || e.ctrlKey || e.altKey || e.metaKey;
+      if (e.defaultPrevented) return;
+      if (!isPlayPauseKey({ key: e.key, repeat: e.repeat, modified, target }))
+        return;
       e.preventDefault();
       send(playPauseEvent(stateRef.current));
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
+  }, [send]);
+
+  // A pause from outside the page (media key) while playing: the machine
+  // pauses too. The pause that comes with the end of the audio isn't one.
+  const onPause = useCallback(() => {
+    const audio = audioRef.current;
+    if (audio === null || audio.ended) return;
+    if (stateRef.current.kind === "playing") send({ type: "pause" });
+  }, [send]);
+
+  // A play from outside the page: the machine resumes if it can, and
+  // otherwise the audio stops again (no narration over Ask or an ended step).
+  const onPlay = useCallback(() => {
+    if (stateRef.current.kind === "playing") return;
+    if (send({ type: "resume" }).outcome !== "changed")
+      audioRef.current?.pause();
   }, [send]);
 
   const step = stepOnScreen(view.state);
@@ -297,6 +283,8 @@ export function usePlayer({
       preload: "auto",
       onEnded: () => send({ type: "audioEnded" }),
       onError: () => send({ type: "audioError" }),
+      onPause,
+      onPlay,
       onTimeUpdate: readClock,
       onSeeked: readClock,
       onLoadedMetadata: readClock,
