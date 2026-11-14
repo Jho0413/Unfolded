@@ -4,14 +4,15 @@
 import { describe, expect, it } from "vitest";
 import {
   canSend,
+  carryOnEvent,
   isPlayPauseKey,
   lastFiredCue,
   playPauseEvent,
   playRejectionEvent,
-  statusFor,
+  shortcutEvent,
   stepOnScreen,
 } from "@/player/controls";
-import { MESSAGES, type PlayerState } from "@/player/machine";
+import type { PlayerState } from "@/player/machine";
 import type { CuedAction } from "@/shared/scene";
 
 const ctx = { stepCount: 2 };
@@ -217,36 +218,69 @@ describe("lastFiredCue", () => {
   });
 });
 
-describe("statusFor (the line under the board)", () => {
-  it("failed → the failure message, as an error", () => {
-    expect(
-      statusFor({ kind: "failed", step: 0, message: "server words" }, null),
-    ).toEqual({ tone: "error", text: "server words" });
+describe("shortcutEvent (→ next, ← back, R again)", () => {
+  const on = (tagName: string, isContentEditable = false) => ({
+    tagName,
+    isContentEditable,
   });
-  it("a notice (Press play to start) → the notice", () => {
-    expect(statusFor({ kind: "paused", step: 0 }, MESSAGES.pressPlay)).toEqual({
-      tone: "notice",
-      text: MESSAGES.pressPlay,
+  const key = (k: string, target = on("BODY"), extra = {}) => ({
+    key: k,
+    repeat: false,
+    modified: false,
+    target,
+    ...extra,
+  });
+  const cases: [string, Parameters<typeof shortcutEvent>[0], unknown][] = [
+    ["→ on the page: next", key("ArrowRight"), { type: "next" }],
+    ["← on the page: back", key("ArrowLeft"), { type: "back" }],
+    ["r: replay", key("r"), { type: "replay" }],
+    ["R (caps): replay", key("R"), { type: "replay" }],
+    [
+      "no target: still a shortcut",
+      key("ArrowRight", null as never),
+      { type: "next" },
+    ],
+    [
+      "on a focused button (the outline): still a shortcut",
+      key("ArrowLeft", on("BUTTON")),
+      { type: "back" },
+    ],
+    ["typing in the Ask box: none", key("r", on("INPUT")), null],
+    ["in a textarea: none", key("ArrowLeft", on("textarea")), null],
+    ["in a select: none", key("ArrowRight", on("SELECT")), null],
+    ["on contentEditable: none", key("r", on("DIV", true)), null],
+    [
+      "with a modifier (Cmd+←, Shift+R): none",
+      key("ArrowLeft", on("BODY"), { modified: true }),
+      null,
+    ],
+    [
+      "a held key (repeat): none",
+      key("ArrowRight", on("BODY"), { repeat: true }),
+      null,
+    ],
+    ["Space is not one of these (usePlayer has it)", key(" "), null],
+    ["A is not one of these (the Ask panel has it)", key("a"), null],
+  ];
+  it.each(cases)("%s", (_, input, expected) => {
+    expect(shortcutEvent(input)).toEqual(expected);
+  });
+});
+
+describe("carryOnEvent (Got it, carry on)", () => {
+  it("closeAsk left the lesson paused mid-step: resume", () => {
+    expect(carryOnEvent({ kind: "paused", step: 1 })).toEqual({
+      type: "resume",
     });
   });
-  it("a failure wins over a notice", () => {
+  it("the step had ended (or the lesson finished): stay there", () => {
+    expect(carryOnEvent({ kind: "stepEnded", step: 0 })).toBeNull();
+    expect(carryOnEvent({ kind: "finished", step: 1 })).toBeNull();
+  });
+  it("loading (a go_to_step jump, or a step not here yet) or failed: nothing more", () => {
     expect(
-      statusFor({ kind: "failed", step: 0, message: "x" }, "notice")?.tone,
-    ).toBe("error");
-  });
-  it("loading → which step is loading (1-based)", () => {
-    expect(
-      statusFor({ kind: "loading", step: 1, autoplay: true }, null),
-    ).toEqual({ tone: "info", text: "Loading step 2…" });
-  });
-  it("finished → the end of the lesson", () => {
-    expect(statusFor({ kind: "finished", step: 1 }, null)).toEqual({
-      tone: "info",
-      text: MESSAGES.finished,
-    });
-  });
-  it("playing, paused or stepEnded with no notice → nothing", () => {
-    for (const kind of ["playing", "paused", "stepEnded"] as const)
-      expect(statusFor({ kind, step: 0 }, null)).toBeNull();
+      carryOnEvent({ kind: "loading", step: 1, autoplay: false }),
+    ).toBeNull();
+    expect(carryOnEvent({ kind: "failed", step: 0, message: "x" })).toBeNull();
   });
 });

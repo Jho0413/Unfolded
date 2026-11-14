@@ -3,10 +3,16 @@
 // the ARCHITECTURE.md section 6.1 cell (state + event) it drives, and asserts
 // on data-* attributes. Timing is checked by seeking the audio to a cue time
 // + 50 ms, never by waiting. Blocked autoplay is in player-autoplay.spec.ts.
+//
+// There's no transport (section 5.6): the tutor card offers each state's
+// buttons (Hold on, Go on, Next, Say that again, Retry), and the keys send the
+// rest (← back, → next, R again).
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { M1_CUE_TIMES } from "@/app/dev/board/scenes";
 import { FAKE_AUDIO_MS, FAKE_SERVER_ERROR } from "@/app/dev/player/fakeLesson";
+import { CARD_STATUS } from "@/player/cardView";
 import { MESSAGES } from "@/player/machine";
+import { card, goOn, holdOn, nextIdea, retry, sayAgain } from "./support/tutor";
 
 // Chromium's default autoplay policy sometimes blocks the first play in
 // tests, so autoplay is allowed outright here.
@@ -21,10 +27,10 @@ function player(page: Page): Locator {
   return page.getByTestId("player");
 }
 
-function control(page: Page, name: string): Locator {
-  return page
-    .getByRole("toolbar", { name: "Player controls" })
-    .getByRole("button", { name, exact: true });
+/** The keys for what the card doesn't offer in a state: ← back, → next, R again. */
+const KEYS = { back: "ArrowLeft", next: "ArrowRight", replay: "r" } as const;
+async function press(page: Page, event: keyof typeof KEYS) {
+  await page.keyboard.press(KEYS[event]);
 }
 
 async function expectState(page: Page, state: string, step: number) {
@@ -62,18 +68,13 @@ async function open(page: Page, query = "") {
 async function openStep1(page: Page, query = "") {
   await open(page, query);
   await endStep(page, 0);
-  await control(page, "Next").click();
+  await nextIdea(page).click();
   await expectState(page, "playing", 1);
 }
 
-/** Asserts which controls are enabled; the others on screen are disabled. */
-async function expectEnabled(page: Page, enabled: string[]) {
-  for (const name of ["Back", "Replay", "Play", "Pause", "Next"]) {
-    const button = control(page, name);
-    if ((await button.count()) === 0) continue; // Play and Pause swap
-    if (enabled.includes(name)) await expect(button).toBeEnabled();
-    else await expect(button).toBeDisabled();
-  }
+/** The card's buttons: exactly what the state can do (ignored events have none). */
+async function expectButtons(page: Page, labels: (string | RegExp)[]) {
+  await expect(card(page).getByRole("button")).toHaveText(labels);
 }
 
 function cell(page: Page, id: string, r: number, c: number): Locator {
@@ -90,7 +91,7 @@ test.describe("controls", () => {
 
   test("playing + pause: → paused", async ({ page }) => {
     await open(page);
-    await control(page, "Pause").click();
+    await holdOn(page).click();
     await expectState(page, "paused", 0);
     expect(
       await page
@@ -101,8 +102,8 @@ test.describe("controls", () => {
 
   test("paused + resume: → playing", async ({ page }) => {
     await open(page);
-    await control(page, "Pause").click();
-    await control(page, "Play").click();
+    await holdOn(page).click();
+    await goOn(page).click();
     await expectState(page, "playing", 0);
   });
 
@@ -120,19 +121,19 @@ test.describe("controls", () => {
     await expectState(page, "playing", 0);
   });
 
-  test("playing + replay: seek to 0, stays playing", async ({ page }) => {
+  test("playing + replay (R): seek to 0, stays playing", async ({ page }) => {
     await open(page);
     await seek(page, 5000);
-    await control(page, "Replay").click();
+    await press(page, "replay");
     await expectState(page, "playing", 0);
     expect(await currentTimeMs(page)).toBeLessThan(1000);
   });
 
-  test("paused + replay: seek to 0 → playing", async ({ page }) => {
+  test("paused + replay (R): seek to 0 → playing", async ({ page }) => {
     await open(page);
-    await control(page, "Pause").click();
+    await holdOn(page).click();
     await seek(page, 5000);
-    await control(page, "Replay").click();
+    await press(page, "replay");
     await expectState(page, "playing", 0);
     expect(await currentTimeMs(page)).toBeLessThan(1000);
   });
@@ -141,19 +142,21 @@ test.describe("controls", () => {
     page,
   }) => {
     await open(page);
-    await expect(control(page, "Next")).toBeDisabled();
+    await expect(nextIdea(page)).toHaveCount(0);
+    await press(page, "next");
+    await expectState(page, "playing", 0);
   });
 
   test("playing + audioEnded: → stepEnded", async ({ page }) => {
     await open(page);
     await endStep(page, 0);
-    await expect(control(page, "Next")).toBeEnabled();
+    await expect(nextIdea(page)).toBeEnabled();
   });
 
   test("stepEnded + replay: seek to 0 → playing", async ({ page }) => {
     await open(page);
     await endStep(page, 0);
-    await control(page, "Replay").click();
+    await sayAgain(page).click();
     await expectState(page, "playing", 0);
     expect(await currentTimeMs(page)).toBeLessThan(1000);
   });
@@ -161,7 +164,7 @@ test.describe("controls", () => {
   test("stepEnded + next: → loading(next), then playing", async ({ page }) => {
     await open(page, "?delay=1500");
     await endStep(page, 0);
-    await control(page, "Next").click();
+    await nextIdea(page).click();
     await expectState(page, "loading", 1);
     await expect(page.getByTestId("whiteboard")).toBeVisible();
     await expectState(page, "playing", 1);
@@ -173,25 +176,25 @@ test.describe("controls", () => {
   test("stepEnded + next on the last step: → finished", async ({ page }) => {
     await open(page);
     await endStep(page, 0);
-    await control(page, "Next").click();
+    await nextIdea(page).click();
     await expectState(page, "playing", 1);
     await endStep(page, 1);
-    await control(page, "Next").click();
+    // The card offers no Next on the last step; → still sends it.
+    await expect(nextIdea(page)).toHaveCount(0);
+    await press(page, "next");
     await expectState(page, "finished", 1);
-    await expect(page.getByTestId("player-status")).toHaveText(
-      MESSAGES.finished,
-    );
+    await expect(page.getByTestId("card-status")).toHaveText(CARD_STATUS.end);
   });
 
   test("finished + replay: seek to 0 → playing", async ({ page }) => {
     await open(page);
     await endStep(page, 0);
-    await control(page, "Next").click();
+    await nextIdea(page).click();
     await expectState(page, "playing", 1);
     await endStep(page, 1);
-    await control(page, "Next").click();
+    await press(page, "next");
     await expectState(page, "finished", 1);
-    await control(page, "Replay").click();
+    await sayAgain(page).click();
     await expectState(page, "playing", 1);
     expect(await currentTimeMs(page)).toBeLessThan(1000);
   });
@@ -199,35 +202,35 @@ test.describe("controls", () => {
   test("finished + back: → loading(last), then playing", async ({ page }) => {
     await open(page);
     await endStep(page, 0);
-    await control(page, "Next").click();
+    await nextIdea(page).click();
     await expectState(page, "playing", 1);
     await endStep(page, 1);
-    await control(page, "Next").click();
+    await press(page, "next");
     await expectState(page, "finished", 1);
-    await control(page, "Back").click();
+    await press(page, "back");
     await expectState(page, "playing", 1);
     expect(await currentTimeMs(page)).toBeLessThan(1000);
   });
 
   test("playing + back: → loading(prev), then playing", async ({ page }) => {
     await openStep1(page);
-    await control(page, "Back").click();
+    await press(page, "back");
     await expectState(page, "playing", 0);
     expect(await currentTimeMs(page)).toBeLessThan(1000);
   });
 
   test("paused + back: → loading(prev), then playing", async ({ page }) => {
     await openStep1(page);
-    await control(page, "Pause").click();
+    await holdOn(page).click();
     await expectState(page, "paused", 1);
-    await control(page, "Back").click();
+    await press(page, "back");
     await expectState(page, "playing", 0);
   });
 
   test("stepEnded + back: → loading(prev), then playing", async ({ page }) => {
     await openStep1(page);
     await endStep(page, 1);
-    await control(page, "Back").click();
+    await press(page, "back");
     await expectState(page, "playing", 0);
   });
 
@@ -236,16 +239,16 @@ test.describe("controls", () => {
   }) => {
     await open(page);
     await seek(page, 5000);
-    await control(page, "Back").click();
+    await press(page, "back");
     await expectState(page, "playing", 0);
     expect(await currentTimeMs(page)).toBeLessThan(1000);
   });
 
   test("paused + back on step 0: seek to 0 → playing", async ({ page }) => {
     await open(page);
-    await control(page, "Pause").click();
+    await holdOn(page).click();
     await seek(page, 5000);
-    await control(page, "Back").click();
+    await press(page, "back");
     await expectState(page, "playing", 0);
     expect(await currentTimeMs(page)).toBeLessThan(1000);
   });
@@ -253,35 +256,37 @@ test.describe("controls", () => {
   test("stepEnded + back on step 0: seek to 0 → playing", async ({ page }) => {
     await open(page);
     await endStep(page, 0);
-    await control(page, "Back").click();
+    await press(page, "back");
     await expectState(page, "playing", 0);
   });
 });
 
-test.describe("ignored controls are disabled", () => {
-  test("loading: every control ignored", async ({ page }) => {
+test.describe("the card offers only what the state can do", () => {
+  test("loading: every control ignored, no buttons", async ({ page }) => {
     await open(page, "?delay=1500");
     await endStep(page, 0);
-    await control(page, "Next").click();
+    await nextIdea(page).click();
     await expectState(page, "loading", 1);
-    await expectEnabled(page, []);
+    await expectButtons(page, []);
+    await expect(page.getByTestId("board-preparing")).toBeVisible();
   });
 
-  test("playing: next ignored", async ({ page }) => {
+  test("playing: next ignored, Hold on only", async ({ page }) => {
     await open(page);
-    await expectEnabled(page, ["Back", "Replay", "Pause"]);
+    await expectButtons(page, ["Hold on"]);
   });
 
-  test("paused: next ignored", async ({ page }) => {
+  test("paused: next ignored, Go on only", async ({ page }) => {
     await open(page);
-    await control(page, "Pause").click();
-    await expectEnabled(page, ["Back", "Replay", "Play"]);
+    await holdOn(page).click();
+    await expectButtons(page, ["Go on"]);
   });
 
   test("stepEnded: resume (Play, Space) ignored", async ({ page }) => {
     await open(page);
     await endStep(page, 0);
-    await expectEnabled(page, ["Back", "Replay", "Next"]);
+    await expectButtons(page, [/^Next: /, "Say that again"]);
+    await page.locator("body").click({ position: { x: 5, y: 5 } });
     await page.keyboard.press("Space");
     await expectState(page, "stepEnded", 0);
   });
@@ -289,9 +294,9 @@ test.describe("ignored controls are disabled", () => {
   test("finished: next and resume ignored", async ({ page }) => {
     await openStep1(page);
     await endStep(page, 1);
-    await control(page, "Next").click();
+    await press(page, "next");
     await expectState(page, "finished", 1);
-    await expectEnabled(page, ["Back", "Replay"]);
+    await expectButtons(page, ["Say that again"]);
   });
 });
 
@@ -306,7 +311,7 @@ test.describe("play and pause from outside the page (media keys)", () => {
 
   test("paused + play from outside: → playing", async ({ page }) => {
     await open(page);
-    await control(page, "Pause").click();
+    await holdOn(page).click();
     await page
       .getByTestId("player-audio")
       .evaluate((audio: HTMLAudioElement) => audio.play());
@@ -339,7 +344,7 @@ test.describe("failures", () => {
   }) => {
     await open(page, "?fail=server");
     await endStep(page, 0);
-    await control(page, "Next").click();
+    await nextIdea(page).click();
     await expectState(page, "failed", 1);
     await expect(page.getByTestId("player-error")).toHaveText(
       FAKE_SERVER_ERROR,
@@ -351,7 +356,7 @@ test.describe("failures", () => {
   }) => {
     await open(page, "?fail=network");
     await endStep(page, 0);
-    await control(page, "Next").click();
+    await nextIdea(page).click();
     await expectState(page, "failed", 1);
     await expect(page.getByTestId("player-error")).toHaveText(
       MESSAGES.stepFailed,
@@ -361,9 +366,9 @@ test.describe("failures", () => {
   test("failed + retry: → loading(same), then playing", async ({ page }) => {
     await open(page, "?fail=server");
     await endStep(page, 0);
-    await control(page, "Next").click();
+    await nextIdea(page).click();
     await expectState(page, "failed", 1);
-    await control(page, "Retry").click();
+    await retry(page).click();
     await expectState(page, "playing", 1);
     await expect(page.getByTestId("player-error")).toHaveCount(0);
   });
@@ -371,9 +376,9 @@ test.describe("failures", () => {
   test("failed + back: → loading(prev)", async ({ page }) => {
     await open(page, "?fail=server");
     await endStep(page, 0);
-    await control(page, "Next").click();
+    await nextIdea(page).click();
     await expectState(page, "failed", 1);
-    await control(page, "Back").click();
+    await press(page, "back");
     await expectState(page, "playing", 0);
   });
 
@@ -385,9 +390,10 @@ test.describe("failures", () => {
     await expect(page.getByTestId("player-error")).toHaveText(
       MESSAGES.audioFailed,
     );
-    await expect(control(page, "Retry")).toBeEnabled();
+    await expect(retry(page)).toBeEnabled();
     // failed + back on step 0: ignored.
-    await expect(control(page, "Back")).toBeDisabled();
+    await press(page, "back");
+    await expectState(page, "failed", 0);
   });
 
   test("audio fails to load: loading + stepFailed(k) → failed (Couldn't play the audio. Retry?)", async ({
@@ -404,7 +410,7 @@ test.describe("failures", () => {
 test.describe("the board follows the audio clock", () => {
   test.beforeEach(async ({ page }) => {
     await open(page, "?debug=1");
-    await control(page, "Pause").click();
+    await holdOn(page).click();
     await expectState(page, "paused", 0);
   });
 

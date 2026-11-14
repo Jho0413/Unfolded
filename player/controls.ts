@@ -5,7 +5,6 @@
 import type { CueTimes } from "@/shared/lesson";
 import type { CuedAction } from "@/shared/scene";
 import {
-  MESSAGES,
   type PlayerContext,
   type PlayerEvent,
   type PlayerState,
@@ -97,22 +96,42 @@ export function lastFiredCue(
   return last;
 }
 
-/** The line under the board: one message at a time, the most urgent first. */
-export type PlayerStatus = {
-  /** `error` is announced at once (an alert); the others politely. */
-  tone: "error" | "notice" | "info";
-  text: string;
-} | null;
+/**
+ * The tutor's other shortcuts (the outline's key hints): → next idea, ← back, R say that
+ * again. Space is `isPlayPauseKey` and `A` is the Ask panel's. Not with a modifier, not on key
+ * repeat, and not while typing in a text field (a focused button is fine: arrows and R don't
+ * press it).
+ */
+export function shortcutEvent(key: {
+  key: string;
+  repeat: boolean;
+  modified: boolean;
+  target: { tagName: string; isContentEditable: boolean } | null;
+}): PlayerEvent | null {
+  if (key.repeat || key.modified) return null;
+  if (key.target?.isContentEditable) return null;
+  if (key.target && TEXT_TAGS.has(key.target.tagName.toUpperCase()))
+    return null;
+  switch (key.key) {
+    case "ArrowRight":
+      return { type: "next" };
+    case "ArrowLeft":
+      return { type: "back" };
+    case "r":
+    case "R":
+      return { type: "replay" };
+    default:
+      return null;
+  }
+}
 
-export function statusFor(
-  state: PlayerState,
-  notice: string | null,
-): PlayerStatus {
-  if (state.kind === "failed") return { tone: "error", text: state.message };
-  if (notice !== null) return { tone: "notice", text: notice };
-  if (state.kind === "loading")
-    return { tone: "info", text: MESSAGES.loading(state.step) };
-  if (state.kind === "finished")
-    return { tone: "info", text: MESSAGES.finished };
-  return null;
+const TEXT_TAGS = new Set(["INPUT", "TEXTAREA", "SELECT"]);
+
+/**
+ * "Got it, carry on": after closeAsk, the event that carries on. A lesson stopped mid-step
+ * (closeAsk returns to paused) resumes; any other state (an ended step, a step still loading,
+ * a failed one) stays as closeAsk left it.
+ */
+export function carryOnEvent(afterClose: PlayerState): PlayerEvent | null {
+  return afterClose.kind === "paused" ? { type: "resume" } : null;
 }
