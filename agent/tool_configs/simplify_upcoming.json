@@ -1,0 +1,18 @@
+{
+  "type": "client",
+  "name": "simplify_upcoming",
+  "description": "Ask for the upcoming steps to be made simpler.",
+  "expects_response": false,
+  "parameters": {
+    "type": "object",
+    "description": "Why to simplify",
+    "required": ["reason"],
+    "properties": {
+      "reason": {
+        "type": "string",
+        "description": "Why the learner needs it simpler"
+      }
+    }
+  },
+  "dynamic_variables": { "dynamic_variable_placeholders": {} }
+}

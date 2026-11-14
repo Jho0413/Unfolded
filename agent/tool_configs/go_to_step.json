@@ -1,0 +1,19 @@
+{
+  "type": "client",
+  "name": "go_to_step",
+  "description": "Jump to a lesson step. It loads, paused, once the question is over.",
+  "expects_response": true,
+  "response_timeout_secs": 10,
+  "parameters": {
+    "type": "object",
+    "description": "Which step to go to",
+    "required": ["step"],
+    "properties": {
+      "step": {
+        "type": "integer",
+        "description": "Step number, 1-based, as spoken"
+      }
+    }
+  },
+  "dynamic_variables": { "dynamic_variable_placeholders": {} }
+}
