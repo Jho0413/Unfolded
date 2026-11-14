@@ -158,7 +158,7 @@ type Sketch = {                               // what /api/sketch returns for a 
 1. `[[row]]`: highlight row 0 of `a` and move it (a copy) to a point left of `c`. `[[col]]`: highlight column 0 of `b` and move it beside the row's copy. The row and column slide together.
 2. `[[pair1]]`, `[[pair2]]`: show `p1`, then `p2`. The pairs multiply.
 3. `[[add]]`: show `sum` with `1·5 + 2·7`. `[[total]]`: write `19` to `sum`.
-4. `[[drop]]`: move `sum` to `{ id: "c", row: 0, col: 0 }`. `[[done]]`: write `19` to that cell, hide `sum` and hide both copies. The sum has dropped into (1,1).
+4. `[[drop]]`: move `sum` to `{ id: "c", row: 0, col: 0 }`. `[[done]]`: write `19` to that cell, hide `sum` and hide both copies. The sum has dropped into (1,1), the first cell.
 
 **`shared/validate.ts`** checks the rules zod can't express. It runs on the server after Claude responds and in the browser before a tool draws. Each row gets a test.
 
