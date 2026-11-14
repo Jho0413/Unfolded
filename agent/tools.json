@@ -1,0 +1,9 @@
+{
+  "tools": [
+    {
+      "type": "client",
+      "config": "tool_configs/highlight.json",
+      "id": "tool_4101m7dgd21xe2e9kgnh3htc4gw5"
+    }
+  ]
+}

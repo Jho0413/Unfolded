@@ -567,6 +567,35 @@ Each spike is time-boxed to 60 minutes, and its answer is written back into this
 - **S4:** which fal image model to use for the cover (M3) and for in-scene images (E1, stretch), and its latency. Download the images into `runs/`, in case fal's URLs expire. Keep the generations few: the budget is about 25 US dollars per teammate.
 - **S5:** the ElevenLabs CLI commands that push the agent and its client tools from `agent/`, and how its tracking file records the agent id.
 
+### S5 findings: the ElevenLabs CLI (done 2026-11-14)
+
+- **CLI:** `@elevenlabs/cli` **1.11.0**, pinned exactly as a devDependency. It is a native binary behind a thin npm launcher (platform builds are `optionalDependencies`), and the bin is `elevenlabs`. v1 renamed some v0 commands: `agents list` and `agents delete` now call the API directly, so use `agents status` to see what is configured locally.
+- **Key:** the CLI reads `ELEVENLABS_API_KEY` from the environment, or from a `.env` in its working directory. It does **not** read `.env.local`, so `npm run agent:push` sources the repo's `.env.local` before `cd agent`. You don't need `auth login`. Set `ELEVENLABS_TELEMETRY=off` if you don't want the anonymous User-Agent tags.
+- **Layout** (`agent/`, scaffolded with `elevenlabs agents init agent`):
+  ```
+  agent/
+  ├── agents.json               # registry: config path, agent id, branch id, version id
+  ├── tools.json                # registry: type, config path, tool id
+  ├── tests.json                # unused (empty)
+  ├── agent_configs/tutor.json  # the agent: prompt, llm, tool_ids, tts.voice_id
+  ├── tool_configs/highlight.json
+  └── .gitignore                # ignores agent/.env (written by init)
+  ```
+- **Commands.** These are the one-off setup steps, already done:
+  - `cd agent && elevenlabs tools add highlight --type client --config-path tool_configs/highlight.json` creates the tool remotely with a template body and writes its id to `tools.json`. Then edit the config.
+  - `elevenlabs agents add --from-file agent_configs/tutor.json` creates the agent and writes its id to `agents.json`.
+
+  After that, every change goes through **`npm run agent:push`**, which runs `elevenlabs tools push && elevenlabs agents push` from `agent/`, then `prettier --write agent`. Tools go first, because the agent refers to them by id in `conversation_config.agent.prompt.tool_ids`.
+- **Push is idempotent by id.** Push 1, push 2 and push 3 all said `Updated agent … (ID: agent_8201m7dgdjy6eswr6zndc8yw19xa)`. Afterwards `elevenlabs agents list` showed one agent and `elevenlabs agents tools list` showed one tool, so no duplicates were made. The remote matched the config: the prompt edit, `tool_ids` and `voice_id` for the agent, and `expects_response: true`, the params and `required: ["target_id"]` for the tool. Push always does a "force override", with no diff: every push uploads and makes a new agent version, even when nothing changed.
+- **Tracking file:** the agent id is in `agent/agents.json` → `agents[0].id` (plus `branch_id` and `version_id`), and the tool id is in `agent/tools.json` → `tools[0].id`. Neither file holds anything secret, so **both are committed**, which keeps the team on one agent. `ELEVENLABS_AGENT_ID` in `.env.local` is copied from `agents.json`. If a registry entry is lost, `add` would create a **second** agent, so recover it with `elevenlabs agents pull --agent <id>` instead.
+- **Client tool config:** this is the API's `ClientToolConfig` written out flat: `type: "client"`, `name`, `description`, `expects_response`, `response_timeout_secs` (1–120), and `parameters` as `{ type: "object", required, properties: { x: { type, description } } }`. Optional params are simply left out of `required`. The JSON shape follows `shared/tools.ts` (`highlight`: `target_id` string, plus optional integer `row` and `col`). Q1 should generate or test the configs from `CLIENT_TOOLS`.
+- **Gotchas:**
+  1. `--dry-run` is **ignored** by `tools add` (and probably by the other workflow commands): it sent a real create request. Only that request's failed auth stopped it.
+  2. `agents add --from-file X` copies the config to `agent_configs/<Agent-Name>.json` (for this agent, `Paper-Tutor-Q&A.json`) and registers that copy. We moved it back to `tutor.json` and edited the `config` path in `agents.json`. Doing that by hand is fine.
+  3. The CLI writes 4-space JSON and rewrites `agents.json` on every push (a new `version_id`), so `prettier --check` would fail. `agent:push` runs `prettier --write agent` afterwards, and the push-made `version_id` change is committed with the config change.
+  4. The voice is still the template default, `cjVigY5qzO86Huf0OWal`, because S1 hasn't chosen yet. Q1 sets `tts.voice_id` to `ELEVENLABS_VOICE_ID`, and its unit test checks they're equal. The LLM is the template default, `gemini-2.5-flash`, until S2 picks one.
+- **Values:** `ELEVENLABS_AGENT_ID=agent_8201m7dgdjy6eswr6zndc8yw19xa`, and the `highlight` tool id is `tool_4101m7dgd21xe2e9kgnh3htc4gw5`.
+
 ## Sources
 
 - ElevenLabs: [React SDK](https://elevenlabs.io/docs/eleven-agents/libraries/react), [client tools](https://elevenlabs.io/docs/eleven-agents/customization/tools/client-tools), [TTS with timestamps](https://elevenlabs.io/docs/api-reference/text-to-speech/convert-with-timestamps), [CLI](https://elevenlabs.io/docs/eleven-agents/operate/cli.md)
