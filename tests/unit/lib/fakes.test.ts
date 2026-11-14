@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resetEnvForTests } from "@/lib/env";
-import { fakesEnabled, readFixture } from "@/lib/fakes";
+import { fakesEnabled, readFixture, readFixtureBytes } from "@/lib/fakes";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -22,5 +22,12 @@ describe("lib/fakes", () => {
   it("readFixture() rejects a path outside the fixtures folder", async () => {
     for (const name of ["../env.ts", "..", "sub/x.json"])
       await expect(readFixture(name)).rejects.toThrow("bad fixture name");
+  });
+
+  it("readFixtureBytes() reads a recorded image, and only an image by its own name", async () => {
+    const bytes = await readFixtureBytes("fal-cover.jpg");
+    expect([...bytes.subarray(0, 2)]).toEqual([0xff, 0xd8]);
+    for (const name of ["../env.ts", "x.json", "sub/x.jpg"])
+      await expect(readFixtureBytes(name)).rejects.toThrow("bad fixture name");
   });
 });

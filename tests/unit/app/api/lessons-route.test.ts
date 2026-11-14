@@ -1,8 +1,9 @@
 // POST /api/lessons (ROADMAP L1, ARCHITECTURE.md sections 5.1 and 7). One test per upload and
 // plan row, named after it, with PDFs generated in a temp dir and runs in a temp runs dir.
 // Claude is never called: each test scripts lib/fakes/claude.ts, or runs with FAKE_APIS=1 and
-// its recorded fixtures.
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+// its recorded fixtures. fal neither: the cover (L4) comes from lib/fakes/fal.ts, or from the
+// real falImages() only where the env makes it a fake or none.
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
@@ -11,7 +12,7 @@ import { POST } from "@/app/api/lessons/route";
 import { PDF_FIELD, UPLOAD_ERRORS } from "@/app/upload";
 import { config } from "@/lib/config";
 import { resetEnvForTests } from "@/lib/env";
-import { readFixture } from "@/lib/fakes";
+import { readFixture, readFixtureBytes } from "@/lib/fakes";
 import {
   type FakeClaude,
   fakeClaude,
@@ -20,6 +21,7 @@ import {
   fakeMessage,
   type FakeReply,
 } from "@/lib/fakes/claude";
+import { type FakeImages, fakeImages } from "@/lib/fakes/fal";
 import { SavedPaper } from "@/lib/pipeline/plan";
 import { PAPER_FILE, PLAN_FILE, readRunJson } from "@/lib/runs/store";
 import {
@@ -37,6 +39,11 @@ const state = vi.hoisted(() => ({
   messages: undefined as FakeClaude | undefined,
   files: undefined as FakeFiles | undefined,
   useFixtures: false,
+  /** The cover's fal: a scripted fake, or none (as with no FAL_KEY) unless a test opts in. */
+  images: undefined as FakeImages | undefined,
+  /** The real falImages(), which picks by env (the FAL_KEY row). */
+  useRealFal: false,
+  coverTimeoutMs: undefined as number | undefined,
   runs: "",
 }));
 vi.mock("@/lib/pipeline/generate", async (importOriginal) => {
@@ -54,6 +61,14 @@ vi.mock("@/lib/pipeline/generate", async (importOriginal) => {
       (state.useFixtures ? real.claudeFiles(fixture) : unscripted()),
   };
 });
+vi.mock("@/lib/media/fal", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/media/fal")>();
+  return {
+    ...real,
+    falImages: () =>
+      state.useFixtures || state.useRealFal ? real.falImages() : state.images,
+  };
+});
 vi.mock("@/lib/config", async (importOriginal) => {
   const { config } = await importOriginal<typeof import("@/lib/config")>();
   return {
@@ -61,6 +76,12 @@ vi.mock("@/lib/config", async (importOriginal) => {
       ...config,
       get runsDir() {
         return state.runs;
+      },
+      get cover() {
+        return {
+          ...config.cover,
+          timeoutMs: state.coverTimeoutMs ?? config.cover.timeoutMs,
+        };
       },
     },
   };
@@ -128,6 +149,10 @@ async function expectFailed(res: Response, status: number, error: string) {
   expect(ApiError.parse(await res.json())).toEqual({ error });
 }
 
+/** Where a lesson's cover is saved. */
+const coverPath = (lessonId: string) =>
+  path.join(state.runs, lessonId, config.cover.file);
+
 /** Lesson folders written to the temp runs dir. */
 const savedLessons = () => readdir(state.runs).catch(() => []);
 
@@ -145,6 +170,9 @@ afterEach(async () => {
   state.messages = undefined;
   state.files = undefined;
   state.useFixtures = false;
+  state.images = undefined;
+  state.useRealFal = false;
+  state.coverTimeoutMs = undefined;
   await rm(state.runs, { recursive: true, force: true });
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
@@ -452,7 +480,14 @@ describe("POST /api/lessons with FAKE_APIS=1", () => {
     const { lessonId, plan } = CreateLessonResponse.parse(await res.json());
     const fixture = await readFixture<Anthropic.Message>(config.plan.fixture);
     const text = fixture.content.find((b) => b.type === "text");
-    expect(plan).toEqual(JSON.parse(text!.text));
+    // The fal fake's recorded image is the cover.
+    expect(plan).toEqual({
+      ...JSON.parse(text!.text),
+      cover: config.cover.file,
+    });
+    await expect(readFile(coverPath(lessonId))).resolves.toEqual(
+      Buffer.from(await readFixtureBytes(config.fal.fixtureImage)),
+    );
     expect(plan.steps.length).toBeGreaterThanOrEqual(config.plan.minSteps);
     const upload = await readFixture<Anthropic.FileMetadata>(
       config.plan.uploadFixture,
@@ -462,5 +497,81 @@ describe("POST /api/lessons with FAKE_APIS=1", () => {
     ).resolves.toMatchObject({
       fileId: upload.id,
     });
+  });
+});
+
+describe("POST /api/lessons: the cover (L4)", () => {
+  const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
+
+  /** A 200 whose plan, answered and saved, has no cover, and no cover file in the run. */
+  async function expectNoCover(res: Response) {
+    expect(res.status).toBe(200);
+    const { lessonId, plan } = CreateLessonResponse.parse(await res.json());
+    expect(plan).toEqual(PLAN);
+    await expect(readRunJson(lessonId, PLAN_FILE, LessonPlan)).resolves.toEqual(
+      PLAN,
+    );
+    await expect(readFile(coverPath(lessonId))).rejects.toThrow("ENOENT");
+  }
+
+  it("a cover is saved and returned: made once from coverPrompt, named in plan.json", async () => {
+    script(reply(PLAN));
+    state.images = fakeImages([JPEG]);
+    const res = await postFile(pdfs["tiny.pdf"]);
+    expect(res.status).toBe(200);
+    const { lessonId, plan } = CreateLessonResponse.parse(await res.json());
+    expect(plan).toEqual({ ...PLAN, cover: config.cover.file });
+    expect(state.images.prompts).toEqual([PLAN.coverPrompt]);
+    await expect(readFile(coverPath(lessonId))).resolves.toEqual(
+      Buffer.from(JPEG),
+    );
+    await expect(readRunJson(lessonId, PLAN_FILE, LessonPlan)).resolves.toEqual(
+      plan,
+    );
+  });
+
+  it("a fal error still returns the plan without a cover, and is logged", async () => {
+    const logs = quietLogs();
+    script(reply(PLAN));
+    state.images = fakeImages([new Error("fal is down")]);
+    await expectNoCover(await postFile(pdfs["tiny.pdf"]));
+    expect(logs.warned()).toContain("fal is down");
+  });
+
+  it("a timeout still returns the plan without a cover, after config.cover.timeoutMs", async () => {
+    const logs = quietLogs();
+    script(reply(PLAN));
+    state.coverTimeoutMs = 50;
+    // The fake never answers and ignores the abort: only the cover's own deadline ends it.
+    state.images = fakeImages(["hang"]);
+    await expectNoCover(await postFile(pdfs["tiny.pdf"]));
+    expect(logs.warned()).toContain("no cover after 50 ms");
+  });
+
+  it("a missing FAL_KEY still returns the plan without a cover: there's no fal to call", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.stubEnv("FAKE_APIS", undefined);
+    vi.stubEnv("REPLAY_RUN", undefined);
+    // CI builds with browser fakes; real mode refuses to start on such a build.
+    vi.stubEnv("NEXT_PUBLIC_FAKE_APIS", undefined);
+    vi.stubEnv("BUILT_WITH_BROWSER_FAKES", undefined);
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("ELEVENLABS_API_KEY", "test-key");
+    vi.stubEnv("ELEVENLABS_VOICE_ID", "test-voice");
+    vi.stubEnv("FAL_KEY", "");
+    resetEnvForTests();
+    state.useRealFal = true;
+    script(reply(PLAN));
+    await expectNoCover(await postFile(pdfs["tiny.pdf"]));
+    expect(info.mock.calls.flat().join(" ")).toContain("no FAL_KEY");
+  });
+
+  it("an image that isn't a JPEG (by its bytes) still returns the plan without a cover", async () => {
+    const logs = quietLogs();
+    script(reply(PLAN));
+    // A PNG's first bytes.
+    state.images = fakeImages([new Uint8Array([0x89, 0x50, 0x4e, 0x47])]);
+    await expectNoCover(await postFile(pdfs["tiny.pdf"]));
+    expect(logs.warned()).toContain("aren't a JPEG");
   });
 });
