@@ -87,7 +87,8 @@ lib/                                server-only (import "server-only")
   env.ts                            reads and validates env vars once
   pipeline/plan.ts, step.ts, sketch.ts, prompts/
   narration/cues.ts                 pure: strip markers, cue offsets -> times
-  narration/tts.ts                  ElevenLabs TTS with timestamps
+  narration/tts.ts                  ElevenLabs TTS with timestamps -> audio + cue times (S1 fixture when FAKE_APIS=1)
+  narration/makeM1.ts               npm run make:m1: demo-m1.step.json -> runs/demo-m1/ (plan.json, step-0.v<k>.json + .mp3)
   agent/token.ts                    the Q&A agent's conversation token (fixture when FAKE_APIS=1)
   media/fal.ts
   runs/store.ts                     read/write runs/<lessonId>/
@@ -107,7 +108,7 @@ qa/                                 browser
   context.ts                        pure: the sendContextualUpdate() message, and the narration heard by time t
   AskPanel.tsx                      voice + typed input, through conversation.ts; shows the Ask messages of section 7
   tools.ts                          client tool handlers, typed by shared/tools.ts
-scripts/                            dev scripts: make:m1, seed:m2
+scripts/                            dev scripts, run with tsx: make:m1 (make-m1.ts), seed:m2
 agent/                              ElevenLabs CLI config: the agent (prompt, voice, LLM) and its client tools, plus the CLI's tracking file
 runs/                               gitignored: one folder per lesson (store + replay)
 tests/e2e/                          Playwright, with FAKE_APIS=1 and NEXT_PUBLIC_FAKE_APIS=1
@@ -525,12 +526,13 @@ The developer gets the full error in the server log, tagged with the route, less
 | `FAKE_APIS=1` (tests, CI) | none | all keys |
 | `REPLAY_RUN=<id>` | the run folder exists | all keys (Q&A is off) |
 | `next build` | none: env isn't checked at build | all keys |
+| Dev scripts (`npm run make:m1`) | real mode: only the keys the script uses (`loadEnvFor`), e.g. `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` | the rest |
 
 - `lib/env.ts` validates the env once, at server start, from `instrumentation.ts` `register()`, with zod. Code behind it trusts the values. A missing required key stops the server (it logs an error naming the key and exits with code 1, since Next would otherwise serve 500s).
 - The mode is picked in this order: `REPLAY_RUN` set → replay; else `FAKE_APIS=1` → fake; else real. An empty value (`KEY=`, as copied from `.env.example`) counts as unset.
 - A build made with `NEXT_PUBLIC_FAKE_APIS=1` (for example, left over from a local `npm run e2e`) refuses to start in real mode, since the browser would use the fake agent: run `npm run build` again first. `next.config.ts` bakes that build-time value in as `BUILT_WITH_BROWSER_FAKES`, so the check never depends on the shell `npm start` runs in. The reverse, `FAKE_APIS=1` on a normal build, starts with a warning.
 - Keys are only read in `lib/` and the API routes, which import `"server-only"`. The browser never sees a key.
-- All of these live in `lib/config.ts`: model ids, effort per request type, `maxNarrationChars`, `maxPdfMb`, `coverTimeoutMs`, `maxBoardObjects` (the cap on the board a sketch request sends, section 8), the image cap per lesson (E1), the agent token's URL, timeout and fixture (section 8), and the `runs/` path.
+- All of these live in `lib/config.ts`: model ids, effort per request type, `maxNarrationChars`, `maxPdfMb`, `coverTimeoutMs`, `maxBoardObjects` (the cap on the board a sketch request sends, section 8), the image cap per lesson (E1), the agent token's URL, timeout and fixture (section 8), TTS (`tts`: URL, model id, output format, timeout, fixture; section 11, S1), and the `runs/` path.
 
 ## 10. Testing: how we prove it works
 
