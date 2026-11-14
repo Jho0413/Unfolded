@@ -91,7 +91,10 @@ export const Signal = z.union([
 ]);
 export type Signal = z.infer<typeof Signal>;
 
-/** GET /api/agent/token */
+/** What Ask shows when the token route fails or the agent can't connect (ARCHITECTURE.md section 7). */
+export const QA_UNAVAILABLE = "Questions are unavailable right now.";
+
+/** GET /api/agent/token. On failure: 503 (not set up), 502 (ElevenLabs failed) or 500, all with `{ error: QA_UNAVAILABLE }`. */
 export const AgentTokenResponse = z.object({
   conversationToken: z.string().min(1),
 });

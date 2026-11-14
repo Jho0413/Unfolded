@@ -83,6 +83,7 @@ lib/                                server-only (import "server-only")
   pipeline/plan.ts, step.ts, sketch.ts, prompts/
   narration/cues.ts                 pure: strip markers, cue offsets -> times
   narration/tts.ts                  ElevenLabs TTS with timestamps
+  agent/token.ts                    the Q&A agent's conversation token (fixture when FAKE_APIS=1)
   media/fal.ts
   runs/store.ts                     read/write runs/<lessonId>/
   fakes/                            fake Claude/ElevenLabs/fal for tests (FAKE_APIS=1)
@@ -433,7 +434,8 @@ The developer gets the full error in the server log, tagged with the route, less
 
 - **Starting a session:** the learner presses **Ask**, or presses the `A` key (Space stays play/pause).
   1. The player moves to `asking` and pauses the narration. Ask also works while a step is loading (section 6.1).
-  2. The browser calls `GET /api/agent/token`, and the server gets a WebRTC conversation token with `ELEVENLABS_API_KEY`.
+  2. The browser calls `GET /api/agent/token`, and the server gets a WebRTC conversation token with `ELEVENLABS_API_KEY` (ElevenLabs' `GET /v1/convai/conversation/token?agent_id=…`).
+     - It answers `{ conversationToken }`, never cached. On failure it answers `{ error: "Questions are unavailable right now." }`: 503 when Q&A isn't set up (no `ELEVENLABS_AGENT_ID`, or a replay run), 502 when ElevenLabs fails or times out (`config.agentToken.timeoutMs`). Anything else is a 500. The reason goes to the server log, never the key.
   3. `startSession({ conversationToken })` starts the session through `qa/conversation.ts`.
      - That adapter is the only file that imports `@elevenlabs/react`, which also needs a `ConversationProvider` around the lesson page.
      - With `NEXT_PUBLIC_FAKE_APIS=1` the adapter is a scripted fake: it replays canned agent turns and calls the tool handlers directly, so Playwright can test Q&A without a network.
@@ -497,7 +499,7 @@ The developer gets the full error in the server log, tagged with the route, less
 - The mode is picked in this order: `REPLAY_RUN` set → replay; else `FAKE_APIS=1` → fake; else real. An empty value (`KEY=`, as copied from `.env.example`) counts as unset.
 - A build made with `NEXT_PUBLIC_FAKE_APIS=1` (for example, left over from a local `npm run e2e`) refuses to start in real mode, since the browser would use the fake agent: run `npm run build` again first. `next.config.ts` bakes that build-time value in as `BUILT_WITH_BROWSER_FAKES`, so the check never depends on the shell `npm start` runs in. The reverse, `FAKE_APIS=1` on a normal build, starts with a warning.
 - Keys are only read in `lib/` and the API routes, which import `"server-only"`. The browser never sees a key.
-- All of these live in `lib/config.ts`: model ids, effort per request type, `maxNarrationChars`, `maxPdfMb`, `coverTimeoutMs`, `maxBoardObjects` (the cap on the board a sketch request sends, section 8), the image cap per lesson (E1) and the `runs/` path.
+- All of these live in `lib/config.ts`: model ids, effort per request type, `maxNarrationChars`, `maxPdfMb`, `coverTimeoutMs`, `maxBoardObjects` (the cap on the board a sketch request sends, section 8), the image cap per lesson (E1), the agent token's URL, timeout and fixture (section 8), and the `runs/` path.
 
 ## 10. Testing: how we prove it works
 
