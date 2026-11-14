@@ -64,6 +64,10 @@ function Cover({ src }: { src: string }) {
       alt=""
       data-testid="lesson-cover"
       onError={() => setFailed(true)}
+      // The server-rendered image can fail before hydration, when React isn't listening yet.
+      ref={(img) => {
+        if (img?.complete && img.naturalWidth === 0) setFailed(true);
+      }}
       style={COVER}
     />
   );
