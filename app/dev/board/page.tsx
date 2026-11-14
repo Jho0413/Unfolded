@@ -5,11 +5,14 @@
 //   /dev/board?scene=m1&t=3400              demo-m1 at 3400 ms, via sceneAt
 //   /dev/board?scene=m1-late-highlight&t=…  demo-m1 with a highlight after the slide
 //
-// Production builds answer 404 unless FAKE_APIS=1 (how e2e and CI run the
-// production build), so it is never reachable in a real `npm start`.
+// Production servers answer 404 unless started with FAKE_APIS=1 (how e2e and
+// CI run the production build), so it is never reachable in a real
+// `npm start`. The gate reads FAKE_APIS per request, not at build time.
+// TODO: read FAKE_APIS through lib/env once F2 (#24) is merged.
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { connection } from "next/server";
 import { Whiteboard } from "@/player/Whiteboard";
 import { M1_CUE_TIMES, SCENES, isScene, sceneState } from "./scenes";
 
@@ -27,6 +30,9 @@ export default async function DevBoardPage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
+  // Without this, `next build` prerenders the page and fixes the gate with
+  // the build's env: a plain build would 404 even under FAKE_APIS=1.
+  await connection();
   if (process.env.NODE_ENV === "production" && process.env.FAKE_APIS !== "1")
     notFound();
 
