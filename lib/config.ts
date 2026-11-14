@@ -3,7 +3,7 @@
 import "server-only";
 import path from "node:path";
 
-/** Claude effort levels we use, per request type (ARCHITECTURE.md section 5.1). S3 may widen it. */
+/** Claude effort levels we use, per request type (ARCHITECTURE.md section 5.1). */
 export type Effort = "low" | "medium" | "high";
 
 export const config = {
@@ -13,7 +13,7 @@ export const config = {
     step: "claude-sonnet-5-5",
     sketch: "claude-sonnet-5-5",
   },
-  /** Plan and step are placeholders until spike S3 records its choice in ARCHITECTURE.md section 11. */
+  /** Step: medium, chosen by spike S3 (ARCHITECTURE.md section 11). Plan and sketch are not measured yet (L1, Q4). */
   effort: {
     plan: "medium",
     step: "medium",

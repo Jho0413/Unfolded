@@ -107,7 +107,7 @@ qa/                                 browser
   context.ts                        pure: the sendContextualUpdate() message, and the narration heard by time t
   AskPanel.tsx                      voice + typed input, through conversation.ts; shows the Ask messages of section 7
   tools.ts                          client tool handlers, typed by shared/tools.ts
-scripts/                            dev scripts: make:m1, seed:m2
+scripts/                            dev scripts: make:m1, seed:m2, spike:s3
 agent/                              ElevenLabs CLI config: the agent (prompt, voice, LLM) and its client tools, plus the CLI's tracking file
 runs/                               gitignored: one folder per lesson (store + replay)
 tests/e2e/                          Playwright, with FAKE_APIS=1 and NEXT_PUBLIC_FAKE_APIS=1
@@ -243,6 +243,7 @@ sequenceDiagram
   - The plan, goal, signals and (for a sketch) the current board go *after* the document block.
   - The plan and sketch requests use a different output format, so they build their own cache.
 - **Structured output.** Requests stream: `client.messages.stream({ output_config: { format: zodOutputFormat(Step) } })` (the helper is in `@anthropic-ai/sdk/helpers/zod`), then `(await stream.finalMessage()).parsed_output`.
+  - Today the API rejects the schema `zodOutputFormat(Step)` and `zodOutputFormat(Sketch)` build ("compiled grammar is too large"). S3 found the fix and proposes it in section 11.
   - Constraints the API can't enforce (number ranges, item counts) are checked by the SDK with zod after the response arrives, and a failure *throws*. The generator catches it as a rejection.
   - Effort per request type (plan, step, sketch) is set in `lib/config.ts`.
 - **Prompts are generic.** No paper-specific logic, hard-coded concept lists or examples taken from the demo paper, in prompts or code. Paper-specific content lives only in fixtures and demo checks.
@@ -564,6 +565,26 @@ Each spike is time-boxed to 60 minutes, and its answer is written back into this
   - **`cues.ts` on the real response:** no fix needed. On all three voices, every M1 cue time equals the direct alignment-index start (Alice: row 2601, col 3994, slide 5213, pair1 8498, pair2 9787, add 11146, total 12318, drop 14222, done 16718 ms). On the Unicode probe, cues after the emoji, at CJK, at a combining accent and at the end all land on the right entry. This hasn't been checked by ear: C1's ±100 ms check against the audio still applies.
 - **S2:** the Q&A agent's LLM, comparing two candidates on latency and tool-calling. Also: whether text-only sessions speak, and how long a `draw_scene` sketch takes.
 - **S3:** whether Sonnet 5.5 writes valid, good `Step` scripts from the Attention paper and from a second, different paper (non-ML or math-heavy), and the effort level needed for steps, plans and sketches.
+  - **Answer (2026-11-14, #11, #27).** Script: `npm run spike:s3` (`scripts/s3-spike.ts`; the concepts are in `scripts/s3-spike.lessons.json`, and results go to `evidence/s3/`). Second paper: *Newton's Method in Three Precisions* (Kelley, arXiv 2307.16051, math.NA, 10 pages). Three concepts per paper: scaled dot-product scores, softmax over scores, and multi-head (Attention); the Newton step, iterative refinement, and why three precisions (Kelley). Each request sends the PDF from the Files API as a `document` block with a 1-hour `cache_control`, then the step goal, with the generic step system prompt in the script.
+  - **The contract schema is rejected (#27).** `zodOutputFormat(Step)` and `zodOutputFormat(Sketch)` both get a 400: "The compiled grammar is too large". This isn't the documented 24-optional-parameter limit. With every property made required, the schema still gets the same 400. The cause is the 5-kind object union combined with the 6-kind action union: either union alone is accepted. Two changes were tested, and both get `Step` and `Sketch` accepted (`npm run spike:s3 -- --probe` checks them; a rejected request costs nothing):
+    - **One action object (recommended):** a single object with `do` as an enum of the six kinds, `target`, `durationMs` and the cue (or `atMs`) required, and `color`, `to` and `value` optional. This makes 19 optional properties counted per use. `validate.ts` would then need two new rows, "`move` needs `to`" and "`write` needs `value`". It keeps `image`.
+    - **Four branches, no image:** merge `show|hide` and `highlight|unhighlight` into one branch each, and leave `image` out of the model's schema. This keeps the action types tight, but it is at the edge: the same merge with `image` kept is rejected, so it breaks again at E1.
+    - Neither has headroom: one more object kind on top of the one-action schema is rejected too. A new primitive needs `--probe` before it merges. A guard test that counts optional properties can't catch this limit. `shared/` is area A, so this is a proposal for its owner, not a change in this PR.
+  - **Validity:** every request in the spike used the one-action schema, and every output was then checked against the real contract with `validateStep`. **30 of 30 steps were valid on the first try** (5 runs × 6 concepts, at low, medium and high), so the retry never ran.
+  - **Valid isn't the same as good.** With the first prompt, one medium step had the wrong product (Q times K transpose didn't match its own matrices), two narrations corrected themselves aloud ("wait, let's use round numbers", "or more precisely"), and two `text` objects held LaTeX (shown as raw source). Three prompt lines fixed all of these at medium (6/6 correct, checked by hand): `text` is plain, so formulas go in `latex`; the narration is the final script, never think aloud; work out every number first and check the board matches the narration. At low effort with the same prompt, the dot-product step's arithmetic was still wrong, and one `text` still held LaTeX. Following S1, the prompt also spells maths out in words, and no narration had a maths symbol.
+  - **Latency and tokens per step** (one request each, streamed, 6 steps per row; the paper read from the cache):
+
+    | Prompt | Effort | Valid first try | Latency (median, max) | Output tokens (median) |
+    |---|---|---|---|---|
+    | first | low | 6/6 | 10.0 s, 10.8 s | 1,098 |
+    | first | medium | 6/6 | 9.7 s, 11.6 s | 1,256 |
+    | first | high | 6/6 | 26.9 s, 34.4 s | 3,580 |
+    | final | low | 6/6 | 9.2 s, 10.8 s | 1,034 |
+    | final | **medium** | 6/6 | 19.1 s, 20.4 s | 2,019 |
+
+  - **Cache:** the Attention PDF is 42k input tokens, and Kelley's is 32k. The first step of each paper writes the cache, and every later step reads it, at any effort: changing effort didn't invalidate it. Uncached input per step is about 100 tokens. At $2 / $10 per MTok with $0.20 cache reads, a medium step costs about 3 cents, and the cache write is about 17 cents per paper.
+  - **Chosen effort.** **Steps: `medium`**, with the final prompt: it was the only setting with correct arithmetic and a clean board. Its 19 s is shorter than a step's 60–90 s of audio, so prefetching step n+1 while step n plays hides it, and only step 0 waits. `high` costs three times as much and takes 27 s, with no gain in validity. **Plans: `medium`** and **sketches: `low`** stay as they were. S3 didn't measure them, beyond `Sketch` being accepted with the same schema change; L1 and Q4 measure them.
+  - **For G1:** move the prompt from `scripts/s3-spike.ts` into `lib/pipeline/prompts/` unchanged. Use `output_config.format` with the schema the area-A owner settles on, and keep `max_tokens` well above the 4.7k high-effort peak.
 - **S4:** which fal image model to use for the cover (M3) and for in-scene images (E1, stretch), and its latency. Download the images into `runs/`, in case fal's URLs expire. Keep the generations few: the budget is about 25 US dollars per teammate.
 - **S5:** the ElevenLabs CLI commands that push the agent and its client tools from `agent/`, and how its tracking file records the agent id.
 
