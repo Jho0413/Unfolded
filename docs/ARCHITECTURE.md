@@ -260,6 +260,7 @@ sequenceDiagram
 | A marker mid-word (`ro[[c]]w`) | its time is the start of `w` |
 | Two markers back to back | both get the same time |
 | A marker at the end | the last character's end time |
+| A cue named like an `Object.prototype` key (`constructor`) | it gets its own time, like any other cue |
 | Unicode (é, emoji, CJK) in the narration | the walk matches characters one by one, so the cues still land correctly |
 | The alignment skips or adds characters (normalisation) | the walk resyncs on the next matching character, and the cue takes the nearest following time |
 | `alignment` is null, or the walk can't match at all | error `no alignment`: the step fails (section 6.2), logged with the text and response |
@@ -496,7 +497,7 @@ The developer gets the full error in the server log, tagged with the route, less
 | `REPLAY_RUN=<id>` | the run folder exists | all keys (Q&A is off) |
 | `next build` | none: env isn't checked at build | all keys |
 
-- `lib/env.ts` validates the env once, at server start, from `instrumentation.ts` `register()`, with zod. Code behind it trusts the values. A missing required key stops the server, and the error names the key.
+- `lib/env.ts` validates the env once, at server start, from `instrumentation.ts` `register()`, with zod. Code behind it trusts the values. A missing required key stops the server (it logs an error naming the key and exits with code 1, since Next would otherwise serve 500s).
 - The mode is picked in this order: `REPLAY_RUN` set → replay; else `FAKE_APIS=1` → fake; else real. An empty value (`KEY=`, as copied from `.env.example`) counts as unset.
 - A build made with `NEXT_PUBLIC_FAKE_APIS=1` (for example, left over from a local `npm run e2e`) refuses to start in real mode, since the browser would use the fake agent: run `npm run build` again first. `next.config.ts` bakes that build-time value in as `BUILT_WITH_BROWSER_FAKES`, so the check never depends on the shell `npm start` runs in. The reverse, `FAKE_APIS=1` on a normal build, starts with a warning.
 - Keys are only read in `lib/` and the API routes, which import `"server-only"`. The browser never sees a key.
