@@ -1,0 +1,30 @@
+{
+  "id": "msg_fake_sketch",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-5-5",
+  "container": null,
+  "diagnostics": null,
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"objects\":[{\"kind\":\"text\",\"id\":\"sketch_note\",\"x\":1200,\"y\":120,\"text\":\"each output cell pairs one row with one column\",\"size\":\"m\"},{\"kind\":\"latex\",\"id\":\"sketch_formula\",\"x\":1200,\"y\":200,\"tex\":\"c_{ij} = \\\\sum_k a_{ik} b_{kj}\",\"hidden\":true},{\"kind\":\"arrow\",\"id\":\"sketch_arrow\",\"from\":{\"id\":\"sketch_note\"},\"to\":{\"id\":\"sketch_formula\"}}],\"actions\":[{\"do\":\"highlight\",\"target\":{\"id\":\"sketch_note\"},\"color\":\"accent\",\"durationMs\":400,\"atMs\":0},{\"do\":\"show\",\"target\":{\"id\":\"sketch_formula\"},\"durationMs\":400,\"atMs\":1500},{\"do\":\"highlight\",\"target\":{\"id\":\"sketch_formula\"},\"color\":\"warn\",\"durationMs\":400,\"atMs\":3000}]}",
+      "citations": null
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+    "cache_creation": null,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "inference_geo": null,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "output_tokens_details": null,
+    "server_tool_use": null,
+    "service_tier": "standard",
+    "speed": null
+  }
+}

@@ -1,0 +1,317 @@
+// POST /api/sketch (ROADMAP SK1, ARCHITECTURE.md sections 4, 7 and 8). One test per case,
+// named after it. Claude is never called: each test scripts lib/fakes/claude.ts, or runs with
+// FAKE_APIS=1 and its recorded fixture.
+import Anthropic from "@anthropic-ai/sdk";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { POST } from "@/app/api/sketch/route";
+import { config } from "@/lib/config";
+import { resetEnvForTests } from "@/lib/env";
+import { readFixture } from "@/lib/fakes";
+import {
+  fakeClaude,
+  fakeMessage,
+  type FakeClaude,
+  type FakeReply,
+} from "@/lib/fakes/claude";
+import { ApiError, SKETCH_FAILED, SketchResponse } from "@/shared/lesson";
+import type { BoardState, ObjectState, Sketch } from "@/shared/scene";
+
+// The Claude the route gets: a scripted fake per test, or the real factory (FAKE_APIS=1).
+const claude = vi.hoisted(() => ({
+  current: undefined as FakeClaude | undefined,
+}));
+vi.mock("@/lib/pipeline/generate", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/pipeline/generate")>();
+  return {
+    ...real,
+    claudeMessages: (fixture: string) =>
+      claude.current ?? real.claudeMessages(fixture),
+  };
+});
+
+function script(...replies: FakeReply[]) {
+  claude.current = fakeClaude(replies);
+  return claude.current;
+}
+
+const matrixA: ObjectState = {
+  object: {
+    kind: "matrix",
+    id: "a",
+    x: 100,
+    y: 100,
+    rows: [
+      ["1", "2"],
+      ["3", "4"],
+    ],
+  },
+  visible: true,
+  highlight: null,
+  cellHighlight: [
+    [null, null],
+    [null, null],
+  ],
+};
+const BOARD: BoardState = { objects: [matrixA], copies: [], active: [] };
+
+/** Highlights row 0 of the board's matrix `a` and points a new note at it. */
+const TARGETS_BOARD: Sketch = {
+  objects: [
+    { kind: "text", id: "note", x: 600, y: 120, text: "this row" },
+    {
+      kind: "arrow",
+      id: "pointer",
+      from: { id: "note" },
+      to: { id: "a", row: 0 },
+    },
+  ],
+  actions: [
+    {
+      do: "highlight",
+      target: { id: "a", row: 0 },
+      color: "accent",
+      durationMs: 400,
+      atMs: 0,
+    },
+    { do: "show", target: { id: "note" }, durationMs: 400, atMs: 800 },
+  ],
+};
+
+/** A new object reusing the board's id `a`. */
+const REUSES_BOARD_ID: Sketch = {
+  objects: [{ kind: "text", id: "a", x: 600, y: 120, text: "a clash" }],
+  actions: [],
+};
+
+function post(body: unknown): Promise<Response> {
+  return POST(
+    new Request("http://localhost/api/sketch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: typeof body === "string" ? body : JSON.stringify(body),
+    }),
+  );
+}
+
+const reply = (sketch: unknown) => fakeMessage(JSON.stringify(sketch));
+
+function quietLogs() {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  const text = (spy: typeof warn) =>
+    spy.mock.calls.flat().map(String).join(" ");
+  return { warned: () => text(warn), logged: () => text(error) };
+}
+
+async function expectFailed(res: Response, status: number) {
+  expect(res.status).toBe(status);
+  const body: unknown = await res.json();
+  expect(ApiError.parse(body)).toEqual({ error: SKETCH_FAILED });
+  expect(body).not.toHaveProperty("sketch");
+}
+
+afterEach(() => {
+  claude.current = undefined;
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+  resetEnvForTests();
+});
+
+describe("POST /api/sketch: the sketch against the board", () => {
+  it("a valid sketch that targets a board object: 200 with the sketch", async () => {
+    const fake = script(reply(TARGETS_BOARD));
+    const res = await post({
+      description: "point at the first row",
+      board: BOARD,
+    });
+    expect(res.status).toBe(200);
+    expect(SketchResponse.parse(await res.json())).toEqual({
+      sketch: TARGETS_BOARD,
+    });
+    expect(fake.calls).toHaveLength(1);
+  });
+
+  it("the same sketch with fresh: true: unknown object, retried once, then Couldn't draw that (502)", async () => {
+    const logs = quietLogs();
+    const fake = script(reply(TARGETS_BOARD), reply(TARGETS_BOARD));
+    const res = await post({
+      description: "point at the first row",
+      fresh: true,
+      board: BOARD,
+    });
+    await expectFailed(res, 502);
+    expect(fake.calls).toHaveLength(2);
+    expect(fake.calls[1].body.messages.at(-1)?.content).toContain(
+      'unknown object "a"',
+    );
+    expect(logs.logged()).toContain('unknown object "a"');
+  });
+
+  it("a sketch reusing a board id: duplicate id, retried once, then Couldn't draw that (502)", async () => {
+    const logs = quietLogs();
+    const fake = script(reply(REUSES_BOARD_ID), reply(REUSES_BOARD_ID));
+    const res = await post({ description: "label it", board: BOARD });
+    await expectFailed(res, 502);
+    expect(fake.calls[1].body.messages.at(-1)?.content).toContain(
+      'duplicate id "a"',
+    );
+    expect(logs.logged()).toContain('duplicate id "a"');
+  });
+
+  it("the same id with fresh: true is allowed (the board is empty)", async () => {
+    script(reply(REUSES_BOARD_ID));
+    const res = await post({
+      description: "label it",
+      fresh: true,
+      board: BOARD,
+    });
+    expect(res.status).toBe(200);
+    expect(SketchResponse.parse(await res.json()).sketch).toEqual(
+      REUSES_BOARD_ID,
+    );
+  });
+
+  it("an invalid sketch, then a valid one: retried once with the errors, 200 with the valid one", async () => {
+    const logs = quietLogs();
+    const fake = script(reply(REUSES_BOARD_ID), reply(TARGETS_BOARD));
+    const res = await post({ description: "point at it", board: BOARD });
+    expect(res.status).toBe(200);
+    expect(SketchResponse.parse(await res.json()).sketch).toEqual(
+      TARGETS_BOARD,
+    );
+    expect(fake.calls).toHaveLength(2);
+    expect(logs.warned()).toContain('duplicate id "a"');
+  });
+});
+
+describe("POST /api/sketch: an invalid sketch or a failed request is an error response, not a sketch", () => {
+  it("output that fails the Sketch schema twice: 502 Couldn't draw that", async () => {
+    const logs = quietLogs();
+    script(reply({ objects: "nope" }), reply({ actions: [] }));
+    await expectFailed(await post({ description: "x", board: BOARD }), 502);
+    expect(logs.logged()).toContain("sketch rejected twice");
+  });
+
+  it("output that isn't JSON twice: 502 Couldn't draw that", async () => {
+    quietLogs();
+    script(fakeMessage("not json"), fakeMessage("still not"));
+    await expectFailed(await post({ description: "x", board: BOARD }), 502);
+  });
+
+  it("refusal: 502 Couldn't draw that, with no retry", async () => {
+    quietLogs();
+    const fake = script(fakeMessage("", "refusal"));
+    await expectFailed(await post({ description: "x", board: BOARD }), 502);
+    expect(fake.calls).toHaveLength(1);
+  });
+
+  it("max_tokens cut-off: 502 Couldn't draw that, with no retry", async () => {
+    quietLogs();
+    const fake = script(fakeMessage('{"objects": [', "max_tokens"));
+    await expectFailed(await post({ description: "x", board: BOARD }), 502);
+    expect(fake.calls).toHaveLength(1);
+  });
+
+  it("API error (after the SDK's retries): 502 Couldn't draw that, logged", async () => {
+    const logs = quietLogs();
+    script(
+      new Anthropic.InternalServerError(
+        529,
+        undefined,
+        "Overloaded",
+        new Headers(),
+      ),
+    );
+    await expectFailed(await post({ description: "x", board: BOARD }), 502);
+    expect(logs.logged()).toContain("Claude sketch request failed");
+  });
+
+  it("an error that isn't Claude's (a bug): 500 Couldn't draw that, logged", async () => {
+    const logs = quietLogs();
+    script(new TypeError("boom"));
+    await expectFailed(await post({ description: "x", board: BOARD }), 500);
+    expect(logs.logged()).toContain("boom");
+  });
+});
+
+describe("POST /api/sketch: a bad request body is a 400, and Claude isn't called", () => {
+  const cases: [string, unknown][] = [
+    ["not JSON", "{not json"],
+    ["no description", { board: BOARD }],
+    ["an empty description", { description: "", board: BOARD }],
+    ["no board", { description: "x" }],
+    [
+      "a board that isn't a BoardState",
+      { description: "x", board: { objects: [{}] } },
+    ],
+    [
+      "fresh that isn't a boolean",
+      { description: "x", fresh: "yes", board: BOARD },
+    ],
+    [
+      "a board object with an invalid id",
+      {
+        description: "x",
+        board: {
+          ...BOARD,
+          objects: [
+            { ...matrixA, object: { ...matrixA.object, id: "Bad Id" } },
+          ],
+        },
+      },
+    ],
+  ];
+  for (const [name, body] of cases)
+    it(`${name}: 400 Couldn't draw that`, async () => {
+      const logs = quietLogs();
+      const fake = script();
+      await expectFailed(await post(body), 400);
+      expect(fake.calls).toHaveLength(0);
+      expect(logs.warned()).toContain("bad request");
+    });
+
+  /** A board of `n` distinct text objects. */
+  function boardOf(n: number): BoardState {
+    const objects = Array.from({ length: n }, (_, i): ObjectState => ({
+      object: { kind: "text", id: `t${i}`, x: 10, y: 10, text: "" },
+      visible: true,
+      highlight: null,
+    }));
+    return { objects, copies: [], active: [] };
+  }
+
+  it("a board over config.maxBoardObjects: 400 Couldn't draw that", async () => {
+    quietLogs();
+    const fake = script();
+    const res = await post({
+      description: "x",
+      board: boardOf(config.maxBoardObjects + 1),
+    });
+    await expectFailed(res, 400);
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it("a board of exactly config.maxBoardObjects: accepted", async () => {
+    script(reply({ objects: [], actions: [] }));
+    const res = await post({
+      description: "x",
+      board: boardOf(config.maxBoardObjects),
+    });
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("POST /api/sketch with FAKE_APIS=1", () => {
+  it("serves the recorded sketch response, which is valid on the board", async () => {
+    vi.stubEnv("FAKE_APIS", "1");
+    vi.stubEnv("REPLAY_RUN", undefined);
+    resetEnvForTests();
+    const res = await post({ description: "anything", board: BOARD });
+    expect(res.status).toBe(200);
+    const fixture = await readFixture<Anthropic.Message>(config.sketch.fixture);
+    const text = fixture.content.find((b) => b.type === "text");
+    expect(SketchResponse.parse(await res.json()).sketch).toEqual(
+      JSON.parse(text!.text),
+    );
+  });
+});

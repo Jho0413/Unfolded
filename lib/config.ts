@@ -33,6 +33,15 @@ export const config = {
     /** Served when FAKE_APIS=1, in the Messages API's response shape. */
     fixture: "claude-step.message.json",
   },
+  /** A Q&A sketch request (ARCHITECTURE.md section 8): the learner is waiting, so it's short. */
+  sketch: {
+    /** Output cap, thinking included. A cut-off fails the sketch. */
+    maxTokens: 16_000,
+    /** Deadline for one attempt, the SDK's own retries included, until the whole answer is in. */
+    timeoutMs: 60_000,
+    /** Served when FAKE_APIS=1, in the Messages API's response shape. */
+    fixture: "claude-sketch.message.json",
+  },
   /** Upload cap: our own choice, not Claude's limit (ARCHITECTURE.md section 5.1). */
   maxPdfMb: 32,
   /** How long the plan route waits for the fal cover before returning without it. */
