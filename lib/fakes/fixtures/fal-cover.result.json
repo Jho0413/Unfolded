@@ -1,0 +1,16 @@
+{
+  "images": [
+    {
+      "url": "https://v3b.fal.media/files/b/0ab276c0/abxQEe0S-8rAt5zTgm_TG_76Pt9LSd.jpg",
+      "content_type": "image/jpeg",
+      "file_name": "abxQEe0S-8rAt5zTgm_TG_76Pt9LSd.jpg",
+      "file_size": null,
+      "width": 1024,
+      "height": 576
+    }
+  ],
+  "timings": { "inference": 2.185410787999899 },
+  "seed": 1895595998,
+  "has_nsfw_concepts": [false],
+  "prompt": "A glowing web of luminous threads linking every bead on a long necklace to every other bead at once, with some threads brighter and thicker than others, set against a deep dark background in warm gold and blue."
+}

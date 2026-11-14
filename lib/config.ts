@@ -74,8 +74,26 @@ export const config = {
   maxPdfMb: 32,
   /** Claude's page limit for a PDF document (a 1M-context model), checked before uploading. */
   maxPdfPages: 600,
-  /** How long the plan route waits for the fal cover before returning without it. */
-  coverTimeoutMs: 4000,
+  /** fal images (ARCHITECTURE.md section 11, S4): chosen for prompt-following at ~3.5 s. */
+  fal: {
+    model: "fal-ai/flux-2",
+    /** 1024 x 576: wide, like the plan view's and the lesson page's header. */
+    imageSize: "landscape_16_9",
+    /** S4's real flux-2 result (Attention coverPrompt), served when FAKE_APIS=1. */
+    fixture: "fal-cover.result.json",
+    /** That result's image, scaled down to 256 x 144, as the fake's download. */
+    fixtureImage: "fal-cover.jpg",
+  },
+  /** The lesson cover (ARCHITECTURE.md section 5.1): one fal image per plan. */
+  cover: {
+    /**
+     * How long the plan route waits for the cover (generation and download) before returning
+     * the plan without it. S4 saw 4.4-4.6 s; it delays step 0, so it's kept short.
+     */
+    timeoutMs: 6000,
+    /** Its file in the run folder, recorded as the plan's `cover`. fal is asked for a JPEG. */
+    file: "cover.jpg",
+  },
   /** Cap on `board.objects` in a POST /api/sketch body (ARCHITECTURE.md section 8). */
   maxBoardObjects: 200,
   /** fal illustrations per lesson, cover included (E1). fal credits are tight. */
