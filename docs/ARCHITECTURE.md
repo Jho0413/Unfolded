@@ -86,7 +86,7 @@ shared/                             imported by server and browser (the contract
 lib/                                server-only (import "server-only")
   config.ts                         model ids, effort, limits, paths: one place
   env.ts                            reads and validates env vars once
-  pipeline/plan.ts, step.ts, sketch.ts, generate.ts (one structured-output request, validated and retried once), prompts/, outputFormat.ts (the wire format Claude fills in for steps and sketches, and its converters)
+  pipeline/plan.ts, step.ts, sketch.ts, generate.ts (one structured-output request, validated and retried once), pdf.ts (the byte checks before upload), prompts/, outputFormat.ts (the wire format Claude fills in for steps and sketches, its converters, and the plan's schema)
   pipeline/stepGeneration.ts        pure: the step-generation machine (section 6.2)
   pipeline/lessonStep.ts            the step route's work: serve a saved step, or generate, narrate and save it, one generation per step at a time
   pipeline/seed.ts                  npm run seed:m2: a hand-made plan and its uploaded paper -> runs/<id>/ (paper.json, plan.json)
@@ -227,7 +227,7 @@ sequenceDiagram
   participant E as ElevenLabs
   participant F as fal
   B->>A: POST /api/lessons (PDF)
-  A->>C: Files API upload, then plan request (structured output: LessonPlan)
+  A->>C: Files API upload, then plan request (structured output: LessonPlanOutput)
   A->>F: one cover illustration (optional, time-limited)
   A->>A: save runs/<id>/plan.json + paper file id + cover
   A-->>B: { lessonId, plan }
@@ -248,7 +248,7 @@ sequenceDiagram
   - It's uploaded once with the Files API (`client.files.upload`).
   - Every plan and step request then references it by `file_id`, as a `document` block.
   - The upload size cap (`config.maxPdfMb`) is our own choice, not Claude's limit. We don't parse the PDF, but `lib/pipeline/pdf.ts` checks its bytes before uploading: the `%PDF-` header within the first 1024 bytes, the size, an `/Encrypt` entry and a count of `/Type /Page` objects over `config.maxPdfPages` (Claude's 600-page limit). That catches the common cases without a paid request. When Claude rejects a PDF the checks missed (pages hidden in compressed object streams, an unreadable file), it answers 400, and we return the same upload error in section 7.
-  - The run folder gets `paper.json` (`{ fileId, filename }`, the paper's Files API id for the step requests) and then `plan.json`, last, so a lesson the page can open is always complete. The lesson id is the plan title's slug plus 8 random hex characters. `POST /api/lessons` answers `{ lessonId, plan }`, or `{ error }` with a section 7 message: 400 for no file or not a PDF, 413 over the size cap, 422 for an encrypted PDF, too many pages or a PDF Claude rejects, 502 when Claude fails to plan or upload, and 500 for anything else. The reason goes to the server log.
+  - The run folder gets `paper.json` (`PAPER_FILE` in `lib/runs/store.ts`, beside `PLAN_FILE`; `{ fileId, filename }`, the paper's Files API id for the step requests) and then `plan.json`, last, so a lesson the page can open is always complete. The lesson id is the plan title's slug plus 8 random hex characters. `POST /api/lessons` answers `{ lessonId, plan }`, or `{ error }` with a section 7 message: 400 for no file or not a PDF, 413 over the size cap (checked on `Content-Length` before the body is read, then on the file), 422 for an encrypted PDF, too many pages or a PDF Claude rejects, 502 when Claude fails to plan or upload, and 500 for anything else. The reason goes to the server log.
 - **Caching.** The document block carries `cache_control: { type: "ephemeral", ttl: "1h" }`, so later step requests reuse the cached paper. The 1-hour cache outlasts long Q&A pauses and rehearsals. Its writes cost more than the 5-minute cache's, but each request type writes the paper only once. For the cache to work:
   - The step system prompt must be byte-identical for every step.
   - The plan, goal and signals go *after* the document block.
@@ -456,7 +456,7 @@ The developer gets the full error in the server log, tagged with the route, less
 | Where | Problem | Learner sees | Recovery |
 |---|---|---|---|
 | Upload | No file, or not a PDF | "Please choose a PDF." | Pick again |
-| Upload | Over `config.maxPdfMb`, or Claude rejects the document (too many pages, encrypted, unreadable) | "This PDF is too large or locked." | Another PDF |
+| Upload | Over `config.maxPdfMb`, encrypted or over `config.maxPdfPages` pages (our byte checks, section 5.1), or Claude rejects the document (too many pages, encrypted, unreadable) | "This PDF is too large or locked." | Another PDF |
 | Plan | Invalid plan twice (zod, or fewer than `config.plan.minSteps` steps), refusal, a cut-off, or a Claude or Files API error | "Couldn't read this paper." | Retry, or another PDF |
 | Step | Any `failed` cause in section 6.2 (502), or a failure outside the table such as a missing `paper.json` or a failed save (500); the reason is logged with the route, lesson and step, and `failed (<event>)` | "Couldn't make this step." | Retry (player `failed` state): the next request generates again |
 | Step | Replay mode, and the step isn't in the run | "This step isn't in the saved run." | Back, or another step |
@@ -511,7 +511,7 @@ The developer gets the full error in the server log, tagged with the route, less
 - `draw_scene` takes plain words, not scene JSON. The voice model only describes what to draw, and Claude writes the validated sketch, so the scene schema stays in one place and out of the agent's prompt.
 - **A sketch builds on the board the learner is looking at.** The request body is `{ description, fresh, board }`, where `board` is the current `BoardState`. The route checks the body with zod, including a cap on the board's size (`config.maxBoardObjects`). Claude sees the board, so an answer to "why does the row go with the column?" can highlight and draw over the matrix on screen.
   - The sketch's ids are checked against its own objects plus the board's (section 4). With `fresh: true` the sketch starts from an empty board, and later sketches in this Ask build on that new board, not the lesson board.
-  - A rejected sketch is retried once with its errors, as a step is (section 4). The route answers `{ sketch }`, or `{ error: "Couldn't draw that." }` with 400 for a bad body (including a board over the cap), 502 when Claude fails (invalid twice, a refusal, a cut-off or a provider error) and 500 for anything else. The reason goes to the server log.
+  - A rejected sketch is retried once with its errors, as a step is (section 4). Each attempt has a 20-second deadline (`config.sketch.timeoutMs`; a real sketch took 3 to 5 s), so the route answers within about 40 s at worst, and Q5's request timeout must be longer than that. The route answers `{ sketch }`, or `{ error: "Couldn't draw that." }` with 400 for a bad body (including a board over the cap), 502 when Claude fails (invalid twice, a refusal, a cut-off or a provider error) and 500 for anything else. The reason goes to the server log.
   - The browser validates the sketch again against the board it has when the sketch arrives, since the board may have changed while Claude worked.
 - **The board during Ask.** Ask freezes the lesson board at `pausedT`: the audio time when Ask opened, the end of the step from `stepEnded` or `finished`, or an empty board from `loading`. `highlight` and sketches draw on top of it, each timed from when it arrives. **Closing Ask throws all of that away**: the board goes back to `sceneAt(step, pausedT)` and the player returns to the state Ask was opened from, with `playing` becoming `paused` (section 6.1), so Play carries on from the same point. If Ask was opened while loading and the step arrived meanwhile, the board is that step at 0.
 - **Agent config in the repo.** We use the official **ElevenLabs CLI** (`@elevenlabs/cli`) rather than writing our own sync script.

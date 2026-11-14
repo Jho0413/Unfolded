@@ -8,13 +8,18 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { config } from "@/lib/config";
 import { fakeFiles } from "@/lib/fakes/claude";
-import { PAPER_FILE, PLAN_FILE, SavedPaper } from "@/lib/pipeline/plan";
+import { SavedPaper } from "@/lib/pipeline/plan";
 import {
   parseSeedFile,
   type SeedLesson,
   seedLesson,
 } from "@/lib/pipeline/seed";
-import { listRunFiles, readRunJson } from "@/lib/runs/store";
+import {
+  listRunFiles,
+  PAPER_FILE,
+  PLAN_FILE,
+  readRunJson,
+} from "@/lib/runs/store";
 import { LessonPlan } from "@/shared/lesson";
 import { makePdf } from "./pdfs";
 
@@ -100,7 +105,7 @@ describe("parseSeedFile", () => {
 
 describe("seedLesson", () => {
   it("uploads the PDF once and writes paper.json and plan.json", async () => {
-    const files = fakeFiles(undefined, UPLOADED);
+    const files = fakeFiles(UPLOADED);
     const pdf = makePdf();
     const paper = await seedLesson(lesson(), pdf, files);
     expect(paper).toEqual({ fileId: UPLOADED.id, filename: "seeded.pdf" });
@@ -117,7 +122,7 @@ describe("seedLesson", () => {
   });
 
   it("bytes that aren't a usable PDF are refused before uploading, and nothing is written", async () => {
-    const files = fakeFiles(undefined, UPLOADED);
+    const files = fakeFiles(UPLOADED);
     for (const pdf of [
       new TextEncoder().encode("not a pdf"),
       makePdf({ encrypted: true }),
@@ -130,7 +135,7 @@ describe("seedLesson", () => {
   });
 
   it("a failed upload writes nothing", async () => {
-    const files = fakeFiles(undefined, new Error("network down"));
+    const files = fakeFiles(new Error("network down"));
     await expect(seedLesson(lesson(), makePdf(), files)).rejects.toThrow(
       "network down",
     );

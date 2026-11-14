@@ -22,8 +22,14 @@ import {
 } from "@/lib/fakes/claude";
 import { NoAlignmentError, stripMarkers } from "@/lib/narration/cues";
 import { TtsError } from "@/lib/narration/tts";
-import { PAPER_FILE, PLAN_FILE, type SavedPaper } from "@/lib/pipeline/plan";
-import { readRunJson, saveStepVersion, writeRunJson } from "@/lib/runs/store";
+import type { SavedPaper } from "@/lib/pipeline/plan";
+import {
+  PAPER_FILE,
+  PLAN_FILE,
+  readRunJson,
+  saveStepVersion,
+  writeRunJson,
+} from "@/lib/runs/store";
 import {
   ApiError,
   type LessonPlan,

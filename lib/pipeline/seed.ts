@@ -9,13 +9,11 @@ import { config } from "@/lib/config";
 import type { ClaudeFiles } from "@/lib/pipeline/generate";
 import { pdfProblem } from "@/lib/pipeline/pdf";
 import {
-  PAPER_FILE,
-  PLAN_FILE,
   type SavedPaper,
   uploadPaper,
   validatePlan,
 } from "@/lib/pipeline/plan";
-import { writeRunJson } from "@/lib/runs/store";
+import { PAPER_FILE, PLAN_FILE, writeRunJson } from "@/lib/runs/store";
 
 const MB = 1024 * 1024;
 

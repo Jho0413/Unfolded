@@ -14,7 +14,7 @@ import {
   type StepResponse,
 } from "@/shared/lesson";
 import { narrate } from "@/lib/narration/tts";
-import { PAPER_FILE, PLAN_FILE, SavedPaper } from "@/lib/pipeline/plan";
+import { SavedPaper } from "@/lib/pipeline/plan";
 import { generateStep } from "@/lib/pipeline/step";
 import {
   failureEvent,
@@ -23,6 +23,8 @@ import {
 } from "@/lib/pipeline/stepGeneration";
 import {
   listRunFiles,
+  PAPER_FILE,
+  PLAN_FILE,
   readRunJson,
   saveStepVersion,
   stepAudioFileName,

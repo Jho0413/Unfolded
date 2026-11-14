@@ -20,8 +20,8 @@ import {
   fakeMessage,
   type FakeReply,
 } from "@/lib/fakes/claude";
-import { PAPER_FILE, PLAN_FILE, SavedPaper } from "@/lib/pipeline/plan";
-import { readRunJson } from "@/lib/runs/store";
+import { SavedPaper } from "@/lib/pipeline/plan";
+import { PAPER_FILE, PLAN_FILE, readRunJson } from "@/lib/runs/store";
 import {
   ApiError,
   CreateLessonResponse,
@@ -30,20 +30,28 @@ import {
 } from "@/shared/lesson";
 import { makePdf, viaTempDir } from "../../lib/pipeline/pdfs";
 
-// The Claude the route gets (a scripted fake per test, or the real factories with FAKE_APIS=1),
-// and a temp runs dir per test.
+// The Claude the route gets: a scripted fake per test, or the real factories only in the
+// FAKE_APIS=1 test (`useFixtures`), so a test that forgets to script can never reach a real
+// client. And a temp runs dir per test.
 const state = vi.hoisted(() => ({
   messages: undefined as FakeClaude | undefined,
   files: undefined as FakeFiles | undefined,
+  useFixtures: false,
   runs: "",
 }));
 vi.mock("@/lib/pipeline/generate", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/pipeline/generate")>();
+  const unscripted = () => {
+    throw new Error("test reached Claude without scripting it");
+  };
   return {
     ...real,
     claudeMessages: (fixture: string) =>
-      state.messages ?? real.claudeMessages(fixture),
-    claudeFiles: (fixture: string) => state.files ?? real.claudeFiles(fixture),
+      state.messages ??
+      (state.useFixtures ? real.claudeMessages(fixture) : unscripted()),
+    claudeFiles: (fixture: string) =>
+      state.files ??
+      (state.useFixtures ? real.claudeFiles(fixture) : unscripted()),
   };
 });
 vi.mock("@/lib/config", async (importOriginal) => {
@@ -77,7 +85,7 @@ const UPLOADED: Anthropic.FileMetadata = {
 
 function script(...replies: FakeReply[]) {
   state.messages = fakeClaude(replies);
-  state.files ??= fakeFiles(undefined, UPLOADED);
+  state.files ??= fakeFiles(UPLOADED);
   return state.messages;
 }
 const reply = (value: unknown) => fakeMessage(JSON.stringify(value));
@@ -136,6 +144,7 @@ beforeEach(async () => {
 afterEach(async () => {
   state.messages = undefined;
   state.files = undefined;
+  state.useFixtures = false;
   await rm(state.runs, { recursive: true, force: true });
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
@@ -152,6 +161,9 @@ describe("POST /api/lessons: a valid PDF", () => {
     expect(lessonId).toMatch(/^a-paper-s-main-idea-[0-9a-f]{8}$/);
     expect(state.files!.calls).toHaveLength(1);
     expect(claude.calls).toHaveLength(1);
+    // Both the upload and the plan request have a total deadline.
+    expect(state.files!.calls[0].options?.signal).toBeInstanceOf(AbortSignal);
+    expect(claude.calls[0].options?.signal).toBeInstanceOf(AbortSignal);
     // The plan request sends the uploaded paper by its file id.
     const content = claude.calls[0].body.messages[0].content;
     expect(Array.isArray(content) && content[0]).toMatchObject({
@@ -250,6 +262,32 @@ describe('POST /api/lessons: "This PDF is too large or locked."', () => {
     expect(state.files!.calls).toHaveLength(0);
   });
 
+  it("a Content-Length over the cap: 413 before the body is read, nothing uploaded", async () => {
+    quietLogs();
+    script();
+    const body = new FormData();
+    body.append(
+      PDF_FIELD,
+      new File([new Uint8Array(pdfs["tiny.pdf"])], "paper.pdf"),
+    );
+    const request = new Request("http://localhost/api/lessons", {
+      method: "POST",
+      body,
+    });
+    const formData = vi.spyOn(request, "formData");
+    request.headers.set(
+      "content-length",
+      String(config.maxPdfMb * 1024 * 1024 * 2),
+    );
+    await expectFailed(
+      await POST(request),
+      413,
+      UPLOAD_ERRORS.tooLargeOrLocked,
+    );
+    expect(formData).not.toHaveBeenCalled();
+    expect(state.files!.calls).toHaveLength(0);
+  });
+
   it("encrypted: 422, nothing is uploaded", async () => {
     quietLogs();
     script();
@@ -287,7 +325,7 @@ describe('POST /api/lessons: "This PDF is too large or locked."', () => {
 
   it("the Files API rejects the upload (a 400): 422, no plan request", async () => {
     quietLogs();
-    state.files = fakeFiles(undefined, badRequest("bad file"));
+    state.files = fakeFiles(badRequest("bad file"));
     const claude = script();
     await expectFailed(
       await postFile(pdfs["tiny.pdf"]),
@@ -365,7 +403,6 @@ describe(`POST /api/lessons: "Couldn't read this paper."`, () => {
   it("a Claude error in the upload: 502, no plan request", async () => {
     const logs = quietLogs();
     state.files = fakeFiles(
-      undefined,
       new Anthropic.APIConnectionError({ message: "down" }),
     );
     const claude = script();
@@ -380,7 +417,7 @@ describe(`POST /api/lessons: "Couldn't read this paper."`, () => {
 
   it("an upload timeout: 502", async () => {
     const logs = quietLogs();
-    state.files = fakeFiles(undefined, new Anthropic.APIUserAbortError());
+    state.files = fakeFiles(new Anthropic.APIUserAbortError());
     script();
     await expectFailed(
       await postFile(pdfs["tiny.pdf"]),
@@ -409,6 +446,7 @@ describe("POST /api/lessons with FAKE_APIS=1", () => {
     vi.stubEnv("FAKE_APIS", "1");
     vi.stubEnv("REPLAY_RUN", undefined);
     resetEnvForTests();
+    state.useFixtures = true;
     const res = await postFile(pdfs["tiny.pdf"]);
     expect(res.status).toBe(200);
     const { lessonId, plan } = CreateLessonResponse.parse(await res.json());

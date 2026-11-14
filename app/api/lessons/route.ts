@@ -12,12 +12,25 @@ import { PDF_FIELD, UPLOAD_ERRORS } from "@/app/upload";
 
 const TAG = "[api/lessons]";
 const MB = 1024 * 1024;
+const MAX_PDF_BYTES = config.maxPdfMb * MB;
+/** Room for the multipart boundaries and headers around the PDF in the request body. */
+const FORM_OVERHEAD_BYTES = 64 * 1024;
+/** The Files API name when the browser sends none. */
+const DEFAULT_FILENAME = "paper.pdf";
 
 function failed(error: string, status: number): Response {
   return Response.json({ error } satisfies ApiError, { status });
 }
 
 export async function POST(request: Request): Promise<Response> {
+  // Refuse a body that's too big before reading it into memory. A body sent with no length
+  // (chunked) is read, then checked by size below.
+  const length = Number(request.headers.get("content-length"));
+  if (length > MAX_PDF_BYTES + FORM_OVERHEAD_BYTES) {
+    console.warn(TAG, `rejected upload (too-large): a ${length}-byte body`);
+    return failed(UPLOAD_ERRORS.tooLargeOrLocked, 413);
+  }
+
   let file: FormDataEntryValue | null;
   try {
     file = (await request.formData()).get(PDF_FIELD);
@@ -32,7 +45,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const bytes = new Uint8Array(await file.arrayBuffer());
   const problem = pdfProblem(bytes, {
-    maxBytes: config.maxPdfMb * MB,
+    maxBytes: MAX_PDF_BYTES,
     maxPages: config.maxPdfPages,
   });
   if (problem !== undefined) {
@@ -48,7 +61,7 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const created = await createLesson({
       bytes,
-      filename: file.name || "paper.pdf",
+      filename: file.name || DEFAULT_FILENAME,
     });
     return Response.json(created satisfies CreateLessonResponse);
   } catch (err) {

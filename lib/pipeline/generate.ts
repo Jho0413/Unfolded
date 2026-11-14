@@ -1,5 +1,5 @@
 // One structured-output Claude request, validated and retried once (ARCHITECTURE.md sections
-// 4 and 6.2). Shared by the step and sketch generators: a rejection (output that isn't JSON, a
+// 4 and 6.2). Shared by the step, sketch and plan generators: a rejection (output that isn't JSON, a
 // zod schema error or a validate.ts rejection) is retried once with the errors, and a second
 // rejection, a refusal, a cut-off or a provider error fails with a typed GenerationError.
 import "server-only";
@@ -84,6 +84,25 @@ export async function generateWithRetry<T>(
   );
 }
 
+/**
+ * A failed SDK call as a `provider` GenerationError, keeping the SDK's error as its cause. The
+ * SDK reports every failure as an AnthropicError: HTTP and connection errors (APIError), our
+ * deadline (APIUserAbortError), and anything else it wraps. Any other error is a bug in a fake
+ * or our code, so it's returned as it is, to be rethrown.
+ */
+export function providerError(
+  err: unknown,
+  what: string,
+  timeoutMs: number,
+): unknown {
+  if (!(err instanceof Anthropic.AnthropicError)) return err;
+  const how =
+    err instanceof Anthropic.APIUserAbortError
+      ? `timed out after ${timeoutMs} ms`
+      : `failed: ${err.name}: ${err.message}`;
+  return new GenerationError("provider", `${what} ${how}`, [], { cause: err });
+}
+
 interface Attempt<T> {
   result: ValidationResult<T>;
   content: Anthropic.ContentBlock[];
@@ -102,19 +121,7 @@ async function attempt<T>(
       .stream(body, { signal: AbortSignal.timeout(gen.timeoutMs) })
       .finalMessage();
   } catch (err) {
-    // The real stream reports every failure as an AnthropicError: HTTP and connection errors
-    // (APIError), our deadline (APIUserAbortError), and anything else it wraps.
-    if (!(err instanceof Anthropic.AnthropicError)) throw err;
-    const what =
-      err instanceof Anthropic.APIUserAbortError
-        ? `timed out after ${gen.timeoutMs} ms`
-        : `failed: ${err.name}: ${err.message}`;
-    throw new GenerationError(
-      "provider",
-      `${gen.label}: Claude request ${what}`,
-      [],
-      { cause: err },
-    );
+    throw providerError(err, `${gen.label}: Claude request`, gen.timeoutMs);
   }
 
   if (message.stop_reason === "refusal") {
@@ -180,5 +187,5 @@ export function claudeMessages(fixture: string): ClaudeMessages {
 
 /** The real Files API, or the recorded upload `fixture` when FAKE_APIS=1. */
 export function claudeFiles(fixture: string): ClaudeFiles {
-  return realClient()?.files ?? fakeFiles(fixture);
+  return realClient()?.files ?? fakeFiles(undefined, fixture);
 }
