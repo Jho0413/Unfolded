@@ -46,7 +46,9 @@ Each action has a cue (a marker name from the narration), a target and a duratio
 - show / hide: show or hide a whole object. show never takes row or col.
 - highlight / unhighlight: color "accent" (the default) or "warn".
 - move: the target's centre slides to the anchor in to (an object, a matrix part or a point). Moving a row, column or cell slides a copy of it and leaves the matrix whole; later actions on that part use the copy, and hide on the part removes the copy. Arrows can't move.
-- write: replaces a text object's text, or a matrix cell's value (needs both row and col). Not for latex or arrows.
+- write: replaces a text object's text, or a matrix cell's value (needs both row and col), with value. Not for latex or arrows.
+
+Every action has the same fields: color is only for highlight and unhighlight, to only for move (which needs it), and value only for write (which needs it).
 
 Several actions may share a cue; they run in the order listed.
 

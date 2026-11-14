@@ -85,7 +85,7 @@ shared/                             imported by server and browser (the contract
 lib/                                server-only (import "server-only")
   config.ts                         model ids, effort, limits, paths: one place
   env.ts                            reads and validates env vars once
-  pipeline/plan.ts, step.ts, sketch.ts, prompts/, outputFormat.ts (the step's structured-output schema)
+  pipeline/plan.ts, step.ts, sketch.ts, prompts/, outputFormat.ts (the wire format Claude fills in for steps and sketches, and its converters)
   narration/cues.ts                 pure: strip markers, cue offsets -> times
   narration/tts.ts                  ElevenLabs TTS with timestamps
   agent/token.ts                    the Q&A agent's conversation token (fixture when FAKE_APIS=1)
@@ -200,8 +200,13 @@ type Sketch = {                               // what /api/sketch returns for a 
 | A sketch action or anchor uses an id from the board the sketch draws on | valid |
 | The same, with `fresh: true` (the board is empty) | rejected: `unknown object "x"` |
 | A sketch object reuses an id from the board it draws on | rejected: `duplicate id "x"` |
+| (wire format) A `move` with no `to` | rejected: `move needs to "x"` (x is the target's id; the action is dropped and the rest is still checked) |
+| (wire format) A `write` with no `value` | rejected: `write needs value "x"` (as above) |
+| (wire format) A field the action's kind doesn't take (`to` on a `show`, `color` on a `write`) | allowed (dropped, as zod drops unknown keys) |
 
 For a sketch, the known ids are its own objects plus those of the board it draws on (section 8).
+
+**The wire format (`lib/pipeline/outputFormat.ts`, #57).** Claude doesn't fill in this contract's schema directly: the API rejects `zodOutputFormat(Step)` and `zodOutputFormat(Sketch)` with "The compiled grammar is too large", because of the object union times the action union (S3, #27). So Claude fills in `WireStep` or `WireSketch`: the same objects, but every action is one flat object with `do` an enum of the six kinds and `color`, `to` and `value` optional. `validateWireStep` / `validateWireSketch` parse the wire, convert it with `wireToStep` / `wireToSketch` (pure), then run `validateStep` / `validateSketch` unchanged, and return the conversion's errors and the contract's in one list for the one retry. A parsed contract `Step` or `Sketch` is already a valid wire value, and converting it back gives the same value (a round-trip property test). The wire gives each action field the contract's own constraints, so a schema error names the action's index on the wire, and it requires `durationMs`, which the contract defaults to 400. `shared/` and the player never see the wire format. Neither wire schema has headroom (S3: one more object kind is rejected), so a new primitive needs a real request with the bigger schema before it merges; a size-budget test catches a schema that grows.
 
 When generation is rejected (output that isn't JSON, a zod schema error or a `validate.ts` rejection), the generator retries **once**, with the error messages added to the prompt. If the retry also fails, the step fails (section 6.2).
 
@@ -242,11 +247,11 @@ sequenceDiagram
   - The step system prompt must be byte-identical for every step.
   - The plan, goal, signals and (for a sketch) the current board go *after* the document block.
   - The plan and sketch requests use a different output format, so they build their own cache.
-- **Structured output.** Requests stream: `client.messages.stream({ output_config: { format } })`, then `await stream.finalMessage()`. For a step, `format` is `lib/pipeline/outputFormat.ts`'s JSON schema (today `zodOutputFormat(Step).schema`, from `@anthropic-ai/sdk/helpers/zod`), kept in its own file so it can be swapped for a simpler one.
-  - The generator checks `stop_reason` first: `refusal`, `max_tokens` and `model_context_window_exceeded` fail the step (section 6.2). Each attempt has a total deadline (`config.step.timeoutMs`, an abort signal), since the SDK's own `timeout` stops counting once a stream's headers arrive. Otherwise it parses the text itself with `validateStep`, not the SDK's `parsed_output` (whose parser throws before a refusal can be seen). So a schema failure, including constraints the API can't enforce (number ranges, item counts), and a `validate.ts` rejection give the same error list for the one retry.
+- **Structured output.** Requests stream: `client.messages.stream({ output_config: { format } })`, then `await stream.finalMessage()`. For a step, `format` is `lib/pipeline/outputFormat.ts`'s JSON schema for the wire format (`zodOutputFormat(WireStep).schema`, from `@anthropic-ai/sdk/helpers/zod`; section 4), and a sketch uses `WireSketch`.
+  - The generator checks `stop_reason` first: `refusal`, `max_tokens` and `model_context_window_exceeded` fail the step (section 6.2). Each attempt has a total deadline (`config.step.timeoutMs`, an abort signal), since the SDK's own `timeout` stops counting once a stream's headers arrive. Otherwise it parses the text itself with `validateWireStep` (the wire schema, the conversion, then `validateStep`), not the SDK's `parsed_output` (whose parser throws before a refusal can be seen). So a schema failure, including constraints the API can't enforce (number ranges, item counts), a conversion error and a `validate.ts` rejection give the same error list for the one retry.
   - The retry resends the first request, then Claude's rejected answer (unchanged, thinking included) and the errors, so it reuses the cached paper.
   - Effort per request type (plan, step, sketch) is set in `lib/config.ts`.
-  - The full `Step` schema is currently rejected with "The compiled grammar is too large" (found in S3 and G1); S3 is simplifying it. The rest of the step request (document by `file_id`, 1-hour cache, effort) was accepted on 2026-11-14.
+  - The contract's own `Step` schema is rejected with "The compiled grammar is too large" (S3, G1, #27), so requests send the wire format (section 4). On 2026-11-14 a real request accepted both `WireStep` and `WireSketch`, and one real step (Attention paper, scaled dot-product scores, `medium` effort) was valid on the first try in 9.3 s with 926 output tokens. That response is the `FAKE_APIS=1` step fixture (`lib/fakes/fixtures/claude-step.message.json`).
 - **Prompts are generic.** No paper-specific logic, hard-coded concept lists or examples taken from the demo paper, in prompts or code. Paper-specific content lives only in fixtures and demo checks.
 - **Prompts** live in `lib/pipeline/prompts/`. A step prompt receives:
   - the plan and the step's goal
