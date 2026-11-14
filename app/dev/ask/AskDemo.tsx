@@ -72,6 +72,7 @@ function createMachine() {
     layer: EMPTY_LAYER,
   };
   let openedAt = 0;
+  let askId = 0;
   const listeners = new Set<() => void>();
   const set = (next: Partial<typeof snap>) => {
     snap = { ...snap, ...next };
@@ -91,15 +92,19 @@ function createMachine() {
       const restore =
         result.outcome === "changed" &&
         result.effects.some((e) => e.type === "restoreBoard");
-      if (was !== "asking" && result.state.kind === "asking")
+      const opened = was !== "asking" && result.state.kind === "asking";
+      if (opened) {
         openedAt = performance.now();
+        askId++;
+      }
       set({
         state: result.state,
-        layer: restore ? EMPTY_LAYER : snap.layer,
+        layer: restore || opened ? EMPTY_LAYER : snap.layer,
       });
       return result;
     },
     sinceOpen,
+    askId: () => askId,
     addAction: (a: Action) =>
       set({ layer: addAction(snap.layer, a, sinceOpen()) }),
     addSketch: (sketch: Sketch, fresh: boolean) =>
@@ -119,16 +124,16 @@ function currentStep(s: PlayerState): number {
   return s.kind === "asking" ? (s.goTo ?? s.from.step) : s.step;
 }
 
-export function AskDemo({ replay }: { replay: boolean }) {
-  const [machine] = useState(createMachine);
-  const { state } = useSyncExternalStore(
-    machine.subscribe,
-    machine.get,
-    machine.get,
-  );
-  // Redraw every frame while asking, so sketch actions play from arrival.
+/** The board, redrawn every frame while asking so sketch actions play from arrival. */
+function AskBoardView({
+  machine,
+  asking,
+}: {
+  machine: ReturnType<typeof createMachine>;
+  asking: boolean;
+}) {
+  useSyncExternalStore(machine.subscribe, machine.get, machine.get);
   const [, setFrame] = useState(0);
-  const asking = state.kind === "asking";
   useEffect(() => {
     if (!asking) return;
     let id = requestAnimationFrame(function tick() {
@@ -137,6 +142,17 @@ export function AskDemo({ replay }: { replay: boolean }) {
     });
     return () => cancelAnimationFrame(id);
   }, [asking]);
+  return <Whiteboard state={machine.board()} />;
+}
+
+export function AskDemo({ replay }: { replay: boolean }) {
+  const [machine] = useState(createMachine);
+  const { state } = useSyncExternalStore(
+    machine.subscribe,
+    machine.get,
+    machine.get,
+  );
+
   const [log, setLog] = useState<string[]>([]);
   const [highlights, setHighlights] = useState<HighlightAction[]>([]);
 
@@ -169,6 +185,7 @@ export function AskDemo({ replay }: { replay: boolean }) {
         },
         send,
         isAsking: () => machine.get().state.kind === "asking",
+        askId: machine.askId,
       });
       // Log each call and its result for the e2e tests.
       return Object.fromEntries(
@@ -250,7 +267,7 @@ export function AskDemo({ replay }: { replay: boolean }) {
           onAgentDisconnected={onDropped}
         />
         <div style={{ maxWidth: 960, border: "1px solid #e2e8f0" }}>
-          <Whiteboard state={machine.board()} />
+          <AskBoardView machine={machine} asking={state.kind === "asking"} />
         </div>
         <ul data-testid="highlights">
           {highlights.map((a, i) => (

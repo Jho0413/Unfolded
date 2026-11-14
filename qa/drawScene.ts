@@ -29,6 +29,11 @@ export type DrawSceneDeps = {
   board: () => BoardState;
   /** False once Ask has closed: a sketch arriving then is dropped. */
   isAsking: () => boolean;
+  /**
+   * Which Ask session this is (changes each time Ask opens), so a sketch
+   * asked for in an earlier session is dropped even if Ask reopened.
+   */
+  askId: () => number;
   /** Draws a validated sketch on top of the board, or on an empty one. */
   drawSketch: (sketch: Sketch, fresh: boolean) => void;
   /** Shows SKETCH_FAILED and tells the agent (the Ask panel does both). */
@@ -49,19 +54,23 @@ export function drawScene(
   description: string,
   fresh: boolean,
 ): Promise<void> {
-  return requestSketch(deps, description, fresh).catch((err: unknown) =>
-    fail(deps, description, String(err)),
+  const askId = deps.askId();
+  // Still the session that asked for this sketch?
+  const current = () => deps.isAsking() && deps.askId() === askId;
+  return requestSketch(deps, current, description, fresh).catch(
+    (err: unknown) => fail(current, deps, description, String(err)),
   );
 }
 
 async function requestSketch(
   deps: DrawSceneDeps,
+  current: () => boolean,
   description: string,
   fresh: boolean,
 ): Promise<void> {
   const board = boardToSend(deps.board(), fresh);
   if (board === null) {
-    return fail(deps, description, "board over MAX_BOARD_OBJECTS");
+    return fail(current, deps, description, "board over MAX_BOARD_OBJECTS");
   }
   const doFetch = deps.fetch ?? fetch;
   const res = await doFetch("/api/sketch", {
@@ -71,21 +80,27 @@ async function requestSketch(
     signal: AbortSignal.timeout(deps.timeoutMs ?? SKETCH_FETCH_TIMEOUT_MS),
   });
   const body: unknown = await res.json().catch(() => null);
-  if (!deps.isAsking()) return; // Ask closed meanwhile: nothing to draw on
-  if (!res.ok) return fail(deps, description, `HTTP ${res.status}`);
+  if (!current()) return; // Ask closed meanwhile: nothing to draw on
+  if (!res.ok) return fail(current, deps, description, `HTTP ${res.status}`);
   const parsed = SketchResponse.safeParse(body);
-  if (!parsed.success) return fail(deps, description, "bad response");
+  if (!parsed.success) return fail(current, deps, description, "bad response");
   const checked = validateSketch(parsed.data.sketch, {
     board: deps.board(),
     fresh,
   });
-  if (!checked.ok) return fail(deps, description, checked.errors.join("; "));
+  if (!checked.ok)
+    return fail(current, deps, description, checked.errors.join("; "));
   deps.drawSketch(checked.value, fresh);
 }
 
-function fail(deps: DrawSceneDeps, description: string, reason: string): void {
+function fail(
+  current: () => boolean,
+  deps: DrawSceneDeps,
+  description: string,
+  reason: string,
+): void {
   console.warn("[qa] draw_scene failed:", reason);
-  if (deps.isAsking()) deps.sketchFailed(description, reason);
+  if (current()) deps.sketchFailed(description, reason);
 }
 
 /**

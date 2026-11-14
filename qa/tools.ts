@@ -28,7 +28,10 @@ export type ClientToolDeps = {
   send: (event: PlayerEvent) => TransitionResult;
   /** True while the player is `asking`. A tool call can land after Ask closed. */
   isAsking: () => boolean;
-} & Pick<DrawSceneDeps, "drawSketch" | "sketchFailed" | "fetch" | "timeoutMs">;
+} & Pick<
+  DrawSceneDeps,
+  "askId" | "drawSketch" | "sketchFailed" | "fetch" | "timeoutMs"
+>;
 
 /** What a tool that changes the board or the step returns after Ask closed. */
 export const ASK_CLOSED = "Ask is closed";

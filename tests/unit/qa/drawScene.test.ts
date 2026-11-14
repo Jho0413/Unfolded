@@ -54,6 +54,7 @@ function setup(
   const deps = {
     board: over.board ?? (() => board),
     isAsking: vi.fn(() => true),
+    askId: vi.fn(() => 1),
     drawSketch: vi.fn<DrawSceneDeps["drawSketch"]>(),
     sketchFailed: vi.fn<DrawSceneDeps["sketchFailed"]>(),
     fetch: fetchMock as unknown as typeof fetch,
@@ -176,6 +177,23 @@ describe("drawScene", () => {
     for (const d of [ok.deps, bad.deps]) {
       expect(d.drawSketch).not.toHaveBeenCalled();
       expect(d.sketchFailed).not.toHaveBeenCalled();
+    }
+  });
+
+  it("drops a sketch, or a failure, from an earlier Ask session after Ask reopened", async () => {
+    for (const reply of [
+      async () => json({ sketch: onBoard }),
+      async () => json({ error: "Couldn't draw that." }, 502),
+    ]) {
+      let session = 1;
+      const { deps } = setup(async () => {
+        session = 2; // closed and reopened while the sketch was being made
+        return reply();
+      });
+      deps.askId.mockImplementation(() => session);
+      await drawScene(deps, "x", false);
+      expect(deps.drawSketch).not.toHaveBeenCalled();
+      expect(deps.sketchFailed).not.toHaveBeenCalled();
     }
   });
 

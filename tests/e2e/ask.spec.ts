@@ -185,6 +185,21 @@ test.describe("client tools on /dev/ask (ROADMAP Q4)", () => {
   });
 });
 
+/** Every data-* attribute on the whiteboard, in document order. */
+function boardAttributes(page: Page): Promise<string> {
+  return page
+    .getByTestId("whiteboard")
+    .evaluate((svg) =>
+      [svg, ...svg.querySelectorAll("*")]
+        .flatMap((el) =>
+          [...el.attributes]
+            .filter((a) => a.name.startsWith("data-"))
+            .map((a) => `${a.name}=${a.value}`),
+        )
+        .join("\n"),
+    );
+}
+
 const SKETCH = {
   objects: [{ kind: "text", id: "note", x: 600, y: 400, text: "row 1" }],
   actions: [{ do: "highlight", target: { id: "q", row: 0 }, atMs: 0 }],
@@ -196,20 +211,24 @@ test.describe("draw_scene on /dev/ask (ROADMAP Q5)", () => {
   }) => {
     let release: () => void = () => {};
     const gate = new Promise<void>((r) => (release = r));
-    let body: {
-      description?: string;
-      fresh?: boolean;
-      board?: { objects: { object: { id: string } }[] };
-    } = {};
     await page.route("**/api/sketch", async (route) => {
-      body = route.request().postDataJSON();
       await gate;
       await route.fulfill({ json: { sketch: SKETCH } });
     });
     await open(page);
     await toPlaying(page);
+    const before = await boardAttributes(page);
     await askAndConnect(page);
+    const request = page.waitForRequest("**/api/sketch");
     await typeQuestion(page, "can you draw it?");
+    const body = (await request).postDataJSON() as {
+      description: string;
+      fresh: boolean;
+      board: { objects: { object: { id: string } }[] };
+    };
+    expect(body.description).toBe("Circle the first row of q");
+    expect(body.fresh).toBe(false);
+    expect(body.board.objects.map((o) => o.object.id)).toEqual(["q", "a"]);
     // The agent answers at once: draw_scene doesn't wait for the sketch.
     await expect(
       page.getByTestId("ask-transcript").locator('[data-role="agent"]').last(),
@@ -221,15 +240,18 @@ test.describe("draw_scene on /dev/ask (ROADMAP Q5)", () => {
       .getByTestId("whiteboard")
       .locator('[data-object-id="note"]');
     await expect(note).toHaveCount(0);
-    expect(body.description).toBe("Circle the first row of q");
-    expect(body.fresh).toBe(false);
-    expect(body.board?.objects.map((o) => o.object.id)).toEqual(["q", "a"]);
     release();
     await expect(note).toHaveCount(1);
+    // The sketch's highlight on q row 0 shows too.
+    await expect
+      .poll(async () => (await boardAttributes(page)).includes("accent"))
+      .toBe(true);
     await expect(notice(page)).toHaveCount(0);
-    // Closing Ask throws the drawing away.
+    // Closing Ask throws the drawing away: the board's data-* attributes
+    // match those from before Ask.
     await page.getByRole("button", { name: "Close" }).click();
     await expect(note).toHaveCount(0);
+    await expect.poll(() => boardAttributes(page)).toBe(before);
   });
 
   for (const [name, reply] of [

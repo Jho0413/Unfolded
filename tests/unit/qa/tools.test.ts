@@ -79,6 +79,7 @@ function harness(start: PlayerState) {
     highlight: (a) => highlights.push(a),
     send,
     isAsking: () => state.kind === "asking",
+    askId: () => 1,
     drawSketch: () => {},
     sketchFailed: () => {},
     fetch: vi.fn(() => new Promise<Response>(() => {})),
