@@ -458,6 +458,7 @@ The developer gets the full error in the server log, tagged with the route, less
 | Ask | Microphone permission denied | "Mic is off. Type your question; the answer will appear as text." | Typed input (text-only session) |
 | Tool | `draw_scene` sketch invalid, or the sketch request fails | The Ask panel shows "Couldn't draw that." The agent is told through `sendContextualUpdate()` (it doesn't wait for a result, section 8) | The agent answers in words |
 | Tool | `highlight` on an unknown id | Agent told `unknown object "x"` | None needed |
+| Tool | `highlight` or `go_to_step` arrives after Ask closed (tool calls are asynchronous) | Agent told "Ask is closed"; the board and the step don't change | None needed |
 | Server start | Missing required env var for the mode (section 9) | The server refuses to start and names the missing var | Fix `.env.local` |
 
 ## 8. Q&A mode
@@ -485,8 +486,8 @@ The developer gets the full error in the server log, tagged with the route, less
 
 | Tool | Parameters | Waits for result? | Effect | Returns to the agent |
 |---|---|---|---|---|
-| `highlight` | `target_id`, `row?`, `col?` | yes | Highlights part of the current board | `"ok"`, or the validation error |
-| `go_to_step` | `step` (1-based, as spoken) | yes | `goToStep(step - 1)`, which loads once Ask closes | `"ok"`, or `"no step n"` |
+| `highlight` | `target_id`, `row?`, `col?` | yes | Highlights part of the current board | `"ok"`, the validation error, or `"Ask is closed"` |
+| `go_to_step` | `step` (1-based, as spoken) | yes | `goToStep(step - 1)`, which loads once Ask closes | `"ok"`, `"no step n"`, or `"Ask is closed"` |
 | `draw_scene` | `description` (plain words), `fresh?` (default false) | **no** | Browser → `POST /api/sketch` (low effort) with the current board → `Sketch` → validated → drawn on top of the current board when it arrives, or on an empty board with `fresh: true` | nothing, so the agent keeps talking while the sketch is made |
 | `simplify_upcoming` | `reason` | no | Posts a signal (section 5.4) | nothing |
 
