@@ -74,11 +74,13 @@ app/
   dev/board/scenes.ts               the dev page's fixed BoardState and demo-m1 scenes
   dev/player/page.tsx               dev only: the player with a fake two-step lesson (player tests); same gate (dev/devOnly.ts)
   dev/player/audio/route.ts         dev only: that lesson's silent audio (or broken, or missing)
+  dev/ask/page.tsx, AskDemo.tsx     dev only: the Ask panel driven by the player machine and a fake three-step lesson (?replay=1 as in a replay run); same gate
 instrumentation.ts                  register(): validates env once at server start (not at build)
 shared/                             imported by server and browser (the contract)
   scene.ts                          zod schemas: board objects, actions, step, sketch, board state
   lesson.ts                         zod schemas: lesson plan, API responses
   validate.ts                       checks that zod can't express (ids, cues, bounds)
+  latex.ts                          KaTeX options for untrusted tex (validator and renderer)
   tools.ts                          the client tool names and parameter schemas (one list for the agent config and qa/tools.ts)
 lib/                                server-only (import "server-only")
   config.ts                         model ids, effort, limits, paths: one place
@@ -100,7 +102,10 @@ player/                             browser
   Player.tsx                        the whiteboard, controls, status and the ?debug=1 overlay
 qa/                                 browser
   conversation.ts                   adapter over @elevenlabs/react useConversation; a scripted fake when NEXT_PUBLIC_FAKE_APIS=1
-  AskPanel.tsx                      voice + typed input, through conversation.ts
+  fakeConversation.ts               the scripted fake: canned agent turns, calls tool handlers (window.__qaFake in fake builds, for Playwright)
+  types.ts, callTool.ts             the adapter's types; a tool call checked against shared/tools.ts, then handled
+  context.ts                        pure: the sendContextualUpdate() message, and the narration heard by time t
+  AskPanel.tsx                      voice + typed input, through conversation.ts; shows the Ask messages of section 7
   tools.ts                          client tool handlers, typed by shared/tools.ts
 scripts/                            dev scripts: make:m1, seed:m2
 agent/                              ElevenLabs CLI config: the agent (prompt, voice, LLM) and its client tools, plus the CLI's tracking file
@@ -180,14 +185,14 @@ type Sketch = {                               // what /api/sketch returns for a 
 | A malformed marker (`[[Row 1]]`, a stray `[[` or `]]`) | rejected: `malformed marker "[[Row 1]]"` (otherwise it would be read aloud) |
 | A marker in `narration` that no action uses | allowed (it's ignored) |
 | A `target.id`, or an anchor's `id`, with no object | rejected: `unknown object "x"` |
-| `row` or `col` outside the matrix, or set on a non-matrix (in a target or an anchor) | rejected: `target out of range` |
+| `row` or `col` outside the matrix, or set on a non-matrix (in a target or an anchor) | rejected: `target out of range "x"` (x is the id the target or anchor names) |
 | `write` on a matrix without both `row` and `col` | rejected: `write needs a cell` |
 | `write` on a `latex`, `arrow` or `image` | rejected: `can't write to "x"` |
 | `show` with `row` or `col` | rejected: `show needs a whole object` |
 | `move` on an `arrow` | rejected: `can't move "x"` |
 | `show` on a visible object, `hide` on a hidden one, or `hide` on a part that hasn't moved | allowed (no change) |
-| `tex` that KaTeX can't parse | rejected: `invalid LaTeX in "x"` (the renderer also uses `throwOnError: false` as a safety net) |
-| An object, or an `{x, y}` point in an anchor, outside the 1600 × 900 canvas (for a matrix, its whole cell box; for `text` and `latex`, only their x,y) | rejected: `off canvas` |
+| `tex` that KaTeX can't parse, or that uses a command `trust: false` refuses (`\href`, `\url`, `\includegraphics`, `\htmlClass` and the like) | rejected: `invalid LaTeX in "x"` (the renderer also uses `throwOnError: false` as a safety net) |
+| An object, or an `{x, y}` point in an anchor, outside the 1600 × 900 canvas (for a matrix, its whole cell box; for `text` and `latex`, only their x,y) | rejected: `off canvas "x"` (x is the object, an arrow for its own point ends, or for a `move` to a point, the object that moves) |
 | Two objects with the same id | rejected: `duplicate id "x"` |
 | Narration longer than `config.maxNarrationChars` after the markers are stripped | rejected: `narration too long` |
 | Narration with nothing left after the markers are stripped (only markers or spaces) | rejected: `narration empty` (TTS would fail after validation, too late to retry) |
@@ -283,7 +288,7 @@ Property-based tests (fast-check) check three things:
 sceneAt(objects: BoardObject[], timed: { action; startMs; durationMs }[], tMs: number): BoardState
 ```
 
-- `BoardState` (a zod schema in `shared/scene.ts`, since `/api/sketch` receives it) is every object with its visibility, highlight, position and value at `tMs`, plus the moved copies of matrix parts. For each action in progress, it also includes how far along it is (0..1).
+- `BoardState` (a zod schema in `shared/scene.ts`, since `/api/sketch` receives it) is every object with its visibility, highlight, position and value at `tMs`, plus the moved copies of matrix parts. For each action in progress, it also includes how far along it is (0..1) and, for a matrix highlight, unhighlight or write, the cells it changed.
 - **Lesson mode:** `timed` comes from `cueTimes`, and `tMs` is `audio.currentTime * 1000`.
 - **Q&A mode:** the lesson board stays at `pausedT`, with the Q&A drawing on top (section 8). `objects` is the step's objects plus each sketch's objects. `timed` is the step's actions that started by `pausedT`, plus each Q&A action at `pausedT` + the time since Ask opened when it arrived (+ `atMs` for a sketch). `tMs` is `pausedT` + the time since Ask opened. After a `fresh` sketch, the step and earlier sketches are left out.
 - **Timing rules** (what `sceneAt` does with each action):
@@ -291,7 +296,8 @@ sceneAt(objects: BoardObject[], timed: { action; startMs; durationMs }[], tMs: n
   - `show`, `highlight`, `unhighlight` and `write` take effect when they start. `hide` takes effect when it ends, so the renderer can fade it out using progress.
   - `move` slides in a straight line from where its target was when the move started to where its anchor was then. Its path doesn't change if the anchor moves later.
   - An action is in `active` while `startMs <= tMs < startMs + durationMs`. A 0 ms action is complete at its start and never active.
-  - An action that changes nothing is never in `active`: one that, once complete, would leave the board as it would be with every earlier action complete (for a `hide`, which takes effect when it ends: with the earlier actions as they are then, so a shorter `hide` during a longer one is active). For example a `show` of a visible object, a `highlight` in the colour its cells already have, or a `write` of the value already there. So the renderer doesn't fade in an object, value or highlight that is already there. The check is per action, not per cell: a highlight that changes some of its cells is active, and fades in all of them, including those that already had its colour.
+  - An action that changes nothing is never in `active`: one that, once complete, would leave the board as it would be with every earlier action complete (for a `hide`, which takes effect when it ends: with the earlier actions as they are then, so a shorter `hide` during a longer one is active). For example a `show` of a visible object, a `highlight` in the colour its cells already have, or a `write` of the value already there. So the renderer doesn't fade in an object, value or highlight that is already there. The check is per action: a highlight that changes some of its cells is active.
+  - A `highlight`, `unhighlight` or `write` on a matrix also lists its `cells` in `active`: the cells [row, col] it changed (judged as above) that no later started action has changed since (a later `highlight` or `unhighlight` for a highlight, a later `write` for a write). The renderer fades in only those, so a cell that already had the colour or value doesn't blink, and a cell a later 0 ms action has set is shown at once.
   - A `show` that starts while a `hide` of the same object is in progress takes over with no jump: the renderer shows the larger of the two opacities, so the object keeps fading until the show overtakes the hide, then fades in. Once the show ends, the hide leaves `active` (the show applies after it, so the object stays visible). A `hide` during a `show` mirrors this with the smaller opacity: the object keeps fading in until the hide overtakes the show.
   - `unhighlight` with a `color` clears only that colour. Without one, it clears every colour.
   - A whole-matrix highlight sets every cell in `cellHighlight`. A matrix's own `highlight` stays `null`.
@@ -301,6 +307,7 @@ sceneAt(objects: BoardObject[], timed: { action; startMs; durationMs }[], tMs: n
   - `player/sceneAt.ts` also exports `timeline(actions, cueTimes)`, which builds `timed` in lesson mode, and `resolveAnchor(board, anchor)`, which gives the renderer arrow ends. The renderer reuses its target helpers (`partKey`, `isPart`, `coversCell`, `highlightColor`) rather than copying them.
 - Back, Replay and scrubbing are just seeks on the audio element. There's no animation state to undo.
 - `Whiteboard.tsx` renders `BoardState` as SVG on each animation frame. Positions (moves included) come from `sceneAt`; the renderer only fades shows, hides, highlights and writes by each action's progress, and exposes state as `data-*` attributes for tests.
+- **Latex and arrows on the board.** `latex` is KaTeX's HTML in a `foreignObject` centred on x,y, rendered with `shared/latex.ts`'s `KATEX_OPTIONS` (trust off, `maxSize` and `maxExpand` capped; `validate.ts` uses the same options, and rejects tex that uses a command trust refuses) and `throwOnError: false`, so tex that slips through shows as KaTeX's red source text instead of breaking the board (if KaTeX fails outright, the source shows as plain text). An arrow resolves its ends with `resolveAnchor` on every frame. An end on a point is exact; an end on a target stops just outside the target's box (cells, text box, image; for latex, a box estimated from KaTeX's output, since its real size is only known after layout), so the head doesn't cover what it points at. The label sits beside the middle of the line, far enough out that its box clears it. `data-from-*`/`data-to-*` are the resolved anchors.
 - Motion is only used for UI chrome, such as panels and buttons, not for board objects, so the board always matches the clock.
 
 ### 5.4 Adaptation
@@ -442,6 +449,7 @@ The developer gets the full error in the server log, tagged with the route, less
 | Run file | Reading the file fails for another reason | 500 "Couldn't read this file." (the error is logged) | As above |
 | Ask | Token route fails, or the agent can't connect | "Questions are unavailable right now." | The lesson carries on; close the panel |
 | Ask | Session drops mid-question | "Q&A ended unexpectedly." | Ask again |
+| Ask | Replay mode (`REPLAY_RUN`): the page tells the panel, which never asks for a token | "Q&A needs a connection." | Close the panel |
 | Ask | Microphone permission denied | "Mic is off. Type your question; the answer will appear as text." | Typed input (text-only session) |
 | Tool | `draw_scene` sketch invalid, or the sketch request fails | The Ask panel shows "Couldn't draw that." The agent is told through `sendContextualUpdate()` (it doesn't wait for a result, section 8) | The agent answers in words |
 | Tool | `highlight` on an unknown id | Agent told `unknown object "x"` | None needed |
@@ -456,6 +464,7 @@ The developer gets the full error in the server log, tagged with the route, less
   3. `startSession({ conversationToken })` starts the session through `qa/conversation.ts`.
      - That adapter is the only file that imports `@elevenlabs/react`, which also needs a `ConversationProvider` around the lesson page.
      - With `NEXT_PUBLIC_FAKE_APIS=1` the adapter is a scripted fake: it replays canned agent turns and calls the tool handlers directly, so Playwright can test Q&A without a network.
+- **The panel and the machine.** `AskPanel` takes `open` (the player is `asking`), `replay`, the context, the tool handlers (Q4) and three callbacks the page turns into machine events: `onAsk` (`ask`), `onClose` (`closeAsk`) and `onAgentDisconnected` (`agentDisconnected`, when the session drops with an error). The panel shows the Ask messages of section 7 itself, so the page doesn't show the machine's "Q&A ended unexpectedly." notice again. A session the agent ends normally closes Ask like `closeAsk`, with no message.
 - **Typed questions** go through `sendUserMessage(text)` to the same agent.
   - While the learner types, the mic is muted so venue noise doesn't start a turn, and `sendUserActivity()` keeps the agent from talking over them.
   - If mic permission is denied, the session starts text-only and answers appear as text. Spike S2 confirms that text-only answers aren't spoken.
@@ -464,6 +473,7 @@ The developer gets the full error in the server log, tagged with the route, less
   - the current step's narration up to the point where it was paused (or, while a step is loading, that step's goal from the plan)
   - the ids of the objects on the board
   - the questions asked earlier in this lesson
+  - after a `go_to_step` jump, that step as the next one: the board ids and narration stay those of the frozen board until Ask closes
 
   So the agent knows what "this" means and which ids `highlight` can use. The browser also sends one when a `draw_scene` sketch fails, so the agent answers in words.
 - **Client tools.** Names and parameters are in `shared/tools.ts`. The agent config and `qa/tools.ts` both use that list, and a test checks they match.
@@ -537,6 +547,21 @@ The developer gets the full error in the server log, tagged with the route, less
 Each spike is time-boxed to 60 minutes, and its answer is written back into this file:
 
 - **S1:** the exact shape of ElevenLabs' timestamps for our narration (how characters are counted, normalisation, whether `alignment` can be null), and latency per step.
+  - **Answer (2026-11-14, #10).** Tested on the M1 narration with markers stripped by `stripMarkers` (274 characters), plus one short Unicode probe. The real response is `lib/fakes/fixtures/tts-demo-m1.json` (its `audio_base64` is cut to 4 KB).
+  - **Voice:** `ELEVENLABS_VOICE_ID=Xb7hH8MSUJpSbSDYk0k2` (Alice, "Clear, Engaging Educator": British, premade, built for informative/educational use). It was compared with Matilda (`XrExE9yKIg1WjnnlVkGX`) and Daniel (`onwK4e9ZLuTAKqWW03F9`). Alice reads M1 in 19.0 s, Matilda in 19.3 s, and Daniel in 23.3 s, which is slow for a 30 s step budget. The agent (Q1) uses the same id.
+  - **Model:** `eleven_multilingual_v2`, sent as `model_id` with `output_format=mp3_44100_128`. `eleven_v4` also returns timestamps in the same shape, but it took 5.4 s rather than 1.2–1.8 s, so we stay on v2.
+  - **Response shape:** `{ audio_base64, alignment, normalized_alignment, quality_check }`. `quality_check` was always `null`. `alignment` has `characters: string[]`, `character_start_times_seconds: number[]` and `character_end_times_seconds: number[]`.
+    - The three arrays are the same length. Times are in seconds to the millisecond, they start at 0, never decrease, and touch end to start with no gaps.
+    - Some characters that aren't spoken (`√`, an emoji, the space after it) get zero duration (start = end).
+  - **Character counting:** `alignment.characters` echoes the text we sent exactly (`characters.join("") === text`), with **one entry per Unicode code point**.
+    - An emoji is one entry but two UTF-16 units in JavaScript.
+    - Nothing is normalised: a combining accent (`e` + U+0301) stays as two entries, and `é`, `²`, `×`, `½` and CJK are kept as written.
+    - So index-for-index lookup only works for text without astral characters. The walk in `cues.ts` handles every case.
+  - **`normalized_alignment`** is the text as spoken, not as sent: it gets a leading and trailing space, and `x²` → `x2`, `½` → `1/2`, `×` → `x`, `√4` → `4`, `注意` → `Zhu Yi`. We ignore it.
+    - Maths symbols are read badly (`√` is skipped). Narration must write maths out in words ("x squared", "the square root of four"), as M1 already does. G1's step prompt should say so.
+  - **Null alignment:** never seen. Even an emoji-only or space-only text got a one-entry alignment. `cues.ts` still throws `no alignment` on `null` or empty arrays (checked).
+  - **Latency** (one call each, warm): 1.2–1.8 s for the 274-character M1 narration (about 19 s of audio), 0.46 s for 45 characters, and 0.25 s for 1 character. TTS is small next to the Claude step call.
+  - **`cues.ts` on the real response:** no fix needed. On all three voices, every M1 cue time equals the direct alignment-index start (Alice: row 2601, col 3994, slide 5213, pair1 8498, pair2 9787, add 11146, total 12318, drop 14222, done 16718 ms). On the Unicode probe, cues after the emoji, at CJK, at a combining accent and at the end all land on the right entry. This hasn't been checked by ear: C1's ±100 ms check against the audio still applies.
 - **S2:** the Q&A agent's LLM, comparing two candidates on latency and tool-calling. Also: whether text-only sessions speak, and how long a `draw_scene` sketch takes.
 - **S3:** whether Sonnet 5.5 writes valid, good `Step` scripts from the Attention paper and from a second, different paper (non-ML or math-heavy), and the effort level needed for steps, plans and sketches.
 - **S4:** which fal image model to use for the cover (M3) and for in-scene images (E1, stretch), and its latency. Download the images into `runs/`, in case fal's URLs expire. Keep the generations few: the budget is about 25 US dollars per teammate.

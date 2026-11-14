@@ -118,6 +118,16 @@ describe("cellProgress", () => {
     // A 0 ms warn highlight since: the cell is warn, shown at once.
     expect(cellProgress([hl], "highlight", "m", 0, 0, "warn")).toBe(1);
   });
+  it("with cells, only the cells the action changed fade in", () => {
+    const hl: ActiveAction = {
+      action: { do: "highlight", target: { id: "m" }, durationMs: 300 },
+      progress: 0.4,
+      cells: [[1, 0]],
+    };
+    expect(cellProgress([hl], "highlight", "m", 1, 0, "accent")).toBe(0.4);
+    // Already accent before the action: shown at once, no blink.
+    expect(cellProgress([hl], "highlight", "m", 0, 0, "accent")).toBe(1);
+  });
   it("a write in progress fades its value in", () => {
     const write: ActiveAction = {
       action: {
@@ -227,6 +237,30 @@ describe("Whiteboard", () => {
   it("a show of a visible object doesn't blink: it stays fully opaque", () => {
     const html = mid({ do: "show", target: { id: "t" }, durationMs: 400 });
     expect(html).toMatch(/data-object-id="t"[^>]*data-opacity="1"/);
+  });
+  it("a highlight over cells that already had its colour fades in only the new ones", () => {
+    // Cell 0,0 is accent; then all of m goes accent: only 0,1 fades in.
+    const timed: TimedAction[] = [
+      {
+        action: {
+          do: "highlight",
+          target: { id: "m", row: 0, col: 0 },
+          durationMs: 0,
+        },
+        startMs: 0,
+        durationMs: 0,
+      },
+      {
+        action: { do: "highlight", target: { id: "m" }, durationMs: 400 },
+        startMs: 100,
+        durationMs: 400,
+      },
+    ];
+    const html = renderToStaticMarkup(
+      <Whiteboard state={sceneAt(objects, timed, 300)} />,
+    );
+    expect(html).toMatch(/data-cell="0,0"[^>]*data-highlight-opacity="1"/);
+    expect(html).toMatch(/data-cell="0,1"[^>]*data-highlight-opacity="0.5"/);
   });
   it("a moved single cell renders as a one-cell copy", () => {
     const html = mid({

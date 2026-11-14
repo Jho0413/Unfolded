@@ -31,6 +31,49 @@ export const HIGHLIGHT: Record<
 export const TEXT_SIZE = { s: 24, m: 32, l: 48 } as const;
 export const CELL_FONT = 26;
 
+/**
+ * A text object's box (its highlight, and where arrows stop), from a rough
+ * width: a pure render has no layout pass to measure the text.
+ */
+export function textBox(text: string, fontSize: number) {
+  const width = Math.max(1, [...text].length) * fontSize * 0.62;
+  return { w: width + fontSize, h: fontSize * 1.4 };
+}
+
+/** Font size (px) a latex object's formula is set in: the size of a medium text. */
+export const LATEX_FONT = TEXT_SIZE.m;
+/**
+ * The box a latex object is laid out in, centred on its x,y. KaTeX's size is
+ * only known after layout, so the formula is centred in a box big enough for
+ * any lesson formula; what overflows it is still drawn.
+ */
+export const LATEX_BOX = { w: 1200, h: 400 } as const;
+
+/** Padding (px) around a formula, inside its highlight box. */
+export const LATEX_PAD = { x: 12, y: 4 } as const;
+/** KaTeX sets formulas at 1.21em of the surrounding font (its stylesheet). */
+export const KATEX_EM = 1.21;
+/** Average formula glyph width, in ems, for estimating a formula's width. */
+export const GLYPH_EM = 0.6;
+/** Colour of tex KaTeX can't render (KaTeX's own default). */
+export const LATEX_ERROR = "#cc0000";
+
+/**
+ * Arrow look. An end that names a target stops `margin` outside the target's
+ * box, so the head points at the object instead of covering it; a point end
+ * is exact.
+ */
+export const ARROW = {
+  stroke: 3,
+  head: { len: 18, w: 14 },
+  margin: 10,
+  labelFont: 22,
+  /** Clear space between the line and the nearest edge of its label's box. */
+  labelGap: 6,
+  /** The board-coloured outline behind a label, so it reads over the line. */
+  labelHalo: 6,
+} as const;
+
 /** The `data-highlight` value of a highlight. */
 export function highlightAttr(color: HighlightColor | null | undefined) {
   return color ?? "none";
@@ -81,10 +124,21 @@ function setsCurrent(action: Action, current: string | null): boolean {
 }
 
 /**
- * Progress (0..1) of the latest in-progress action of kind `kind` on matrix
- * cell (r, c) that set its `current` highlight or value, or 1 if none: a new
- * highlight or written value fades in. An unhighlight takes effect at once
- * (sceneAt clears the colour when it starts), so it doesn't fade out.
+ * Whether an in-progress action changed matrix cell (r, c): one of its
+ * `cells` (set by sceneAt), or any cell its target covers if `cells` is absent.
+ */
+function changedCell(a: ActiveAction, r: number, c: number): boolean {
+  return a.cells
+    ? a.cells.some(([cr, cc]) => cr === r && cc === c)
+    : coversCell(a.action.target, r, c);
+}
+
+/**
+ * Progress (0..1) of the latest in-progress action of kind `kind` that
+ * changed matrix cell (r, c) and set its `current` highlight or value, or 1
+ * if none: a new highlight or written value fades in, and a cell that already
+ * had it doesn't blink. An unhighlight takes effect at once (sceneAt clears
+ * the colour when it starts), so it doesn't fade out.
  */
 export function cellProgress(
   active: readonly ActiveAction[],
@@ -95,14 +149,14 @@ export function cellProgress(
   current: string | null,
 ): number {
   let p = 1;
-  for (const { action, progress } of active)
+  for (const a of active)
     if (
-      action.do === kind &&
-      action.target.id === id &&
-      coversCell(action.target, r, c) &&
-      setsCurrent(action, current)
+      a.action.do === kind &&
+      a.action.target.id === id &&
+      changedCell(a, r, c) &&
+      setsCurrent(a.action, current)
     )
-      p = progress;
+      p = a.progress;
   return p;
 }
 

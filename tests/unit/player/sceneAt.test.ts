@@ -711,10 +711,127 @@ describe("sceneAt: an action that changes nothing is never active", () => {
       at(1000, { do: "highlight", target: { id: "m" } }),
       at(1000, { do: "highlight", target: { id: "m", row: 0 }, color: "warn" }),
     ];
+    // timed[1] changed row 1; row 0 was accent already, then warn overwrote it.
     expect(sceneAt(board(), timed, 1200).active).toEqual([
-      { action: timed[1].action, progress: 0.5 },
-      { action: timed[2].action, progress: 0.5 },
+      {
+        action: timed[1].action,
+        progress: 0.5,
+        cells: [
+          [1, 0],
+          [1, 1],
+        ],
+      },
+      {
+        action: timed[2].action,
+        progress: 0.5,
+        cells: [
+          [0, 0],
+          [0, 1],
+        ],
+      },
     ]);
+  });
+});
+
+describe("sceneAt: the cells a matrix action changed", () => {
+  const cellsAt = (timed: TimedAction[], tMs: number) =>
+    sceneAt(board(), timed, tMs).active.map((a) => a.cells);
+
+  it("a highlight lists only the cells that didn't have its colour", () => {
+    const timed = [
+      at(0, { do: "highlight", target: { id: "m", row: 0 }, durationMs: 0 }),
+      at(1000, { do: "highlight", target: { id: "m" } }),
+    ];
+    expect(cellsAt(timed, 1200)).toEqual([
+      [
+        [1, 0],
+        [1, 1],
+      ],
+    ]);
+  });
+
+  it("a cell a later action changed leaves the earlier action's cells", () => {
+    // accent fading in, then a 0 ms warn and a 0 ms accent on cell 0,0:
+    // the cell is accent at once, so the first action no longer fades it.
+    const timed = [
+      at(0, { do: "highlight", target: { id: "m", row: 0 }, durationMs: 1000 }),
+      at(100, {
+        do: "highlight",
+        target: { id: "m", row: 0, col: 0 },
+        color: "warn",
+        durationMs: 0,
+      }),
+      at(200, {
+        do: "highlight",
+        target: { id: "m", row: 0, col: 0 },
+        durationMs: 0,
+      }),
+    ];
+    expect(cellsAt(timed, 500)).toEqual([[[0, 1]]]);
+  });
+
+  it("a write on another cell, or a highlight, doesn't take a write's cell", () => {
+    const timed = [
+      at(0, { do: "write", target: { id: "m", row: 0, col: 0 }, value: "9" }),
+      at(100, { do: "highlight", target: { id: "m" }, durationMs: 0 }),
+      at(100, {
+        do: "write",
+        target: { id: "m", row: 1, col: 1 },
+        value: "8",
+        durationMs: 0,
+      }),
+    ];
+    expect(cellsAt(timed, 200)).toEqual([[[0, 0]]]);
+  });
+
+  it("a later write to the same cell takes it from an earlier write", () => {
+    const timed = [
+      at(0, { do: "write", target: { id: "m", row: 0, col: 0 }, value: "9" }),
+      at(100, {
+        do: "write",
+        target: { id: "m", row: 0, col: 0 },
+        value: "7",
+        durationMs: 0,
+      }),
+    ];
+    expect(cellsAt(timed, 200)).toEqual([[]]);
+  });
+
+  it("an unhighlight lists the cells it cleared", () => {
+    const timed = [
+      at(0, { do: "highlight", target: { id: "m", row: 0 }, durationMs: 0 }),
+      at(100, { do: "unhighlight", target: { id: "m" } }),
+    ];
+    expect(cellsAt(timed, 200)).toEqual([
+      [
+        [0, 0],
+        [0, 1],
+      ],
+    ]);
+  });
+
+  it("an unhighlight then a re-highlight take the cells from an earlier highlight", () => {
+    // accent fading in on row 0; cell 0,0 is cleared, then accent again at
+    // once: it shows fully, so the first highlight keeps only 0,1.
+    const timed = [
+      at(0, { do: "highlight", target: { id: "m", row: 0 }, durationMs: 1000 }),
+      at(100, {
+        do: "unhighlight",
+        target: { id: "m", row: 0, col: 0 },
+        durationMs: 0,
+      }),
+      at(200, {
+        do: "highlight",
+        target: { id: "m", row: 0, col: 0 },
+        durationMs: 0,
+      }),
+    ];
+    expect(cellsAt(timed, 500)).toEqual([[[0, 1]]]);
+  });
+
+  it("actions on other objects have no cells", () => {
+    const timed = [at(0, { do: "highlight", target: { id: "t" } })];
+    expect(sceneAt(board(), timed, 100).active[0]).not.toHaveProperty("cells");
   });
 });
 

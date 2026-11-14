@@ -1,4 +1,4 @@
-// The whiteboard renderer on /dev/board (ROADMAP P3). Asserts on data-*
+// The whiteboard renderer on /dev/board (ROADMAP P3, P7). Asserts on data-*
 // attributes, never pixels, and checks timing by loading a time (?t=ms), never
 // by waiting. demo-m1 cue times are in app/dev/board/scenes.ts.
 import { expect, type Locator, type Page, test } from "@playwright/test";
@@ -117,6 +117,143 @@ test.describe("fixed BoardState", () => {
     await expect(cell(one, 2, 0)).toHaveAttribute("data-highlight", "warn");
     expect(await numberAttr(one, "data-cx")).toBe(1150);
     expect(await numberAttr(one, "data-cy")).toBe(560);
+  });
+
+  test("latex: KaTeX formula centred on its x,y, with a highlight", async ({
+    page,
+  }) => {
+    const eq = object(page, "eq");
+    await expect(eq).toHaveAttribute("data-kind", "latex");
+    await expect(eq).toHaveAttribute("data-visible", "true");
+    await expect(eq).toHaveAttribute("data-highlight", "accent");
+    await expect(eq.locator("[data-latex-highlight]")).toBeVisible();
+    const formula = eq.locator(".katex-html");
+    await expect(formula).toBeVisible();
+    await expect(eq.locator(".katex-error")).toHaveCount(0);
+    // The one layout check in this file: KaTeX's size is only known after
+    // layout, so data-cx can't show the formula is centred. The laid-out
+    // formula's centre is (330, 520) on the 1600 x 900 canvas, to ~5 px.
+    const board = await page.getByTestId("whiteboard").boundingBox();
+    const box = await formula.boundingBox();
+    const scale = board!.width / 1600;
+    expect(box!.x + box!.width / 2).toBeCloseTo(board!.x + 330 * scale, -1);
+    expect(box!.y + box!.height / 2).toBeCloseTo(board!.y + 520 * scale, -1);
+  });
+
+  test("tex that KaTeX can't parse: shown as an error, the board still draws", async ({
+    page,
+  }) => {
+    const bad = object(page, "bad");
+    await expect(bad.locator(".katex-error")).toHaveText("\\frac{1}{");
+    await expect(object(page, "eq").locator(".katex-html")).toBeVisible();
+  });
+
+  test("latex with trust off: \\href makes no link", async ({ page }) => {
+    const unsafe = object(page, "unsafe");
+    await expect(unsafe.locator(".katex")).toBeVisible();
+    await expect(unsafe.locator("a")).toHaveCount(0);
+    await expect(page.locator("[href^='javascript']")).toHaveCount(0);
+  });
+
+  test("arrow: an end naming a moved part points at its copy", async ({
+    page,
+  }) => {
+    const arrow = object(page, "to_copy");
+    await expect(arrow).toHaveAttribute("data-kind", "arrow");
+    await expect(arrow).toHaveAttribute("data-label-text", "copy");
+    await expect(arrow.locator("line")).toHaveCount(1);
+    await expect(arrow.locator("polygon")).toHaveCount(1);
+    await expect(arrow).toContainText("copy");
+    expect(await numberAttr(arrow, "data-from-x")).toBe(330);
+    expect(await numberAttr(arrow, "data-from-y")).toBe(520);
+    expect(await numberAttr(arrow, "data-to-x")).toBe(900);
+    expect(await numberAttr(arrow, "data-to-y")).toBe(560);
+  });
+
+  test("arrow: point ends, highlighted", async ({ page }) => {
+    const arrow = object(page, "pt");
+    await expect(arrow).toHaveAttribute("data-highlight", "warn");
+    await expect(arrow).toHaveAttribute("data-highlight-opacity", "1");
+    expect(await numberAttr(arrow, "data-from-x")).toBe(1200);
+    expect(await numberAttr(arrow, "data-to-y")).toBe(760);
+    // The base line plus its highlight overlay.
+    await expect(arrow.locator("line")).toHaveCount(2);
+  });
+});
+
+test.describe("arrows through sceneAt", () => {
+  const at = (page: Page, t: number) =>
+    page.goto(`/dev/board?scene=arrows&t=${t}`);
+
+  test("an arrow follows an object that moves", async ({ page }) => {
+    // f moves (300, 300) -> (300, 150) from 1000 ms over 1000 ms.
+    await at(page, 0);
+    const fa = object(page, "fa");
+    expect(await numberAttr(fa, "data-from-y")).toBe(300);
+    expect(await numberAttr(fa, "data-to-x")).toBe(1300);
+
+    await at(page, 1500);
+    expect(await numberAttr(object(page, "f"), "data-cy")).toBeCloseTo(225);
+    expect(await numberAttr(object(page, "fa"), "data-from-y")).toBeCloseTo(
+      225,
+    );
+
+    await at(page, 2000);
+    expect(await numberAttr(object(page, "fa"), "data-from-y")).toBe(150);
+  });
+
+  test("an arrow from a matrix row follows the row's sliding copy", async ({
+    page,
+  }) => {
+    // q row 0 centre (264, 624) -> (1000, 600) from 2000 ms over 1000 ms.
+    await at(page, 1900);
+    const before = object(page, "qa");
+    expect(await numberAttr(before, "data-from-x")).toBe(264);
+    expect(await numberAttr(before, "data-from-y")).toBe(624);
+
+    await at(page, 2500);
+    await expect(copy(page, "q:r0")).toBeVisible();
+    const qa = object(page, "qa");
+    expect(await numberAttr(qa, "data-from-x")).toBeCloseTo(632);
+    expect(await numberAttr(qa, "data-from-y")).toBeCloseTo(612);
+    // The point end doesn't move.
+    expect(await numberAttr(qa, "data-to-x")).toBe(900);
+    // No label, so no text.
+    await expect(qa.locator("text")).toHaveCount(0);
+  });
+
+  test("latex and arrow: hidden until a show, then fade in with progress", async ({
+    page,
+  }) => {
+    await at(page, 2900);
+    for (const id of ["g", "ga"]) {
+      await expect(object(page, id)).toHaveAttribute("data-visible", "false");
+      await expect(object(page, id)).toBeHidden();
+    }
+    // show at 3000, 400 ms.
+    await at(page, 3200);
+    for (const id of ["g", "ga"]) {
+      await expect(object(page, id)).toHaveAttribute("data-visible", "true");
+      await expect(object(page, id)).toHaveAttribute("data-opacity", "0.5");
+    }
+    await at(page, 3400);
+    await expect(object(page, "ga")).toHaveAttribute("data-opacity", "1");
+  });
+
+  test("arrow and latex highlights fade in with progress", async ({ page }) => {
+    // highlight at 3500, 400 ms.
+    await at(page, 3700);
+    const fa = object(page, "fa");
+    await expect(fa).toHaveAttribute("data-highlight", "warn");
+    await expect(fa).toHaveAttribute("data-highlight-opacity", "0.5");
+    const g = object(page, "g");
+    await expect(g).toHaveAttribute("data-highlight", "accent");
+    await expect(g).toHaveAttribute("data-highlight-opacity", "0.5");
+    await at(page, 4000);
+    await expect(object(page, "fa")).toHaveAttribute(
+      "data-highlight-opacity",
+      "1",
+    );
   });
 });
 

@@ -8,12 +8,8 @@ import {
   highlightAttr,
   objectProgress,
   opacityAttr,
+  textBox,
 } from "./style";
-
-/** Rough text width, for the highlight box (no layout pass in a pure render). */
-function approxWidth(text: string, fontSize: number): number {
-  return Math.max(1, [...text].length) * fontSize * 0.62;
-}
 
 export function Text({
   text,
@@ -29,10 +25,9 @@ export function Text({
   const fontSize = TEXT_SIZE[size];
   const opacity = state.visible ? fadeOpacity(active, { id: text.id }) : 0;
   const hl = state.highlight;
-  const boxW = approxWidth(text.text, fontSize) + fontSize;
+  const { w: boxW, h: boxH } = textBox(text.text, fontSize);
   const hlProgress = objectProgress(active, "highlight", text.id, hl);
   const writeProgress = objectProgress(active, "write", text.id, text.text);
-  const boxH = fontSize * 1.4;
   return (
     <g
       data-object-id={text.id}
