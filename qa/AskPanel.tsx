@@ -11,6 +11,7 @@
 // the tutor card (player/cardView.ts askCard) with only the latest question
 // and answer. The connection itself is qa/connector.ts, unchanged.
 import { stripVoiceTags } from "./voiceTags";
+import { AgentTurn, BargeIn } from "./bargeIn";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentSignedUrlResponse, AgentTokenResponse } from "@/shared/lesson";
 import {
@@ -61,7 +62,13 @@ export type AskPanelProps = {
   canAsk?: boolean;
   /** The Captions toggle: off hides a voice answer's text (player/cardView.ts). */
   captions?: boolean;
+  /**
+   * The lesson wants its always-on voice session now (issue #93): the learner can just talk,
+   * and speaking stops the narration (barge-in opens Ask). Off on /dev/ask.
+   */
+  live?: boolean;
 };
+
 
 const NO_DRAWING: { asked: number; drewFor: number | null } = {
   asked: 0,
@@ -94,6 +101,7 @@ export function AskPanel({
   onAgentDisconnected,
   canAsk = true,
   captions = true,
+  live = false,
 }: AskPanelProps) {
   const [session, setSession] = useState<ConnectorState>(
     () => INITIAL_CONNECTOR_STATE,
@@ -131,6 +139,13 @@ export function AskPanel({
     [],
   );
 
+  // Spoken commands wait for the agent to finish speaking (its "Sure." before the narration).
+  const [agentTurn] = useState(() => new AgentTurn());
+  // Barge-in (issue #93): armed while the lesson's session listens with Ask closed.
+  const [bargeIn] = useState(() => new BargeIn());
+  // The learner's privacy switch for the lesson's mic (issue #93).
+  const [muted, setMuted] = useState(false);
+
   const [link] = useState(() => new AgentLink());
   const resolvedTools = useMemo(
     () =>
@@ -139,9 +154,10 @@ export function AskPanel({
             showNotice: setToolNotice,
             tellAgent: (t) => link.tell(t),
             sketchDrawn,
+            afterAgentSpeaks: (fn) => agentTurn.after(fn),
           })
         : tools,
-    [tools, link, sketchDrawn],
+    [tools, link, sketchDrawn, agentTurn],
   );
   // A question typed in the box before Ask was open: sent once Ask opens (text-first).
   const pending = useRef<string | null>(null);
@@ -155,6 +171,9 @@ export function AskPanel({
     onConnect: () => connectorRef.current?.connected(),
     onDisconnect: (reason) => connectorRef.current?.disconnected(reason),
     onMessage: (m) => {
+      // Words in the lesson's session with Ask closed: the learner spoke, or the agent did.
+      if (m.role === "user") bargeIn.transcript(m.text);
+      else bargeIn.agentSpeaking(true);
       // Typed questions are added in submit(); skip the SDK's echo, if any.
       if (m.role === "user" && typedEcho.current.includes(m.text)) {
         typedEcho.current.splice(typedEcho.current.indexOf(m.text), 1);
@@ -163,6 +182,11 @@ export function AskPanel({
       addMessage(m);
     },
     onError: (message) => connectorRef.current?.error(message),
+    onVadScore: (score) => bargeIn.vad(score),
+    onAgentSpeaking: (speaking) => {
+      bargeIn.agentSpeaking(speaking);
+      agentTurn.setSpeaking(speaking);
+    },
   });
 
   useEffect(() => {
@@ -181,8 +205,10 @@ export function AskPanel({
       requestMicrophone: () => conversationRef.current!.requestMicrophone(),
       onState: setSession,
       onConnected: (state) => {
-        // Typing already (focused while a voice session connected): mute, as on focus.
-        if (!state.textOnly && inputFocused.current)
+        agentTurn.setSpeaking(false);
+        // Typing already (focused while a voice session connected), or the learner muted the
+        // mic: mute, as on focus.
+        if (!state.textOnly && (inputFocused.current || mutedRef.current))
           conversationRef.current!.setMicMuted(true);
         const { context: c, questions: q } = contextRef.current;
         conversationRef.current!.sendContextualUpdate(
@@ -193,11 +219,16 @@ export function AskPanel({
       onAgentEnded: () => pageRef.current.onClose("dismiss"),
       log: console,
     });
-  }, []);
+  }, [agentTurn]);
 
   useEffect(() => {
     link.connect((text) => conversation.sendContextualUpdate(text));
   }, [link, conversation]);
+
+  // The lesson's voice session follows the page (none in a replay run: no Q&A).
+  useEffect(() => {
+    connectorRef.current?.setLive(live && !replay);
+  }, [live, replay]);
 
   // Opening Ask starts deciding the session; closing it (from anywhere) ends
   // it. In a replay run there's no session: the panel says Q&A needs a connection.
@@ -213,6 +244,14 @@ export function AskPanel({
     if (replay || connector === null) return;
     typedEcho.current = [];
     connector.open();
+    // The lesson's session was already connected: tell the agent where the learner stopped
+    // (the narration up to now), as a new session's onConnected would.
+    if (connector.current.live && connector.current.phase === "connected") {
+      const { context: c, questions: q } = contextRef.current;
+      conversationRef.current?.sendContextualUpdate(
+        buildContextUpdate({ ...c, earlierQuestions: q }),
+      );
+    }
     // Typed in the box before Ask opened: sent at once, so it's queued until the session
     // connects and decides a text-only one (the mic prompt never holds it up).
     if (typed !== null) {
@@ -254,6 +293,33 @@ export function AskPanel({
     connectorRef.current?.clearNotice();
     onAsk();
   }, [onAsk]);
+  useEffect(() => {
+    bargeIn.setHandler((signal) => {
+      console.info(`[qa] barge-in (${signal})`);
+      ask();
+    });
+  }, [bargeIn, ask]);
+
+  // Barge-in listens only while the lesson's session is connected, Ask is closed, the mic is
+  // on, and Ask can open.
+  const listening =
+    session.live &&
+    session.phase === "connected" &&
+    !session.textOnly &&
+    !open &&
+    !muted &&
+    canAsk;
+  useEffect(() => {
+    if (listening) bargeIn.arm();
+    else bargeIn.disarm();
+  }, [listening, bargeIn]);
+  // The mute switch reaches the session (typing mutes it too, section 8).
+  const mutedRef = useRef(muted);
+  useEffect(() => {
+    mutedRef.current = muted;
+    if (session.phase === "connected" && !session.textOnly)
+      conversation.setMicMuted(muted || inputFocused.current);
+  }, [muted, session.phase, session.textOnly, conversation]);
 
   // `A` opens Ask (Space stays play/pause); Escape closes it.
   useEffect(() => {
@@ -376,7 +442,7 @@ export function AskPanel({
         }}
         onBlur={() => {
           inputFocused.current = false;
-          if (voice) conversation.setMicMuted(false);
+          if (voice && !muted) conversation.setMicMuted(false);
         }}
         mic={mic}
       />

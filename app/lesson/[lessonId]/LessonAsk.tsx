@@ -25,6 +25,7 @@ import { narrationUpTo } from "@/qa/context";
 import { createClientTools } from "@/qa/tools";
 import type { AskApi } from "@/qa/types";
 import type { LessonPlan } from "@/shared/lesson";
+import { useLessonVoice } from "./useLessonVoice";
 
 /** Keeps the session's frozen board and open/closed state in step with the player. */
 function useSessionSync(player: Player, session: AskSession) {
@@ -59,6 +60,8 @@ export function LessonAsk({
 }) {
   useSessionSync(player, session);
   const { send, state, loaded, step, tMs } = player;
+  // The always-on mic (issue #93): the lesson's voice session and spoken commands.
+  const voice = useLessonVoice({ player, session });
 
   const tools = useCallback(
     (ask: AskApi) =>
@@ -74,8 +77,9 @@ export function LessonAsk({
         send,
         isAsking: session.isAsking,
         askId: session.askId,
+        control: voice.control,
       }),
-    [session, send],
+    [session, send, voice.control],
   );
 
   // Open and close the session with the machine, not an effect later, so a
@@ -131,6 +135,7 @@ export function LessonAsk({
       onAgentDisconnected={onDropped}
       canAsk={player.can({ type: "ask" })}
       captions={captions}
+      live={voice.live}
     />
   );
 }
