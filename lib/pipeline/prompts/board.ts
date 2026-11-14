@@ -1,6 +1,6 @@
 // What every whiteboard prompt (steps and Q&A sketches) says about the board: its objects,
-// targets and actions. Built from constants only, so the prompts that embed it stay
-// byte-identical between requests and keep their cache.
+// targets and actions. Built from constants only, so the step prompt that embeds it stays
+// byte-identical between requests and keeps its cache.
 import "server-only";
 import { CANVAS, CELL, MAX_MATRIX_DIM } from "@/shared/scene";
 
@@ -22,4 +22,6 @@ export const BOARD_ACTIONS_PROMPT = `A target is an object id, optionally with r
 - show / hide: show or hide a whole object. show never takes row or col.
 - highlight / unhighlight: color "accent" (the default) or "warn".
 - move: the target's centre slides to the anchor in to (an object, a matrix part or a point). Moving a row, column or cell slides a copy of it and leaves the matrix whole; later actions on that part use the copy, and hide on the part removes the copy. Arrows can't move.
-- write: replaces a text object's text, or a matrix cell's value (needs both row and col). Not for latex or arrows.`;
+- write: replaces a text object's text, or a matrix cell's value (needs both row and col), with value. Not for latex or arrows.
+
+Every action has the same fields: color is only for highlight and unhighlight, to only for move (which needs it), and value only for write (which needs it).`;

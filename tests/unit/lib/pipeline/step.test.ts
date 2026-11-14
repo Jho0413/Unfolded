@@ -1,13 +1,12 @@
 // lib/pipeline/step.ts (ROADMAP G1, ARCHITECTURE.md sections 4, 5.1 and 6.2). One test per
 // case, named after it. Claude is never called: every test uses lib/fakes/claude.ts.
 import Anthropic from "@anthropic-ai/sdk";
-import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { config } from "@/lib/config";
 import { resetEnvForTests } from "@/lib/env";
 import { readFixture } from "@/lib/fakes";
 import { fakeClaude, fakeMessage } from "@/lib/fakes/claude";
-import { STEP_OUTPUT_FORMAT, WireStep } from "@/lib/pipeline/outputFormat";
+import { STEP_OUTPUT_FORMAT, wireToStep } from "@/lib/pipeline/outputFormat";
 import { STEP_SYSTEM_PROMPT } from "@/lib/pipeline/prompts/step";
 import { GenerationError } from "@/lib/pipeline/generate";
 import {
@@ -100,6 +99,20 @@ describe("generateStep (G1)", () => {
       ),
     ]);
     expect(claude.calls[1].body.messages[2].content).toMatch(/^.*\n- title:/);
+  });
+
+  it("a wire action that can't convert (a move without to) is a rejection, retried with its error", async () => {
+    const move = valid.actions.find((a) => a.do === "move")!;
+    const noTo = { ...move, to: undefined };
+    const claude = fakeClaude([
+      fakeMessage(JSON.stringify({ ...valid, actions: [noTo] })),
+      fakeMessage(JSON.stringify(valid)),
+    ]);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    await expect(generateStep(REQ, claude)).resolves.toEqual(valid);
+    expect(claude.calls[1].body.messages[2].content).toContain(
+      `move needs to "${noTo.target.id}"`,
+    );
   });
 
   it("output that isn't JSON is a rejection, retried", async () => {
@@ -240,7 +253,7 @@ describe("generateStep (G1)", () => {
     const step = await generateStep(REQ);
     const fixture = await readFixture<Anthropic.Message>(config.step.fixture);
     const text = fixture.content.find((b) => b.type === "text");
-    expect(step).toEqual(Step.parse(JSON.parse(text!.text)));
+    expect(step).toEqual(wireToStep(JSON.parse(text!.text)).value);
   });
 });
 
@@ -256,13 +269,6 @@ describe("buildStepRequest", () => {
     expect(buildStepRequest(REQ).output_config?.format).toBe(
       STEP_OUTPUT_FORMAT,
     );
-  });
-
-  it("the step output format is the SDK's JSON schema for the wire step, not the contract's Step", () => {
-    expect(STEP_OUTPUT_FORMAT).toEqual({
-      type: "json_schema",
-      schema: zodOutputFormat(WireStep).schema,
-    });
   });
 
   it("sends the paper by file id first, cached for 1 hour, then the step's context", () => {
