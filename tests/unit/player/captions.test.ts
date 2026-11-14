@@ -94,10 +94,24 @@ describe("captionAt", () => {
   });
 
   it("a cue the times don't list is skipped; one timed past the end is capped", () => {
+    // "One two. Three.": x at offset 4 (unlisted), y at offset 9 ("Three") at 1 s.
     const n = "One [[x]]two. [[y]]Three.";
-    expect(captionAt(n, {}, 1000, 0)?.index).toBe(0);
+    // At 200 ms the offset is 0.2 of the way to y (offset 1, "One"). Had x anchored at 0 ms,
+    // it would already be in "two.".
+    const early = captionAt(n, { y: 1000 }, 2000, 200);
+    expect(early?.index).toBe(0);
+    expect(now(early)).toBe("One");
+    expect(captionAt(n, { y: 1000 }, 2000, 1000)?.index).toBe(1);
     // y at 5 s is capped to the 1 s duration: at 1 s the text has ended.
     expect(captionAt(n, { y: 5000 }, 1000, 1000)?.index).toBe(1);
+  });
+
+  it("cue times out of text order never send the offset back (the later cue waits)", () => {
+    // b's time is before a's: b anchors at a's time, so at 500 ms the offset hasn't passed a.
+    const n = "Alpha. [[a]]Beta. [[b]]Gamma.";
+    const times = { a: 1000, b: 400 };
+    expect(captionAt(n, times, 3000, 500)?.index).toBe(0);
+    expect(captionAt(n, times, 3000, 1000)?.index).toBe(2);
   });
 
   it("Unicode (accents, emoji, CJK): sentences stay whole and words never split", () => {
@@ -117,24 +131,34 @@ describe("captionAt", () => {
   });
 });
 
-// Narrations: words, sometimes ending a sentence, sometimes preceded by a cue marker.
+// Narrations: words, sometimes ending a sentence, sometimes preceded by a cue marker. Each
+// cue's time is drawn freely: out of text order, negative, past the end, or not listed at all.
+// The duration is sometimes unknown (null, NaN or 0, as before the audio's metadata loads).
 const narration = fc
   .array(
     fc.record({
       word: fc.constantFrom("row", "Column", "café", "🍵", "注意力", "x", "a1"),
       end: fc.boolean(),
-      cue: fc.boolean(),
+      cue: fc.option(fc.integer({ min: -500, max: 20_000 }), {
+        nil: undefined,
+      }),
+      listed: fc.boolean(),
     }),
     { minLength: 1, maxLength: 20 },
   )
-  .map((words) => {
+  .chain((words) => {
     const times: Record<string, number> = {};
     const parts = words.map((w, i) => {
-      const marker = w.cue ? `[[c${i}]]` : "";
-      if (w.cue) times[`c${i}`] = i * 300;
-      return `${marker}${w.word}${w.end ? "." : ""}`;
+      if (w.cue === undefined) return `${w.word}${w.end ? "." : ""}`;
+      if (w.listed) times[`c${i}`] = w.cue;
+      return `[[c${i}]]${w.word}${w.end ? "." : ""}`;
     });
-    return { text: parts.join(" "), times, duration: words.length * 300 + 300 };
+    return fc
+      .oneof(
+        fc.integer({ min: 1, max: 15_000 }),
+        fc.constantFrom<number | null>(null, Number.NaN, 0),
+      )
+      .map((duration) => ({ text: parts.join(" "), times, duration }));
   });
 
 describe("captionAt properties", () => {
@@ -160,6 +184,46 @@ describe("captionAt properties", () => {
             expect(0 <= c.spoken && c.spoken <= c.current).toBe(true);
             expect(c.current).toBeLessThanOrEqual(c.text.length);
           }
+        },
+      ),
+    );
+  });
+
+  it("once the audio's end is known and reached, the last sentence is all said", () => {
+    fc.assert(
+      fc.property(
+        narration.filter(
+          ({ duration }) => typeof duration === "number" && duration > 0,
+        ),
+        fc.integer({ min: 0, max: 5000 }),
+        ({ text, times, duration }, after) => {
+          const c = captionAt(text, times, duration, (duration ?? 0) + after);
+          const sentences = sentencesOf(stripMarkers(text).text);
+          expect(c?.index).toBe(sentences.length - 1);
+          expect(c?.spoken).toBe(c?.text.length);
+        },
+      ),
+    );
+  });
+
+  it("with the end unknown, the offset never passes the last listed cue's sentence", () => {
+    fc.assert(
+      fc.property(
+        narration.filter(({ duration }) => !(Number(duration) > 0)),
+        fc.integer({ min: 0, max: 30_000 }),
+        ({ text, times, duration }, t) => {
+          const { cues } = stripMarkers(text);
+          const listed = cues.filter((c) => Object.hasOwn(times, c.cue));
+          const last =
+            listed.length === 0 ? 0 : Math.max(...listed.map((c) => c.offset));
+          const sentences = sentencesOf(stripMarkers(text).text);
+          let bound = 0;
+          sentences.forEach((s, i) => {
+            if (s.start <= last) bound = i;
+          });
+          expect(
+            captionAt(text, times, duration, t)?.index,
+          ).toBeLessThanOrEqual(bound);
         },
       ),
     );

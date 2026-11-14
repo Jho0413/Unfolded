@@ -1,7 +1,10 @@
-// Captions (ARCHITECTURE.md section 5.3): the narration sentence being spoken at time t, and
+// Captions (ARCHITECTURE.md section 5.6): the narration sentence being spoken at time t, and
 // an estimate of how much of it has been said. Pure. The browser only has the cue times (no
 // per-word times), so the spoken character offset is interpolated linearly between known
 // (offset, time) anchors: the start (0 s), each cue, and the end of the audio.
+//
+// `prepareNarration` does the per-step work (markers stripped, sentences split) once;
+// `captionFrom` is the per-frame lookup. `captionAt` is both, for one-off calls and tests.
 import { stripMarkers } from "@/lib/narration/cues";
 import type { CueTimes } from "@/shared/lesson";
 
@@ -90,8 +93,28 @@ export function captionAt(
   durationMs: number | null,
   tMs: number,
 ): Caption | null {
+  return captionFrom(prepareNarration(narration), cueTimes, durationMs, tMs);
+}
+
+/** A step's narration, ready for captions: stripped, with its cues and sentences. */
+export type PreparedNarration = {
+  text: string;
+  cues: { cue: string; offset: number }[];
+  sentences: Sentences;
+};
+
+export function prepareNarration(narration: string): PreparedNarration {
   const { text, cues } = stripMarkers(narration);
-  const sentences = sentencesOf(text);
+  return { text, cues, sentences: sentencesOf(text) };
+}
+
+/** `captionAt` on a prepared narration. */
+export function captionFrom(
+  { text, cues, sentences }: PreparedNarration,
+  cueTimes: CueTimes,
+  durationMs: number | null,
+  tMs: number,
+): Caption | null {
   if (sentences.length === 0) return null;
   const at = Math.min(
     text.length,

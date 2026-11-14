@@ -12,7 +12,7 @@
 // - Keys: Space holds on and goes on (usePlayer), → next idea, ← back, R say that again
 //   (controls.ts `shortcutEvent`), A asks (the Ask panel).
 import { type ReactNode, useEffect, useMemo, useState } from "react";
-import { captionAt } from "./captions";
+import { captionFrom, prepareNarration } from "./captions";
 import { shortcutEvent } from "./controls";
 import { lessonCard } from "./cardView";
 import { TutorCard } from "./TutorCard";
@@ -71,8 +71,17 @@ export function PlayerStage({
 }: PlayerStageProps) {
   const { state, send, loaded, tMs } = player;
   useShortcuts(send);
-  // The audio's duration, the captions' last anchor (NaN until its metadata loads).
-  const [durationMs, setDurationMs] = useState<number | null>(null);
+  // The audio's duration, the captions' last anchor, for the audio it was read from: a new
+  // step's audio has none until its metadata loads.
+  const [duration, setDuration] = useState<{ src: string; ms: number } | null>(
+    null,
+  );
+  const src =
+    typeof player.audioProps.src === "string"
+      ? player.audioProps.src
+      : undefined;
+  const durationMs =
+    duration !== null && duration.src === src ? duration.ms : null;
   const card = lessonCard({
     state,
     notice: player.notice,
@@ -83,13 +92,15 @@ export function PlayerStage({
   });
   const narration = loaded?.step.narration;
   const cueTimes = loaded?.cueTimes;
-  const caption = useMemo(
-    () =>
-      narration === undefined || cueTimes === undefined
-        ? null
-        : captionAt(narration, cueTimes, durationMs, tMs),
-    [narration, cueTimes, durationMs, tMs],
+  // Stripping and splitting the narration happens once per step, not on every frame.
+  const prepared = useMemo(
+    () => (narration === undefined ? null : prepareNarration(narration)),
+    [narration],
   );
+  const caption =
+    prepared === null || cueTimes === undefined
+      ? null
+      : captionFrom(prepared, cueTimes, durationMs, tMs);
   const title = loaded?.step.title ?? titles[player.step] ?? "";
   return (
     <section
@@ -141,7 +152,10 @@ export function PlayerStage({
       </div>
       <audio
         {...player.audioProps}
-        onDurationChange={(e) => setDurationMs(e.currentTarget.duration * 1000)}
+        onDurationChange={(e) => {
+          if (src !== undefined)
+            setDuration({ src, ms: e.currentTarget.duration * 1000 });
+        }}
         data-testid="player-audio"
       />
     </section>
