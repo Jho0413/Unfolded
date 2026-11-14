@@ -4,6 +4,21 @@
       "type": "client",
       "config": "tool_configs/highlight.json",
       "id": "tool_4101m7dgd21xe2e9kgnh3htc4gw5"
+    },
+    {
+      "type": "client",
+      "config": "tool_configs/go_to_step.json",
+      "id": "tool_4601m7dhcxarf65a7q2dd4vd1v23"
+    },
+    {
+      "type": "client",
+      "config": "tool_configs/draw_scene.json",
+      "id": "tool_5201m7dhcy1jebessg3vp6n6de0n"
+    },
+    {
+      "type": "client",
+      "config": "tool_configs/simplify_upcoming.json",
+      "id": "tool_5701m7dhcyssfdv9gnvpy1d1p6tg"
     }
   ]
 }
