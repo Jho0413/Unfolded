@@ -72,10 +72,11 @@ describe("Real (npm start)", () => {
 });
 
 describe("FAKE_APIS=1 (tests, CI)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it("requires no keys", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(parseEnv({ FAKE_APIS: "1" }).mode).toBe("fake");
-    warn.mockRestore();
   });
 
   it("on a build without browser fakes, starts but warns", () => {
@@ -84,7 +85,6 @@ describe("FAKE_APIS=1 (tests, CI)", () => {
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining("real Q&A agent"),
     );
-    warn.mockRestore();
   });
 
   it("runs on a build made with NEXT_PUBLIC_FAKE_APIS=1", () => {

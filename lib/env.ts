@@ -1,7 +1,7 @@
 // Reads and validates the environment once (ARCHITECTURE.md section 9).
 //
 // instrumentation.ts register() calls loadEnvOrExit() at server start, so a missing key
-// stops the server (exit code 1) before it serves anything, and the error names the key.
+// stops the server (exit code 1) before it serves a request, and the error names the key.
 // `next build` never calls it. Code behind it calls getEnv() and trusts the values.
 //
 // Modes, first match wins:
