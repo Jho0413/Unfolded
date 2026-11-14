@@ -33,6 +33,27 @@ export const config = {
     /** Served when FAKE_APIS=1, in the Messages API's response shape. */
     fixture: "claude-step.message.json",
   },
+  /** A Q&A sketch request (ARCHITECTURE.md section 8): the learner is waiting, so it's short. */
+  sketch: {
+    /** Output cap, thinking included. A cut-off fails the sketch. */
+    maxTokens: 16_000,
+    /**
+     * Deadline for one attempt, the SDK's own retries included, until the whole answer is in.
+     * A real sketch takes 3 to 5 s; with the one retry, the browser hears back within 40 s.
+     */
+    timeoutMs: 20_000,
+    /**
+     * Cap on the request's `description`: the agent describes a drawing in a sentence or two,
+     * and the route is unauthenticated, so a huge one never becomes a paid request.
+     */
+    maxDescriptionChars: 2000,
+    /**
+     * Served when FAKE_APIS=1: a recorded Sonnet 5.5 sketch drawn with `fresh: true`. It names
+     * only its own objects, so it's valid on any board whose ids it doesn't reuse (an empty one,
+     * demo-m1 and the step fixture's), though not twice on the same board.
+     */
+    fixture: "claude-sketch.message.json",
+  },
   /** Upload cap: our own choice, not Claude's limit (ARCHITECTURE.md section 5.1). */
   maxPdfMb: 32,
   /** How long the plan route waits for the fal cover before returning without it. */

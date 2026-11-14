@@ -85,7 +85,7 @@ shared/                             imported by server and browser (the contract
 lib/                                server-only (import "server-only")
   config.ts                         model ids, effort, limits, paths: one place
   env.ts                            reads and validates env vars once
-  pipeline/plan.ts, step.ts, sketch.ts, prompts/, outputFormat.ts (the wire format Claude fills in for steps and sketches, and its converters)
+  pipeline/plan.ts, step.ts, sketch.ts, generate.ts (one structured-output request, validated and retried once), prompts/, outputFormat.ts (the wire format Claude fills in for steps and sketches, and its converters)
   narration/cues.ts                 pure: strip markers, cue offsets -> times
   narration/tts.ts                  ElevenLabs TTS with timestamps -> audio + cue times (S1 fixture when FAKE_APIS=1)
   narration/makeM1.ts               npm run make:m1: demo-m1.step.json -> runs/demo-m1/ (plan.json, step-0.v<k>.json + .mp3)
@@ -246,8 +246,9 @@ sequenceDiagram
   - The upload size cap (`config.maxPdfMb`) is our own choice, not Claude's limit. We don't parse the PDF ourselves: when Claude rejects it (too many pages, encrypted, unreadable), we return the upload error in section 7.
 - **Caching.** The document block carries `cache_control: { type: "ephemeral", ttl: "1h" }`, so later step requests reuse the cached paper. The 1-hour cache outlasts long Q&A pauses and rehearsals. Its writes cost more than the 5-minute cache's, but each request type writes the paper only once. For the cache to work:
   - The step system prompt must be byte-identical for every step.
-  - The plan, goal, signals and (for a sketch) the current board go *after* the document block.
-  - The plan and sketch requests use a different output format, so they build their own cache.
+  - The plan, goal and signals go *after* the document block.
+  - The plan request uses a different output format, so it builds its own cache.
+  - A sketch request carries no paper (its body has no lesson), so it has no document block and no cache: just the board and the description (section 8).
 - **Structured output.** Requests stream: `client.messages.stream({ output_config: { format } })`, then `await stream.finalMessage()`. For a step, `format` is `lib/pipeline/outputFormat.ts`'s JSON schema for the wire format (`zodOutputFormat(WireStep).schema`, from `@anthropic-ai/sdk/helpers/zod`; section 4), and a sketch uses `WireSketch`.
   - The generator checks `stop_reason` first: `refusal`, `max_tokens` and `model_context_window_exceeded` fail the step (section 6.2). Each attempt has a total deadline (`config.step.timeoutMs`, an abort signal), since the SDK's own `timeout` stops counting once a stream's headers arrive. Otherwise it parses the text itself with `validateWireStep` (the wire schema, the conversion, then `validateStep`), not the SDK's `parsed_output` (whose parser throws before a refusal can be seen). So a schema failure, including constraints the API can't enforce (number ranges, item counts), a conversion error and a `validate.ts` rejection give the same error list for the one retry.
   - The retry resends the first request, then Claude's rejected answer (unchanged, thinking included) and the errors, so it reuses the cached paper.
@@ -501,6 +502,7 @@ The developer gets the full error in the server log, tagged with the route, less
 - `draw_scene` takes plain words, not scene JSON. The voice model only describes what to draw, and Claude writes the validated sketch, so the scene schema stays in one place and out of the agent's prompt.
 - **A sketch builds on the board the learner is looking at.** The request body is `{ description, fresh, board }`, where `board` is the current `BoardState`. The route checks the body with zod, including a cap on the board's size (`config.maxBoardObjects`). Claude sees the board, so an answer to "why does the row go with the column?" can highlight and draw over the matrix on screen.
   - The sketch's ids are checked against its own objects plus the board's (section 4). With `fresh: true` the sketch starts from an empty board, and later sketches in this Ask build on that new board, not the lesson board.
+  - A rejected sketch is retried once with its errors, as a step is (section 4). Each attempt has a 20-second deadline (`config.sketch.timeoutMs`; a real sketch took 3 to 5 s), so the route answers within about 40 s at worst, and Q5's request timeout must be longer than that. The route answers `{ sketch }`, or `{ error: "Couldn't draw that." }` with 400 for a bad body (including a board over the cap), 502 when Claude fails (invalid twice, a refusal, a cut-off or a provider error) and 500 for anything else. The reason goes to the server log.
   - The browser validates the sketch again against the board it has when the sketch arrives, since the board may have changed while Claude worked.
 - **The board during Ask.** Ask freezes the lesson board at `pausedT`: the audio time when Ask opened, the end of the step from `stepEnded` or `finished`, or an empty board from `loading`. `highlight` and sketches draw on top of it, each timed from when it arrives. **Closing Ask throws all of that away**: the board goes back to `sceneAt(step, pausedT)` and the player returns to the state Ask was opened from, with `playing` becoming `paused` (section 6.1), so Play carries on from the same point. If Ask was opened while loading and the step arrived meanwhile, the board is that step at 0.
 - **Agent config in the repo.** We use the official **ElevenLabs CLI** (`@elevenlabs/cli`) rather than writing our own sync script.
@@ -544,7 +546,7 @@ The developer gets the full error in the server log, tagged with the route, less
 - The mode is picked in this order: `REPLAY_RUN` set → replay; else `FAKE_APIS=1` → fake; else real. An empty value (`KEY=`, as copied from `.env.example`) counts as unset.
 - A build made with `NEXT_PUBLIC_FAKE_APIS=1` (for example, left over from a local `npm run e2e`) refuses to start in real mode, since the browser would use the fake agent: run `npm run build` again first. `next.config.ts` bakes that build-time value in as `BUILT_WITH_BROWSER_FAKES`, so the check never depends on the shell `npm start` runs in. The reverse, `FAKE_APIS=1` on a normal build, starts with a warning.
 - Keys are only read in `lib/` and the API routes, which import `"server-only"`. The browser never sees a key.
-- All of these live in `lib/config.ts`: model ids, effort per request type, `maxNarrationChars`, the step request's output cap, total deadline and fake-mode fixture, `maxPdfMb`, `coverTimeoutMs`, `maxBoardObjects` (the cap on the board a sketch request sends, section 8), the image cap per lesson (E1), the agent token's URL, timeout and fixture (section 8), TTS (`tts`: URL, model id, output format, timeout, fixture; section 11, S1), and the `runs/` path.
+- All of these live in `lib/config.ts`: model ids, effort per request type, `maxNarrationChars`, the step and sketch requests' output caps, total deadlines and fake-mode fixtures, `maxPdfMb`, `coverTimeoutMs`, `maxBoardObjects` (the cap on the board a sketch request sends, section 8), the image cap per lesson (E1), the agent token's URL, timeout and fixture (section 8), TTS (`tts`: URL, model id, output format, timeout, fixture; section 11, S1), and the `runs/` path.
 
 ## 10. Testing: how we prove it works
 
