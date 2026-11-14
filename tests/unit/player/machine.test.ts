@@ -43,6 +43,12 @@ const asking = (from: AskOrigin, goTo?: number): PlayerState =>
 const askOrigins: AskOrigin[] = [
   { kind: "loading", step: 1, autoplay: true },
   { kind: "loading", step: 1, autoplay: true, arrived: { ok: true } },
+  {
+    kind: "loading",
+    step: 1,
+    autoplay: true,
+    arrived: { ok: false, message: SERVER_MSG },
+  },
   { kind: "playing", step: 1 },
   { kind: "paused", step: 1 },
   { kind: "stepEnded", step: 1 },

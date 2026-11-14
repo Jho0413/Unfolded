@@ -2,7 +2,11 @@
 // audio, no fetch. `transition` maps (state, event) to a result that says
 // whether the event changed something, was ignored, was rejected (with a
 // message for the learner or the agent tool), or can't happen (treated as
-// ignored, with a warning to log). The caller (usePlayer) runs the effects.
+// ignored, with a warning to log). The caller (usePlayer) runs the effects,
+// and derives audio play/pause from `state.kind` (e.g. asking pauses the
+// narration). It also keeps `pausedT` for `restoreBoard` (time 0 when Ask was
+// opened from loading). A "changed" result can return the same state object
+// (replay), so key re-renders on the result, not on state identity.
 
 /** Step indexes are 0-based; `stepCount` is the number of steps in the plan. */
 export type PlayerContext = { stepCount: number };
@@ -43,6 +47,7 @@ export type PlayerEvent =
   | { type: "agentDisconnected" }
   | { type: "next" }
   | { type: "back" }
+  /** `n` is 0-based: the 1-based agent tool (Q4) subtracts 1 first. */
   | { type: "goToStep"; n: number }
   | { type: "retry" };
 
