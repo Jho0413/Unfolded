@@ -29,6 +29,14 @@ export const config = {
   maxBoardObjects: 200,
   /** fal illustrations per lesson, cover included (E1). fal credits are tight. */
   maxImagesPerLesson: 4,
+  /** The Q&A agent's WebRTC conversation token (ARCHITECTURE.md section 8). */
+  agentToken: {
+    url: "https://api.elevenlabs.io/v1/convai/conversation/token",
+    /** Ask waits on this, so a hung request gives up and Ask says Q&A is unavailable. */
+    timeoutMs: 5000,
+    /** Served when FAKE_APIS=1, in ElevenLabs' response shape. */
+    fixture: "elevenlabs-conversation-token.json",
+  },
   /** One folder per lesson: the store and the replay set (ARCHITECTURE.md section 5.5). */
   runsDir: path.join(process.cwd(), "runs"),
   /** Recorded provider responses served when FAKE_APIS=1 (ARCHITECTURE.md section 10). */
