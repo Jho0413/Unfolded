@@ -1,5 +1,8 @@
 // The Q&A client tool handlers (ARCHITECTURE.md section 8, ROADMAP Q4).
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import {
   initialState,
   type PlayerEvent,
@@ -12,6 +15,18 @@ import {
   type HighlightAction,
 } from "@/qa/tools";
 import type { BoardObject, BoardState } from "@/shared/scene";
+import { CLIENT_TOOL_NAMES, CLIENT_TOOLS } from "@/shared/tools";
+import { errors } from "@/shared/validate";
+
+type AgentToolConfig = {
+  type: string;
+  name: (typeof CLIENT_TOOL_NAMES)[number];
+  expects_response: boolean;
+  parameters: {
+    required?: string[];
+    properties: Record<string, { type: string; description?: string }>;
+  };
+};
 
 const q: BoardObject = {
   kind: "matrix",
@@ -113,12 +128,12 @@ describe("highlight", () => {
 
   it("rejects a row or column outside the matrix, or on a non-matrix", async () => {
     const h = harness(asking);
-    const outOfRange = await h.tools.highlight?.({ target_id: "q", row: 2 });
-    const onText = await h.tools.highlight?.({ target_id: "label", col: 0 });
-    expect(outOfRange).toMatch(/"q"/);
-    expect(onText).toMatch(/"label"/);
-    expect(outOfRange).not.toBe("ok");
-    expect(onText).not.toBe("ok");
+    expect(await h.tools.highlight?.({ target_id: "q", row: 2 })).toBe(
+      errors.targetOutOfRange("q"),
+    );
+    expect(await h.tools.highlight?.({ target_id: "label", col: 0 })).toBe(
+      errors.targetOutOfRange("label"),
+    );
     expect(h.highlights).toEqual([]);
   });
 });
@@ -169,9 +184,47 @@ describe("a tool call that lands after Ask closed", () => {
 });
 
 describe("agent config tool names", () => {
-  // ROADMAP Q4: the agent config in agent/ (Q1, area B) must name exactly the
-  // tools in shared/tools.ts. agent/ doesn't exist yet.
-  it.todo("agent/ client tool names equal CLIENT_TOOL_NAMES (needs Q1)");
+  // ROADMAP Q4: the agent's client tools in agent/tool_configs (area B) must
+  // match shared/tools.ts. Each config present is checked here; that every
+  // tool has a config comes with Q1.
+  const dir = path.join(process.cwd(), "agent/tool_configs");
+  const configs = readdirSync(dir)
+    .filter((f) => f.endsWith(".json"))
+    .map((f) => ({
+      file: f,
+      config: JSON.parse(
+        readFileSync(path.join(dir, f), "utf8"),
+      ) as AgentToolConfig,
+    }));
+
+  it("has at least one config to check", () => {
+    expect(configs.length).toBeGreaterThan(0);
+  });
+
+  it.each(configs)(
+    "$file names a tool in shared/tools.ts, same params",
+    ({ config }) => {
+      expect(config.type).toBe("client");
+      expect(CLIENT_TOOL_NAMES).toContain(config.name);
+      const tool = CLIENT_TOOLS.find((t) => t.name === config.name)!;
+      expect(config.expects_response).toBe(tool.expectsResponse);
+      const schema = z.toJSONSchema(tool.parameters, { io: "input" }) as {
+        required?: string[];
+        properties: Record<string, { type: string; description?: string }>;
+      };
+      const params = config.parameters;
+      expect([...(params.required ?? [])].sort()).toEqual(
+        [...(schema.required ?? [])].sort(),
+      );
+      expect(Object.keys(params.properties).sort()).toEqual(
+        Object.keys(schema.properties).sort(),
+      );
+      for (const [key, prop] of Object.entries(params.properties)) {
+        expect(prop.type, key).toBe(schema.properties[key].type);
+        expect(prop.description, key).toBe(schema.properties[key].description);
+      }
+    },
+  );
 });
 
 describe("simplify_upcoming", () => {
