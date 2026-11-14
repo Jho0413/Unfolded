@@ -1,0 +1,15 @@
+# Generated or owned elsewhere
+package-lock.json
+next-env.d.ts
+.next/
+out/
+build/
+coverage/
+playwright-report/
+test-results/
+blob-report/
+runs/
+evidence/
+.board/
+# Prose docs are not reformatted by the code formatter
+*.md
