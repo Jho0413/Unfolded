@@ -4,6 +4,7 @@
 //   /dev/board                              the fixed BoardState
 //   /dev/board?scene=m1&t=3400              demo-m1 at 3400 ms, via sceneAt
 //   /dev/board?scene=m1-late-highlight&t=…  demo-m1 with a highlight after the slide
+//   /dev/board?scene=arrows&t=…             arrows following moving objects
 //
 // Production builds answer 404 unless FAKE_APIS=1 (how e2e and CI run the
 // production build), so it is never reachable in a real `npm start`.
@@ -11,7 +12,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Whiteboard } from "@/player/Whiteboard";
-import { M1_CUE_TIMES, SCENES, isScene, sceneState } from "./scenes";
+import { SCENES, SCENE_TIMES, isScene, sceneState } from "./scenes";
 
 export const metadata: Metadata = {
   title: "Dev: board",
@@ -36,13 +37,13 @@ export default async function DevBoardPage({
   const parsedT = Number(first(params.t) ?? 0);
   const tMs = Number.isFinite(parsedT) && parsedT >= 0 ? parsedT : 0;
   const state = sceneState(scene, tMs);
-  const timed = scene !== "fixed";
+  const times = scene === "fixed" ? undefined : SCENE_TIMES[scene];
 
   return (
     <main
       data-testid="dev-board"
       data-scene={scene}
-      data-t={timed ? tMs : undefined}
+      data-t={times ? tMs : undefined}
       style={{
         fontFamily: "system-ui, sans-serif",
         background: "#f8fafc",
@@ -81,7 +82,7 @@ export default async function DevBoardPage({
           </Link>
         ))}
       </nav>
-      {timed && (
+      {times && (
         <nav
           aria-label="Cue times"
           style={{
@@ -92,7 +93,7 @@ export default async function DevBoardPage({
           }}
         >
           <span>t = {tMs} ms. Cues:</span>
-          {Object.entries(M1_CUE_TIMES).map(([cue, ms]) => (
+          {Object.entries(times).map(([cue, ms]) => (
             <Link key={cue} href={`/dev/board?scene=${scene}&t=${ms}`}>
               {cue} ({ms})
             </Link>
