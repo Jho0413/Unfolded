@@ -25,8 +25,11 @@ import {
   sketchRetryPrompt,
 } from "@/lib/pipeline/prompts/sketch";
 
-/** The POST /api/sketch body: shared/lesson.ts's SketchRequest, with the board capped. */
+/** The POST /api/sketch body: shared/lesson.ts's SketchRequest, with the description and board capped. */
 export const SketchRequestBody = SketchRequest.extend({
+  description: SketchRequest.shape.description.max(
+    config.sketch.maxDescriptionChars,
+  ),
   board: BoardState.extend({
     objects: BoardState.shape.objects.max(config.maxBoardObjects),
   }),

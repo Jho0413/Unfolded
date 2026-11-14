@@ -15,7 +15,7 @@ export const SKETCH_SYSTEM_PROMPT = `You draw on a whiteboard while a voice tuto
 
 ${BOARD_OBJECTS_PROMPT}
 
-The request lists the objects already on the board, if any, with their ids, whether they are visible and how they are highlighted. Use them: a sketch can highlight a row of a matrix the learner is looking at, write in one of its cells, show a hidden object or point an arrow at one, by its id. Never give a new object the id of an object already on the board, and put new objects in free space so they don't cover the board. If the board is empty, draw from scratch.
+The request lists the objects already on the board, if any, with their ids, whether they are visible and how they are highlighted, then any moved copies of matrix parts with their source and where their centre is now. Use them: a sketch can highlight a row of a matrix the learner is looking at, write in one of its cells, show a hidden object or point an arrow at one, by its id. Never give a new object the id of an object already on the board, and put new objects in free space so they don't cover the board. If the board is empty, draw from scratch.
 
 An object with hidden: true is not drawn until a show action. Use hidden objects for parts that appear one after another.
 
@@ -40,16 +40,26 @@ export interface SketchPromptInput {
   board: BoardState;
 }
 
-/** The request's context: the board to draw on (one object state per line) and the description. */
+/**
+ * The request's context: the board to draw on (one object state per line, then any moved
+ * copies of matrix parts) and the description.
+ */
 export function sketchContextPrompt({
   description,
   fresh,
   board,
 }: SketchPromptInput): string {
+  // `visible` is the object's state now; its starting `hidden` flag would contradict it.
+  const lines = [
+    ...board.objects.map((s) =>
+      JSON.stringify({ ...s, object: { ...s.object, hidden: undefined } }),
+    ),
+    ...board.copies.map((c) => JSON.stringify({ movedCopy: c })),
+  ];
   const onBoard =
     fresh || board.objects.length === 0
       ? "The board is empty."
-      : `<board>\n${board.objects.map((s) => JSON.stringify(s)).join("\n")}\n</board>`;
+      : `<board>\n${lines.join("\n")}\n</board>`;
   return `${onBoard}\n\n<description>\n${description}\n</description>\n\nDraw this sketch.`;
 }
 

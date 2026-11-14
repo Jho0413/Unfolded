@@ -75,6 +75,31 @@ describe("buildSketchRequest", () => {
     expect(text).toContain(`<description>\n${REQ.description}\n</description>`);
   });
 
+  it("an object's current visibility is sent, not its starting hidden flag", () => {
+    const hidden = {
+      ...REQ.board.objects[0],
+      object: { ...REQ.board.objects[0].object, hidden: true },
+      visible: true,
+    };
+    const text = userText({
+      ...REQ,
+      board: { ...REQ.board, objects: [hidden] },
+    });
+    expect(text).toContain('"visible":true');
+    expect(text).not.toContain('"hidden"');
+  });
+
+  it("moved copies of matrix parts are sent with their source and centre", () => {
+    const copy = {
+      source: { id: "formula", row: 0 },
+      x: 10,
+      y: 20,
+      visible: true,
+    };
+    const text = userText({ ...REQ, board: { ...REQ.board, copies: [copy] } });
+    expect(text).toContain(JSON.stringify({ movedCopy: copy }));
+  });
+
   it("with fresh: true, the board isn't sent: it says the board is empty", () => {
     const text = userText({ ...REQ, fresh: true });
     expect(text).toContain("The board is empty.");

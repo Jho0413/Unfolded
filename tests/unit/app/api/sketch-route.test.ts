@@ -58,6 +58,7 @@ const matrixA: ObjectState = {
   ],
 };
 const BOARD: BoardState = { objects: [matrixA], copies: [], active: [] };
+const EMPTY: BoardState = { objects: [], copies: [], active: [] };
 
 /** Highlights row 0 of the board's matrix `a` and points a new note at it. */
 const TARGETS_BOARD: Sketch = {
@@ -208,7 +209,7 @@ describe("POST /api/sketch: an invalid sketch or a failed request is an error re
     const logs = quietLogs();
     script(reply({ objects: "nope" }), reply({ actions: [] }));
     await expectFailed(await post({ description: "x", board: BOARD }), 502);
-    expect(logs.logged()).toContain("sketch rejected twice");
+    expect(logs.logged()).toContain("sketch: rejected twice");
   });
 
   it("output that isn't JSON twice: 502 Couldn't draw that", async () => {
@@ -242,7 +243,17 @@ describe("POST /api/sketch: an invalid sketch or a failed request is an error re
       ),
     );
     await expectFailed(await post({ description: "x", board: BOARD }), 502);
-    expect(logs.logged()).toContain("Claude sketch request failed");
+    expect(logs.logged()).toContain("sketch: Claude request failed");
+  });
+
+  it("timeout: config.sketch.timeoutMs passing (the request aborts) gives 502 Couldn't draw that, with no retry", async () => {
+    const logs = quietLogs();
+    const fake = script(new Anthropic.APIUserAbortError());
+    await expectFailed(await post({ description: "x", board: BOARD }), 502);
+    expect(fake.calls).toHaveLength(1);
+    expect(logs.logged()).toContain(
+      `timed out after ${config.sketch.timeoutMs} ms`,
+    );
   });
 
   it("an error that isn't Claude's (a bug): 500 Couldn't draw that, logged", async () => {
@@ -258,6 +269,13 @@ describe("POST /api/sketch: a bad request body is a 400, and Claude isn't called
     ["not JSON", "{not json"],
     ["no description", { board: BOARD }],
     ["an empty description", { description: "", board: BOARD }],
+    [
+      "a description over config.sketch.maxDescriptionChars",
+      {
+        description: "x".repeat(config.sketch.maxDescriptionChars + 1),
+        board: BOARD,
+      },
+    ],
     ["no board", { description: "x" }],
     [
       "a board that isn't a BoardState",
@@ -321,13 +339,10 @@ describe("POST /api/sketch: a bad request body is a 400, and Claude isn't called
 });
 
 describe("POST /api/sketch with FAKE_APIS=1", () => {
-  it("serves the recorded sketch response, which is valid on the demo-m1 board", async () => {
-    vi.stubEnv("FAKE_APIS", "1");
-    vi.stubEnv("REPLAY_RUN", undefined);
-    resetEnvForTests();
-    const demo = Step.parse(await readFixture("demo-m1.step.json"));
-    const board: BoardState = {
-      objects: demo.objects.map((object) => ({
+  /** The board of a step fixture: its objects as they start. */
+  function boardOf(step: Step): BoardState {
+    return {
+      objects: step.objects.map((object) => ({
         object,
         visible: !object.hidden,
         highlight: null,
@@ -335,12 +350,36 @@ describe("POST /api/sketch with FAKE_APIS=1", () => {
       copies: [],
       active: [],
     };
-    const res = await post({ description: "anything", board });
-    expect(res.status).toBe(200);
+  }
+
+  async function recordedSketch(): Promise<unknown> {
     const fixture = await readFixture<Anthropic.Message>(config.sketch.fixture);
     const text = fixture.content.find((b) => b.type === "text");
-    expect(SketchResponse.parse(await res.json()).sketch).toEqual(
-      JSON.parse(text!.text),
-    );
-  });
+    return JSON.parse(text!.text);
+  }
+
+  const cases: [
+    string,
+    () => Promise<{ fresh: boolean; board: BoardState }>,
+  ][] = [
+    ["a fresh, empty board", async () => ({ fresh: true, board: EMPTY })],
+    [
+      "the demo-m1 board",
+      async () => ({
+        fresh: false,
+        board: boardOf(Step.parse(await readFixture("demo-m1.step.json"))),
+      }),
+    ],
+  ];
+  for (const [name, request] of cases)
+    it(`serves the recorded sketch response, which is valid on ${name}`, async () => {
+      vi.stubEnv("FAKE_APIS", "1");
+      vi.stubEnv("REPLAY_RUN", undefined);
+      resetEnvForTests();
+      const res = await post({ description: "anything", ...(await request()) });
+      expect(res.status).toBe(200);
+      expect(SketchResponse.parse(await res.json()).sketch).toEqual(
+        await recordedSketch(),
+      );
+    });
 });

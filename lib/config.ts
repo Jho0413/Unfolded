@@ -40,8 +40,14 @@ export const config = {
     /** Deadline for one attempt, the SDK's own retries included, until the whole answer is in. */
     timeoutMs: 60_000,
     /**
-     * Served when FAKE_APIS=1: a recorded Sonnet 5.5 response, drawn on the demo-m1 board (it
-     * targets matrices a, b and c, so it's valid on that board, not on an empty one).
+     * Cap on the request's `description`: the agent describes a drawing in a sentence or two,
+     * and the route is unauthenticated, so a huge one never becomes a paid request.
+     */
+    maxDescriptionChars: 2000,
+    /**
+     * Served when FAKE_APIS=1: a recorded Sonnet 5.5 sketch drawn with `fresh: true`. It names
+     * only its own objects, so it's valid on any board whose ids it doesn't reuse (an empty one,
+     * demo-m1 and the step fixture's), though not twice on the same board.
      */
     fixture: "claude-sketch.message.json",
   },

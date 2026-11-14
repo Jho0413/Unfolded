@@ -59,7 +59,7 @@ export async function generateWithRetry<T>(
   if (firstTry.result.ok) return firstTry.result.value;
 
   console.warn(
-    `[${gen.label}] rejected, retrying once: ${firstTry.result.errors.join("; ")}`,
+    `[pipeline] ${gen.label} rejected, retrying once: ${firstTry.result.errors.join("; ")}`,
   );
   // The model sees what it wrote and why it was rejected. Its content (thinking included)
   // goes back unchanged, after the same cached prefix. The API rejects an empty assistant turn.
@@ -79,7 +79,7 @@ export async function generateWithRetry<T>(
   if (secondTry.result.ok) return secondTry.result.value;
   throw new GenerationError(
     "rejected",
-    `${gen.label} rejected twice: ${secondTry.result.errors.join("; ")}`,
+    `${gen.label}: rejected twice: ${secondTry.result.errors.join("; ")}`,
     secondTry.result.errors,
   );
 }
@@ -111,7 +111,7 @@ async function attempt<T>(
         : `failed: ${err.name}: ${err.message}`;
     throw new GenerationError(
       "provider",
-      `Claude ${gen.label} request ${what}`,
+      `${gen.label}: Claude request ${what}`,
       [],
       { cause: err },
     );
@@ -121,7 +121,7 @@ async function attempt<T>(
     const category = message.stop_details?.category ?? "none";
     throw new GenerationError(
       "refusal",
-      `Claude declined the ${gen.label} (category: ${category})`,
+      `${gen.label}: Claude declined (category: ${category})`,
     );
   }
   if (
@@ -130,7 +130,7 @@ async function attempt<T>(
   ) {
     throw new GenerationError(
       "cut-off",
-      `Claude's ${gen.label} was cut off (${message.stop_reason}, max_tokens ${body.max_tokens})`,
+      `${gen.label}: cut off (${message.stop_reason}, max_tokens ${body.max_tokens})`,
     );
   }
 
