@@ -146,14 +146,21 @@ describe("bad file name -> 400", () => {
       await expectBadName("demo-m1", file);
   });
 
-  it("hidden, null-byte, Unicode, upper-case, over-long and unknown-type names", async () => {
+  it("an extension it doesn't serve (not logged: any URL can be typed)", async () => {
+    for (const file of ["index.html", "x.svg", "x.js", "noext"]) {
+      await writeRunFile("demo-m1", file, "<script></script>");
+      await expectBadName("demo-m1", file);
+    }
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it("hidden, null-byte, Unicode, upper-case, over-long and temporary names", async () => {
     for (const file of [
       ".env.json",
       "plan.json\0",
       "plán.json",
       "Plan.json",
       `${"a".repeat(101)}.json`,
-      "index.html",
       "_tmp.json",
     ])
       await expectBadName("demo-m1", file);

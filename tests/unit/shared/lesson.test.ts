@@ -1,6 +1,12 @@
 // Run file names and URLs (shared/lesson.ts, ARCHITECTURE.md section 5.1).
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { RUN_FILE_RE, isRunFileUrl } from "@/shared/lesson";
+import {
+  LESSON_ID_RE,
+  RUN_FILE_RE,
+  StepResponse,
+  isRunFileUrl,
+} from "@/shared/lesson";
 
 describe("run file names", () => {
   it("accept step, audio, plan and media names", () => {
@@ -41,5 +47,44 @@ describe("run file URLs", () => {
       "/api/runs/Demo/x.mp3",
     ])
       expect(isRunFileUrl(url)).toBe(false);
+  });
+});
+
+describe("run file URLs, property", () => {
+  it("/api/runs/<id>/<file> is accepted exactly when both parts follow their rules", () => {
+    const part = (re: RegExp) => fc.oneof(fc.string(), fc.stringMatching(re));
+    fc.assert(
+      fc.property(part(LESSON_ID_RE), part(RUN_FILE_RE), (id, file) => {
+        expect(isRunFileUrl(`/api/runs/${id}/${file}`)).toBe(
+          LESSON_ID_RE.test(id) && RUN_FILE_RE.test(file),
+        );
+      }),
+    );
+  });
+});
+
+describe("StepResponse.audioUrl", () => {
+  const response = (audioUrl: string) => ({
+    step: { title: "t", narration: "n", objects: [], actions: [] },
+    version: 1,
+    audioUrl,
+    cueTimes: {},
+  });
+  const audioUrlOk = (url: string) =>
+    !StepResponse.safeParse(response(url)).error?.issues.some(
+      (i) => i.path[0] === "audioUrl",
+    );
+
+  it("accepts a run file URL ending in .mp3", () => {
+    expect(audioUrlOk("/api/runs/demo-m1/step-0.v1.mp3")).toBe(true);
+  });
+
+  it("refuses another extension, traversal and absolute URLs", () => {
+    for (const url of [
+      "/api/runs/demo-m1/step-0.v1.json",
+      "/api/runs/demo-m1/..",
+      "https://evil.example/api/runs/demo-m1/x.mp3",
+    ])
+      expect(audioUrlOk(url), url).toBe(false);
   });
 });

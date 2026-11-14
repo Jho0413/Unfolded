@@ -78,6 +78,18 @@ describe("versioned step file names", () => {
     ).toEqual([1]);
   });
 
+  it("a step number that isn't a whole number from 0, or a version below 1, is refused", () => {
+    for (const [n, k] of [
+      [-1, 1],
+      [1.5, 1],
+      [0, 0],
+      [0, 1.5],
+      [Number.NaN, 1],
+    ])
+      expect(() => stepFileName(n, k)).toThrow(RunNameError);
+    expect(() => stepAudioFileName(-1, 1)).toThrow(RunNameError);
+  });
+
   it("ignores files that only look like step files", () => {
     const files = [
       "step-01.v1.json",
@@ -186,7 +198,22 @@ describe("saving step versions", () => {
         saveStepVersion("demo-m1", 2, { i }, new Uint8Array([i])),
       ),
     );
-    expect(versions.sort()).toEqual([1, 2, 3, 4]);
+    expect(versions.sort((a, b) => a - b)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("a bad step number is refused before anything is written", async () => {
+    for (const n of [-1, 1.5])
+      await expect(
+        saveStepVersion("demo-m1", n, {}, new Uint8Array([1])),
+      ).rejects.toThrow(RunNameError);
+    expect(await listRunFiles("demo-m1")).toEqual([]);
+  });
+
+  it("a step with no JSON form is refused before its audio claims a version", async () => {
+    await expect(
+      saveStepVersion("demo-m1", 0, undefined, new Uint8Array([1])),
+    ).rejects.toThrow(TypeError);
+    expect(await listRunFiles("demo-m1")).toEqual([]);
   });
 
   it("a version whose save stopped after its audio is never reused", async () => {
@@ -205,6 +232,12 @@ describe("writes", () => {
     const result = await readRunFile("demo-m1", "step-0.v1.mp3");
     expect(result).toEqual({ kind: "ok", data: Buffer.from([1, 2, 3]) });
     expect(await listRunFiles("demo-m1")).toEqual(["step-0.v1.mp3"]);
+  });
+
+  it("a listing leaves out temporary files of writes in progress", async () => {
+    await writeRunJson("demo-m1", "plan.json", {});
+    await writeFile(path.join(dirs.runs, "demo-m1", "_in-progress.tmp"), "x");
+    expect(await listRunFiles("demo-m1")).toEqual(["plan.json"]);
   });
 
   it("an atomic write leaves no temporary file behind", async () => {

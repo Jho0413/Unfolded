@@ -20,7 +20,7 @@ import {
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { z } from "zod";
-import { LessonId, RunFileName } from "@/shared/lesson";
+import { LessonId, RUN_FILE_RE, RunFileName } from "@/shared/lesson";
 import { config } from "@/lib/config";
 
 /** What the route may serve, by extension. Anything else is never served. */
@@ -50,13 +50,23 @@ export function servableContentType(
 
 const STEP_FILE_RE = /^step-(0|[1-9]\d*)\.v([1-9]\d*)\.(json|mp3)$/;
 
+/** Step n (0-based) and version k (from 1) must be whole numbers, or the name won't parse back. */
+function checkStepNumbers(n: number, version: number): void {
+  if (!Number.isSafeInteger(n) || n < 0)
+    throw new RunNameError(`bad step number: ${n}`);
+  if (!Number.isSafeInteger(version) || version < 1)
+    throw new RunNameError(`bad step version: ${version}`);
+}
+
 /** step-<n>.v<k>.json: the step script and its cue times. */
 export function stepFileName(n: number, version: number): string {
+  checkStepNumbers(n, version);
   return `step-${n}.v${version}.json`;
 }
 
 /** step-<n>.v<k>.mp3: the narration audio of that version. */
 export function stepAudioFileName(n: number, version: number): string {
+  checkStepNumbers(n, version);
   return `step-${n}.v${version}.mp3`;
 }
 
@@ -112,7 +122,11 @@ const errorCode = (err: unknown) =>
 const isMissing = (err: unknown) =>
   errorCode(err) === "ENOENT" || errorCode(err) === "ENOTDIR";
 
-/** runs/<lessonId>/ must be a real folder: a symlink there could point anywhere. */
+/**
+ * runs/<lessonId>/ must be a real folder: a symlink there could point anywhere. The folder
+ * could still be swapped between this check and an open (Node has no openat), but that
+ * needs write access to runs/ on the laptop itself, which already means full access.
+ */
 async function checkRunDir(dir: string): Promise<void> {
   if (!(await lstat(dir)).isDirectory())
     throw new RunNameError(`run folder is not a directory: ${dir}`);
@@ -131,7 +145,10 @@ async function ensureRunDir(lessonId: string): Promise<string> {
   return dir;
 }
 
-/** The file names in a lesson's run folder. Empty when the folder doesn't exist yet. */
+/**
+ * The run file names in a lesson's folder (temporary files of writes in progress left out).
+ * Empty when the folder doesn't exist yet.
+ */
 export async function listRunFiles(lessonId: string): Promise<string[]> {
   const dir = runDir(lessonId);
   try {
@@ -140,7 +157,7 @@ export async function listRunFiles(lessonId: string): Promise<string[]> {
     if (isMissing(err)) return [];
     throw err;
   }
-  return readdir(dir);
+  return (await readdir(dir)).filter((file) => RUN_FILE_RE.test(file));
 }
 
 /**
@@ -151,14 +168,16 @@ async function writeTemp(dir: string, data: string | Uint8Array) {
   const tmp = path.join(dir, `_${randomUUID()}.tmp`);
   const handle = await open(tmp, "wx");
   try {
-    await handle.writeFile(data);
-    await handle.sync();
+    try {
+      await handle.writeFile(data);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
   } catch (err) {
-    await handle.close().catch(() => {});
     await rm(tmp, { force: true }).catch(() => {});
     throw err;
   }
-  await handle.close();
   return tmp;
 }
 
@@ -213,11 +232,14 @@ async function createRunFile(
   }
 }
 
+/** How many taken versions a save skips before giving up, so a name clash can't spin forever. */
+const MAX_VERSION_CLAIMS = 100;
+
 /**
  * Saves a new version of step n: its audio (step-<n>.v<k>.mp3), then its JSON
  * (step-<n>.v<k>.json). Returns k. Creating the audio claims version k, so two saves never
- * share a version and an older version is never overwritten. The JSON goes last, so once
- * a version is listed its audio is already there.
+ * share a version and an older version is never overwritten; if k is taken, it tries the
+ * next one. The JSON goes last, so once a version is listed its audio is already there.
  */
 export async function saveStepVersion(
   lessonId: string,
@@ -225,13 +247,21 @@ export async function saveStepVersion(
   step: unknown,
   audio: Uint8Array,
 ): Promise<number> {
-  for (;;) {
+  checkStepNumbers(n, 1);
+  // Serialised before claiming a version, so a step that can't be saved leaves no audio.
+  const text: string | undefined = JSON.stringify(step, null, 2);
+  if (text === undefined)
+    throw new TypeError(`step ${n} has no JSON form: ${String(step)}`);
+  const json = `${text}\n`;
+  for (let tries = 0; tries < MAX_VERSION_CLAIMS; tries++) {
     const k = nextStepVersion(await listRunFiles(lessonId), n);
     if (!(await createRunFile(lessonId, stepAudioFileName(n, k), audio)))
       continue;
-    const json = `${JSON.stringify(step, null, 2)}\n`;
     if (await createRunFile(lessonId, stepFileName(n, k), json)) return k;
   }
+  throw new Error(
+    `couldn't claim a version of step ${n} in ${lessonId} after ${MAX_VERSION_CLAIMS} tries`,
+  );
 }
 
 export type ReadResult =

@@ -61,7 +61,8 @@ test("no directory listing: a run folder URL never lists its files", async ({
   request,
 }) => {
   await using lesson = await savedLesson("listing");
-  for (const p of [`${lesson.lessonId}`, `${lesson.lessonId}/%2e%2e`]) {
+  // (A "%2e%2e" segment never gets here: the URL parser collapses it before sending.)
+  for (const p of [lesson.lessonId, `${lesson.lessonId}/`]) {
     const res = await request.get(`/api/runs/${p}`, { maxRedirects: 0 });
     expect([308, 404], p).toContain(res.status());
     expect(await res.text(), p).not.toContain("step-0.v1.json");
