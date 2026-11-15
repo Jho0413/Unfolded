@@ -21,6 +21,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { z } from "zod";
 import {
+  ANSWERS_DIR,
   EMPTY_SIGNALS,
   LessonId,
   RUN_FILE_RE,
@@ -142,8 +143,24 @@ function runDir(lessonId: string): string {
   return path.join(config.runsDir, lessonId);
 }
 
-function runFilePath(lessonId: string, file: string): string {
+/**
+ * A run folder's only subfolder: drawn answers' audio and records (#105). Their names follow
+ * the run file rules too.
+ */
+export type RunSubfolder = typeof ANSWERS_DIR;
+
+/** runs/<lessonId>/, or its subfolder. */
+function runFolder(lessonId: string, sub?: RunSubfolder): string {
   const dir = runDir(lessonId);
+  return sub === undefined ? dir : path.join(dir, sub);
+}
+
+function runFilePath(
+  lessonId: string,
+  file: string,
+  sub?: RunSubfolder,
+): string {
+  const dir = runFolder(lessonId, sub);
   if (!RunFileName.safeParse(file).success)
     throw new RunNameError(`bad run file name: ${JSON.stringify(file)}`);
   return path.join(dir, file);
@@ -164,17 +181,31 @@ async function checkRunDir(dir: string): Promise<void> {
     throw new RunNameError(`run folder is not a directory: ${dir}`);
 }
 
-/** Creates runs/<lessonId>/ if needed (never through a symlink) and returns its path. */
-async function ensureRunDir(lessonId: string): Promise<string> {
-  const dir = runDir(lessonId);
-  await mkdir(config.runsDir, { recursive: true });
+/** Makes a folder unless it's there, then checks it is a real folder, never a symlink. */
+async function ensureDir(dir: string): Promise<void> {
   try {
     await mkdir(dir);
   } catch (err) {
     if (errorCode(err) !== "EEXIST") throw err;
   }
   await checkRunDir(dir);
-  return dir;
+}
+
+/**
+ * Creates runs/<lessonId>/ (and its subfolder) if needed, never through a symlink, and returns
+ * the path of the folder asked for.
+ */
+async function ensureRunDir(
+  lessonId: string,
+  sub?: RunSubfolder,
+): Promise<string> {
+  const dir = runDir(lessonId);
+  await mkdir(config.runsDir, { recursive: true });
+  await ensureDir(dir);
+  if (sub === undefined) return dir;
+  const inner = runFolder(lessonId, sub);
+  await ensureDir(inner);
+  return inner;
 }
 
 /**
@@ -222,9 +253,10 @@ export async function writeRunFile(
   lessonId: string,
   file: string,
   data: string | Uint8Array,
+  sub?: RunSubfolder,
 ): Promise<void> {
-  const target = runFilePath(lessonId, file);
-  const tmp = await writeTemp(await ensureRunDir(lessonId), data);
+  const target = runFilePath(lessonId, file, sub);
+  const tmp = await writeTemp(await ensureRunDir(lessonId, sub), data);
   try {
     await rename(tmp, target);
   } catch (err) {
@@ -305,6 +337,24 @@ export async function saveStepVersion(
   );
 }
 
+/**
+ * Saves a drawn answer (#105) under runs/<lessonId>/answers/: its audio, <id>.mp3, then a
+ * record of what was drawn and said, <id>.json. Returns the audio's file name. Each answer
+ * gets a fresh random id, so answers never replace one another.
+ */
+export async function saveAnswer(
+  lessonId: string,
+  record: unknown,
+  audio: Uint8Array,
+): Promise<string> {
+  // Serialised first, so an answer that can't be recorded leaves no audio.
+  const json = toJsonText(record);
+  const id = randomUUID();
+  await writeRunFile(lessonId, `${id}.mp3`, audio, ANSWERS_DIR);
+  await writeRunFile(lessonId, `${id}.json`, json, ANSWERS_DIR);
+  return `${id}.mp3`;
+}
+
 export type ReadResult =
   | { kind: "ok"; data: Buffer }
   /** No such lesson folder or file. */
@@ -316,11 +366,13 @@ export type ReadResult =
 export async function readRunFile(
   lessonId: string,
   file: string,
+  sub?: RunSubfolder,
 ): Promise<ReadResult> {
   let target: string;
   try {
-    target = runFilePath(lessonId, file);
-    await checkRunDir(path.dirname(target));
+    target = runFilePath(lessonId, file, sub);
+    await checkRunDir(runDir(lessonId));
+    if (sub !== undefined) await checkRunDir(path.dirname(target));
   } catch (err) {
     if (err instanceof RunNameError)
       return { kind: "refused", reason: err.message };

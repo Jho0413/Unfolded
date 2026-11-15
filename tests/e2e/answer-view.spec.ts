@@ -8,12 +8,13 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { ANSWER_VIEW_TEXT } from "@/app/lesson/[lessonId]/boardView";
-import { ANSWER_CONTEXT } from "@/qa/answerContext";
+import { ANSWER_CONTEXT, answerContextUpdate } from "@/qa/answerContext";
 import { ANSWER_SHOWING } from "@/qa/tools";
 import { CANVAS } from "@/shared/scene";
 import { ANSWER_TEMPLATE } from "@/shared/validate";
 import { savedRun } from "./support/savedRun";
 import { answer, askQuestion, carryOn, goOn } from "./support/tutor";
+import { lessonOf, narratedReply } from "./support/answer";
 
 test.use({
   launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
@@ -31,9 +32,16 @@ const contextUpdates = (page: Page) =>
 
 /** The fake agent's draw_scene description (qa/fakeConversation.ts). */
 const DESCRIPTION = "Circle the first row of q";
+/** What the agent is told when the answer shows: the description and the narrator's words (#105). */
+const SHOWING_UPDATE = answerContextUpdate(false, {
+  kind: "drawn",
+  description: DESCRIPTION,
+  narration: "Here it is.",
+});
 
 /** Two answers laid out from the template, to tell a follow-up from the first. */
 const answerSketch = (id: string, title: string) => ({
+  narration: "[[c]]Here it is.",
   objects: [
     { kind: "text", id: `${id}_title`, x: 800, y: 110, text: title },
     {
@@ -45,7 +53,7 @@ const answerSketch = (id: string, title: string) => ({
       label: "row",
     },
   ],
-  actions: [{ do: "highlight", target: { id, row: 0 }, atMs: 0 }],
+  actions: [{ do: "highlight", target: { id, row: 0 }, cue: "c" }],
 });
 const FIRST = answerSketch("first", "Row times column");
 const SECOND = answerSketch("second", "The same, again");
@@ -54,7 +62,9 @@ const SECOND = answerSketch("second", "The same, again");
 async function fakeSketches(page: Page) {
   let n = 0;
   await page.route("**/api/sketch", (route) =>
-    route.fulfill({ json: { sketch: n++ === 0 ? FIRST : SECOND } }),
+    route.fulfill({
+      json: narratedReply(lessonOf(route), n++ === 0 ? FIRST : SECOND),
+    }),
   );
 }
 
@@ -83,9 +93,7 @@ test("draw_scene: the Answer view, with its tag and chip, instead of the lesson;
   await expect(
     object(page, "first").locator('[data-cell="0,0"]'),
   ).toHaveAttribute("data-highlight", "accent");
-  await expect
-    .poll(() => contextUpdates(page))
-    .toContain(ANSWER_CONTEXT.showing(DESCRIPTION));
+  await expect.poll(() => contextUpdates(page)).toContain(SHOWING_UPDATE);
 });
 
 test("a follow-up draw_scene replaces the drawing with the new one", async ({

@@ -1,6 +1,6 @@
 // The board during Ask (ARCHITECTURE.md sections 5.3 and 8).
 import { describe, expect, it } from "vitest";
-import { addAction, addSketch, askScene, EMPTY_LAYER } from "@/qa/askBoard";
+import { addAction, answerLayer, askScene, EMPTY_LAYER } from "@/qa/askBoard";
 import type { BoardObject, Sketch } from "@/shared/scene";
 
 const q: BoardObject = {
@@ -14,38 +14,47 @@ const q: BoardObject = {
   ],
 };
 const frozen = { objects: [q], timed: [], pausedT: 3000 };
+/** A narrated answer (#105): its note shows on the cue "note", 500 ms into its narration. */
 const sketch: Sketch = {
-  objects: [{ kind: "text", id: "note", x: 600, y: 400, text: "hi" }],
-  actions: [
-    {
-      do: "highlight",
-      target: { id: "q", row: 0 },
-      atMs: 500,
-      durationMs: 400,
-    },
+  narration: "Look at [[note]]this note.",
+  objects: [
+    { kind: "text", id: "note", x: 600, y: 400, text: "hi", hidden: true },
   ],
+  actions: [{ do: "show", target: { id: "note" }, cue: "note", durationMs: 0 }],
 };
+const CUES = { note: 500 };
 
 const rowHighlight = (b: ReturnType<typeof askScene>) =>
   b.objects.find((s) => s.object.id === "q")?.cellHighlight?.[0];
 
 describe("askScene", () => {
   it("with nothing drawn, is the frozen board", () => {
-    const b = askScene(frozen, EMPTY_LAYER, 10_000);
+    const b = askScene(frozen, EMPTY_LAYER, 10_000, 0);
     expect(b.objects.map((s) => s.object.id)).toEqual(["q"]);
     expect(rowHighlight(b)).toEqual([null, null]);
   });
 
-  it("draws a sketch on top, its actions timed from arrival plus atMs", () => {
-    const layer = addSketch(EMPTY_LAYER, sketch, 1000, false);
-    expect(
-      askScene(frozen, layer, 1000).objects.map((s) => s.object.id),
-    ).toEqual(["q", "note"]);
-    expect(rowHighlight(askScene(frozen, layer, 1499))).toEqual([null, null]);
-    expect(rowHighlight(askScene(frozen, layer, 1500))).toEqual([
-      "accent",
-      "accent",
-    ]);
+  it("a drawn answer replaces the board, its actions on their cues on the answer's own clock", () => {
+    const layer = answerLayer(sketch, CUES);
+    expect(layer.fresh).toBe(true);
+    const visible = (answerMs: number, sinceOpen = 0) =>
+      askScene(frozen, layer, sinceOpen, answerMs).objects.map((s) => [
+        s.object.id,
+        s.visible,
+      ]);
+    // Only the answer: the lesson board is left out.
+    expect(visible(0)).toEqual([["note", false]]);
+    expect(visible(499)).toEqual([["note", false]]);
+    expect(visible(500)).toEqual([["note", true]]);
+    // Its clock is its narration's, not the time since Ask opened.
+    expect(visible(0, 10_000)).toEqual([["note", false]]);
+    // Past the end (Infinity): the whole drawing.
+    expect(visible(Infinity)).toEqual([["note", true]]);
+  });
+
+  it("an answer's action whose cue has no time never fires (as in a step)", () => {
+    const layer = answerLayer(sketch, {});
+    expect(layer.timed).toEqual([]);
   });
 
   it("a highlight tool call takes effect when it arrives", () => {
@@ -55,29 +64,21 @@ describe("askScene", () => {
       200,
     );
     const col = (t: number) =>
-      askScene(frozen, layer, t).objects[0].cellHighlight?.map((r) => r[1]);
+      askScene(frozen, layer, t, 0).objects[0].cellHighlight?.map((r) => r[1]);
     expect(col(199)).toEqual([null, null]);
     expect(col(200)).toEqual(["accent", "accent"]);
   });
 
-  it("a fresh sketch leaves out the lesson board and earlier drawings", () => {
-    const fresh: Sketch = {
-      objects: [{ kind: "text", id: "box", x: 50, y: 50, text: "new" }],
-      actions: [],
-    };
-    const layer = addSketch(
-      addSketch(EMPTY_LAYER, sketch, 0, false),
-      fresh,
-      100,
-      true,
+  it("a drawn answer replaces earlier highlights (always a fresh board)", () => {
+    const highlighted = addAction(
+      EMPTY_LAYER,
+      { do: "highlight", target: { id: "q" }, durationMs: 0 },
+      0,
     );
-    expect(layer.fresh).toBe(true);
-    expect(
-      askScene(frozen, layer, 200).objects.map((s) => s.object.id),
-    ).toEqual(["box"]);
-    // Later sketches build on the fresh board.
-    const later = addSketch(layer, { objects: [], actions: [] }, 300, false);
-    expect(later.fresh).toBe(true);
+    expect(highlighted.timed).toHaveLength(1);
+    const layer = answerLayer(sketch, CUES);
+    expect(layer.objects.map((o) => o.id)).toEqual(["note"]);
+    expect(layer.timed.map((t) => t.startMs)).toEqual([500]);
   });
 
   it("keeps the lesson actions that started by pausedT, not later ones", () => {
@@ -88,7 +89,7 @@ describe("askScene", () => {
         durationMs: 0,
       },
     ];
-    const b = askScene({ ...frozen, timed }, EMPTY_LAYER, 10_000);
+    const b = askScene({ ...frozen, timed }, EMPTY_LAYER, 10_000, 0);
     expect(b.objects[0].visible).toBe(true);
   });
 });

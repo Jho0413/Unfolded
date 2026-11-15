@@ -7,7 +7,7 @@ import { afterAskEvent } from "@/player/controls";
 import { type PlayerState, transition } from "@/player/machine";
 import {
   addAction,
-  addSketch,
+  answerLayer,
   type AskLayer,
   askScene,
   EMPTY_LAYER,
@@ -27,11 +27,12 @@ const lessonObject: BoardObject = {
 };
 const frozen = { objects: [lessonObject], timed: [], pausedT: 1000 };
 const sketch = (id: string): Sketch => ({
+  narration: "Here is an answer.",
   objects: [{ kind: "text", id, x: 800, y: 110, text: "an answer" }],
   actions: [],
 });
 const ids = (layer: AskLayer) =>
-  askScene(frozen, layer, 0).objects.map((s) => s.object.id);
+  askScene(frozen, layer, 0, Infinity).objects.map((s) => s.object.id);
 
 const explaining = { kind: "playing", step: 1 } as const;
 const asking: PlayerState = { kind: "asking", from: explaining };
@@ -41,7 +42,7 @@ const CTX = { stepCount: 3 };
 describe("the Answer view table", () => {
   it("Lesson (asking, no sketch), draw_scene succeeds: Answer view, the drawing only, the lesson hidden", () => {
     expect(boardView(true, EMPTY_LAYER)).toBe("lesson");
-    const layer = addSketch(EMPTY_LAYER, sketch("first"), 0, true);
+    const layer = answerLayer(sketch("first"), {});
     expect(boardView(true, layer)).toBe("answer");
     expect(ids(layer)).toEqual(["first"]);
   });
@@ -57,8 +58,8 @@ describe("the Answer view table", () => {
   });
 
   it("Answer, draw_scene again (a follow-up): the new drawing replaces the old", () => {
-    const first = addSketch(EMPTY_LAYER, sketch("first"), 0, true);
-    const second = addSketch(first, sketch("second"), 500, true);
+    expect(boardView(true, answerLayer(sketch("first"), {}))).toBe("answer");
+    const second = answerLayer(sketch("second"), {});
     expect(boardView(true, second)).toBe("answer");
     expect(ids(second)).toEqual(["second"]);
   });
@@ -70,7 +71,7 @@ describe("the Answer view table", () => {
       type: "resume",
     });
     // Leaving asking is what removes the Answer view: one source of truth.
-    const layer = addSketch(EMPTY_LAYER, sketch("first"), 0, true);
+    const layer = answerLayer(sketch("first"), {});
     expect(boardView(false, layer)).toBe("lesson");
   });
 
@@ -93,14 +94,14 @@ describe("the Answer view table", () => {
     expect(afterLeavingAsk("carryOn", "answer", explaining, closed.state)).toBe(
       null,
     );
-    const layer = addSketch(EMPTY_LAYER, sketch("first"), 0, true);
+    const layer = answerLayer(sketch("first"), {});
     expect(boardView(closed.state.kind === "asking", layer)).toBe("lesson");
   });
 
   it(`Answer, the highlight tool: a no-op, the agent is told "${ANSWER_SHOWING}"`, async () => {
     const session = createAskSession(() => 0);
     session.open();
-    session.addSketch(sketch("first"), true);
+    session.showAnswer(sketch("first"), {});
     const highlight = vi.fn();
     const tools = createClientTools({
       board: session.board,
@@ -108,7 +109,8 @@ describe("the Answer view table", () => {
       send: (event) => transition(asking, event, CTX),
       isAsking: session.isAsking,
       askId: session.askId,
-      drawSketch: () => {},
+      lessonId: "lesson-1",
+      playAnswer: async () => ({ kind: "shown" }),
       showNotice: () => {},
       answerShowing: () =>
         boardView(session.isAsking(), session.layer()) === "answer",
@@ -123,7 +125,7 @@ describe("the Answer view table", () => {
     for (const drawnBefore of [true, false]) {
       const session = createAskSession(() => 0);
       session.open();
-      if (drawnBefore) session.addSketch(sketch("first"), true);
+      if (drawnBefore) session.showAnswer(sketch("first"), {});
       const before = boardView(session.isAsking(), session.layer());
       const showNotice = vi.fn();
       const tools = createClientTools({
@@ -132,7 +134,11 @@ describe("the Answer view table", () => {
         send: (event) => transition(asking, event, CTX),
         isAsking: session.isAsking,
         askId: session.askId,
-        drawSketch: (s) => session.addSketch(s, true),
+        lessonId: "lesson-1",
+        playAnswer: async (a) => {
+          session.showAnswer(a.sketch, a.cueTimes);
+          return { kind: "shown" };
+        },
         showNotice,
         fetch: async () =>
           Response.json({ error: SKETCH_FAILED }, { status: 502 }),
@@ -155,7 +161,7 @@ describe("the Answer view table", () => {
     const session = createAskSession(() => 0);
     session.open();
     session.close();
-    session.addSketch(sketch("late"), true);
+    session.showAnswer(sketch("late"), {});
     expect(boardView(session.isAsking(), session.layer())).toBe("lesson");
     expect(session.layer().objects).toEqual([]);
   });

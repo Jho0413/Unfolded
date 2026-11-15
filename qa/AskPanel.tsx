@@ -11,7 +11,7 @@
 // the tutor card (player/cardView.ts askCard) with only the latest question
 // and answer. The connection itself is qa/connector.ts, unchanged.
 import { stripVoiceTags } from "./voiceTags";
-import { AgentTurn, BargeIn } from "./bargeIn";
+import { AgentTurn, BargeIn, type BargeInSignal } from "./bargeIn";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentSignedUrlResponse, AgentTokenResponse } from "@/shared/lesson";
 import {
@@ -72,6 +72,12 @@ export type AskPanelProps = {
    * as a question signal unless it turns out to be a command (qa/askSignals.ts).
    */
   onLearnerMessage?: (text: string) => void;
+  /**
+   * The learner spoke while Ask is open in a voice session (barge-in's VAD and transcript
+   * signals, qa/bargeIn.ts, not the agent speaking): the lesson page holds a drawn answer's
+   * narration with it (#105).
+   */
+  onLearnerSpeech?: (signal: BargeInSignal) => void;
 };
 
 const NO_DRAWING: { asked: number; drewFor: number | null } = {
@@ -107,6 +113,7 @@ export function AskPanel({
   captions = true,
   live = false,
   onLearnerMessage,
+  onLearnerSpeech,
 }: AskPanelProps) {
   const [session, setSession] = useState<ConnectorState>(
     () => INITIAL_CONNECTOR_STATE,
@@ -122,9 +129,19 @@ export function AskPanel({
     contextRef.current = { context, questions };
   });
   // The page's callbacks, read by the connector, which outlives renders.
-  const pageRef = useRef({ onClose, onAgentDisconnected, onLearnerMessage });
+  const pageRef = useRef({
+    onClose,
+    onAgentDisconnected,
+    onLearnerMessage,
+    onLearnerSpeech,
+  });
   useEffect(() => {
-    pageRef.current = { onClose, onAgentDisconnected, onLearnerMessage };
+    pageRef.current = {
+      onClose,
+      onAgentDisconnected,
+      onLearnerMessage,
+      onLearnerSpeech,
+    };
   });
 
   // Typed questions sent but not yet echoed back by the conversation.
@@ -144,11 +161,16 @@ export function AskPanel({
     () => setDrawn((d) => ({ ...d, drewFor: d.asked })),
     [],
   );
+  // A draw_scene answer is being made: the card says "Sketching…" (#105).
+  const [sketching, setSketching] = useState(false);
 
   // Spoken commands wait for the agent to finish speaking (its "Sure." before the narration).
   const [agentTurn] = useState(() => new AgentTurn());
   // Barge-in (issue #93): armed while the lesson's session listens with Ask closed.
   const [bargeIn] = useState(() => new BargeIn());
+  // The learner's own signals (VAD and transcripts, not the agent speaking) while Ask is open
+  // (#105): the learner speaking over a drawn answer.
+  const [speech] = useState(() => new BargeIn());
   // The learner's privacy switch for the lesson's mic (issue #93).
   const [muted, setMuted] = useState(false);
 
@@ -160,6 +182,7 @@ export function AskPanel({
             showNotice: setToolNotice,
             tellAgent: (t) => link.tell(t),
             sketchDrawn,
+            sketching: setSketching,
             afterAgentSpeaks: (fn) => agentTurn.after(fn),
           })
         : tools,
@@ -184,12 +207,19 @@ export function AskPanel({
         return;
       }
       // Words in the lesson's session with Ask closed: the learner spoke, or the agent did.
-      if (m.role === "user") bargeIn.transcript(m.text);
-      else bargeIn.agentSpeaking(true);
+      // While Ask is open only the learner's words count (`speech`): the agent's own voice
+      // never holds a drawn answer.
+      if (m.role === "user") {
+        bargeIn.transcript(m.text);
+        speech.transcript(m.text);
+      } else bargeIn.agentSpeaking(true);
       addMessage(m);
     },
     onError: (message) => connectorRef.current?.error(message),
-    onVadScore: (score) => bargeIn.vad(score),
+    onVadScore: (score) => {
+      bargeIn.vad(score);
+      speech.vad(score);
+    },
     onAgentSpeaking: (speaking) => {
       bargeIn.agentSpeaking(speaking);
       agentTurn.setSpeaking(speaking);
@@ -277,6 +307,7 @@ export function AskPanel({
       setDraft("");
       setToolNotice(null);
       setDrawn(NO_DRAWING);
+      setSketching(false);
     };
   }, [open, replay, addMessage, agentTurn]);
 
@@ -331,6 +362,22 @@ export function AskPanel({
   // the input holds a draft. Only then: once a typed question is sent (the draft clears, the
   // input keeps focus) the mic is back, so a spoken "carry on" still works.
   const micOff = muted || (inputFocused && draft !== "");
+  // While Ask is open in a voice session with the mic on, the learner speaking is passed to
+  // the page (a drawn answer's narration holds). It fires once per arming, so it re-arms.
+  const hearing =
+    open && session.phase === "connected" && !session.textOnly && !micOff;
+  const hearingRef = useRef(hearing);
+  useEffect(() => {
+    hearingRef.current = hearing;
+    if (hearing) speech.arm();
+    else speech.disarm();
+  }, [hearing, speech]);
+  useEffect(() => {
+    speech.setHandler((signal) => {
+      pageRef.current.onLearnerSpeech?.(signal);
+      if (hearingRef.current) speech.arm();
+    });
+  }, [speech]);
   const micOffRef = useRef(micOff);
   useEffect(() => {
     micOffRef.current = micOff;
@@ -389,6 +436,7 @@ export function AskPanel({
     question,
     answer,
     drew: drawn.drewFor === drawn.asked,
+    sketching,
     captions,
   });
 

@@ -21,6 +21,7 @@ import {
   nextIdea,
   sayAgain,
 } from "./support/tutor";
+import { lessonOf, narratedReply } from "./support/answer";
 
 test.use({
   launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
@@ -64,6 +65,7 @@ const answerView = (page: Page) => page.getByTestId("answer-view");
 
 /** A drawn answer, laid out from the answer template (it names only its own objects). */
 const SKETCH = {
+  narration: "[[c]]Here it is.",
   objects: [
     { kind: "text", id: "title", x: 800, y: 110, text: "Row times column" },
     {
@@ -98,7 +100,7 @@ const SKETCH = {
       size: "s",
     },
   ],
-  actions: [{ do: "highlight", target: { id: "row", row: 0 }, atMs: 0 }],
+  actions: [{ do: "highlight", target: { id: "row", row: 0 }, cue: "c" }],
 };
 
 test("no transport: Hold on → Holding on → Go on → the step ends → Next: <title> → step 2", async ({
@@ -269,7 +271,7 @@ test("a draw_scene answer: Drawing on the board, in the Answer view instead of t
   page,
 }) => {
   await page.route("**/api/sketch", (route) =>
-    route.fulfill({ json: { sketch: SKETCH } }),
+    route.fulfill({ json: narratedReply(lessonOf(route), SKETCH) }),
   );
   await using run = await savedRun("e2e-tutor-drawn");
   await page.goto(`/lesson/${run.lessonId}`);
@@ -459,7 +461,7 @@ test("the system's theme with nothing saved: light when it prefers light", async
 for (const theme of ["dark", "light"] as const) {
   test(`evidence: the tutor at 1440 x 900, ${theme}`, async ({ page }) => {
     await page.route("**/api/sketch", (route) =>
-      route.fulfill({ json: { sketch: SKETCH } }),
+      route.fulfill({ json: narratedReply(lessonOf(route), SKETCH) }),
     );
     await using run = await savedRun(`e2e-tutor-shots-${theme}`, {
       steps: 3,

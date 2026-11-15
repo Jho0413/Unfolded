@@ -1,9 +1,9 @@
 {
   "type": "client",
   "name": "draw_scene",
-  "description": "Sketch an answer on a clean answer board. Waits until it is drawn, then returns what is on the board (or why it couldn't be drawn): explain the drawing only after that.",
+  "description": "Show the answer as a narrated drawing on a clean answer board: the lesson's narrator explains it while it draws. Waits until it has played, then returns what was said (or that the learner spoke over it, or why it couldn't be drawn). Stay quiet until then.",
   "expects_response": true,
-  "response_timeout_secs": 50,
+  "response_timeout_secs": 120,
   "parameters": {
     "type": "object",
     "description": "What to sketch",

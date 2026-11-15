@@ -12,6 +12,7 @@ import { STEP_SYSTEM_PROMPT } from "@/lib/pipeline/prompts/step";
 import {
   BOARD_ACTIONS_PROMPT,
   BOARD_OBJECTS_PROMPT,
+  NARRATION_RULES_PROMPT,
 } from "@/lib/pipeline/prompts/board";
 import {
   buildSketchRequest,
@@ -22,6 +23,7 @@ import { ANSWER_TEMPLATE } from "@/shared/validate";
 
 const REQ: SketchRequestBody = {
   description: "why the row goes with the column",
+  lessonId: "lesson-1",
   fresh: false,
   board: {
     objects: [
@@ -43,11 +45,11 @@ const userText = (req: SketchRequestBody) => {
 };
 
 describe("buildSketchRequest", () => {
-  it("uses the sketch model, medium effort and the output cap from lib/config.ts", () => {
+  it("uses the sketch model, low effort (#105) and the output cap from lib/config.ts", () => {
     const body = buildSketchRequest(REQ);
     expect(body.model).toBe(config.models.sketch);
-    expect(body.output_config?.effort).toBe("medium");
-    expect(config.effort.sketch).toBe("medium");
+    expect(body.output_config?.effort).toBe("low");
+    expect(config.effort.sketch).toBe("low");
     expect(body.max_tokens).toBe(config.sketch.maxTokens);
   });
 
@@ -118,11 +120,23 @@ describe("buildSketchRequest", () => {
 });
 
 describe("the sketch prompt", () => {
-  it("describes the board exactly as the step prompt does (one shared text)", () => {
-    for (const part of [BOARD_OBJECTS_PROMPT, BOARD_ACTIONS_PROMPT]) {
+  it("describes the board, and how a narration is spoken and cued, exactly as the step prompt does (one shared text)", () => {
+    for (const part of [
+      BOARD_OBJECTS_PROMPT,
+      BOARD_ACTIONS_PROMPT,
+      NARRATION_RULES_PROMPT,
+    ]) {
       expect(SKETCH_SYSTEM_PROMPT).toContain(part);
       expect(STEP_SYSTEM_PROMPT).toContain(part);
     }
+  });
+
+  it("asks for a short narration within ANSWER_TEMPLATE.maxNarrationChars, with every action on a cue (#105)", () => {
+    expect(SKETCH_SYSTEM_PROMPT).toContain(
+      `at most ${ANSWER_TEMPLATE.maxNarrationChars} characters`,
+    );
+    expect(SKETCH_SYSTEM_PROMPT).toContain("Each action has a cue");
+    expect(SKETCH_SYSTEM_PROMPT).not.toContain("atMs");
   });
 
   it("never draws empty matrices as placeholders, and keeps arrows and their labels clear of other objects", () => {

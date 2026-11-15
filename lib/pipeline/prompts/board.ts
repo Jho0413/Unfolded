@@ -1,6 +1,6 @@
 // What every whiteboard prompt (steps and Q&A sketches) says about the board: its objects,
-// targets and actions. Built from constants only, so the step prompt that embeds it stays
-// byte-identical between requests and keeps its cache.
+// targets and actions, and how a narration is spoken and cued. Built from constants only, so
+// the step prompt that embeds it stays byte-identical between requests and keeps its cache.
 import "server-only";
 import { CANVAS, CELL, MAX_MATRIX_DIM } from "@/shared/scene";
 
@@ -25,3 +25,7 @@ export const BOARD_ACTIONS_PROMPT = `A target is an object id, optionally with r
 - write: replaces a text object's text, or a matrix cell's value (needs both row and col), with value. Not for latex or arrows.
 
 Every action has the same fields: color is only for highlight and unhighlight, to only for move (which needs it), and value only for write (which needs it).`;
+
+/** How a narration is written for the voice, and how its cue markers work (two list items). */
+export const NARRATION_RULES_PROMPT = `- Plain spoken English. The voice reads symbols badly, so spell all maths out in words: "x squared", not "x²" or "x^2"; "the square root of d", not "√d"; "alpha", not "α". No markdown, no LaTeX, no maths symbols. Formulas belong on the board, in latex objects.
+- Cue markers mark the word where an action fires: \`[[name]]\` placed directly before that word, as in "take the [[first]]first row". A name is lowercase letters, digits and underscores, starting with a letter, at most 32 characters. Each name appears once. Any other use of double square brackets is an error.`;

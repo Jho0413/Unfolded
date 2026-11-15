@@ -11,6 +11,7 @@ import {
   carryOn,
   holdOn,
 } from "./support/tutor";
+import { lessonOf, narratedReply } from "./support/answer";
 
 test.use({
   launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
@@ -38,10 +39,11 @@ const typeQuestion = askQuestion;
 
 /** A drawn answer: on its own board (the Answer view), so it names only its own objects. */
 const SKETCH = {
+  narration: "[[c]]Here it is.",
   objects: [
     { kind: "text", id: "note", x: 800, y: 450, text: "row times column" },
   ],
-  actions: [{ do: "highlight", target: { id: "note" }, atMs: 0 }],
+  actions: [{ do: "highlight", target: { id: "note" }, cue: "c" }],
 };
 
 test("typed question -> asking -> highlight, then draw (the Answer view) -> carry on -> the lesson goes on, board restored", async ({
@@ -52,7 +54,7 @@ test("typed question -> asking -> highlight, then draw (the Answer view) -> carr
   const gate = new Promise<void>((r) => (release = r));
   await page.route("**/api/sketch", async (route) => {
     await gate;
-    await route.fulfill({ json: { sketch: SKETCH } });
+    await route.fulfill({ json: narratedReply(lessonOf(route), SKETCH) });
   });
   await page.goto(`/lesson/${run.lessonId}`);
   await expect(player(page)).toHaveAttribute("data-state", "playing");

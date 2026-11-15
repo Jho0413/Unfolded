@@ -1,13 +1,14 @@
 // One lesson's Ask session state, outside React (ARCHITECTURE.md section 8):
-// the Ask layer drawn on the frozen board, when Ask opened, and which Ask
-// session it is. The page opens and closes it as the player enters and leaves
-// `asking`; the client tools and the board read it. A small store, so tool
-// handlers can read it outside render.
+// the Ask layer drawn on the frozen board (or a drawn answer instead, on its
+// own clock), when Ask opened, and which Ask session it is. The page opens and
+// closes it as the player enters and leaves `asking`; the client tools and the
+// board read it. A small store, so tool handlers can read it outside render.
 import type { TimedAction } from "@/player/sceneAt";
+import type { CueTimes } from "@/shared/lesson";
 import type { Action, SceneObject, BoardState, Sketch } from "@/shared/scene";
 import {
   addAction,
-  addSketch,
+  answerLayer,
   type AskLayer,
   askScene,
   EMPTY_LAYER,
@@ -22,6 +23,8 @@ export function createAskSession(now: () => number = () => performance.now()) {
   let openedAt = 0;
   let askId = 0;
   let frozen: FrozenBoard = { objects: [], timed: [], pausedT: 0 };
+  // A drawn answer's clock: ms into its narration (the page's answer player sets it).
+  let answerClock: () => number = () => Infinity;
   let version = 0;
   const listeners = new Set<() => void>();
   const changed = () => {
@@ -67,12 +70,17 @@ export function createAskSession(now: () => number = () => performance.now()) {
     addAction(action: Action): void {
       if (asking) setLayer(addAction(layer, action, sinceOpen()));
     },
-    addSketch(sketch: Sketch, fresh: boolean): void {
-      if (asking) setLayer(addSketch(layer, sketch, sinceOpen(), fresh));
+    /** A drawn answer (#105) replaces the board, timed on its cues; any earlier one goes. */
+    showAnswer(sketch: Sketch, cueTimes: CueTimes): void {
+      if (asking) setLayer(answerLayer(sketch, cueTimes));
     },
-    /** The board on screen while asking: the frozen board plus the drawing. */
+    /** Where the drawn answer's clock comes from: ms into its narration. */
+    setAnswerClock(clock: () => number): void {
+      answerClock = clock;
+    },
+    /** The board on screen while asking: the frozen board plus highlights, or the answer. */
     board(): BoardState {
-      return askScene(frozen, layer, asking ? sinceOpen() : 0);
+      return askScene(frozen, layer, asking ? sinceOpen() : 0, answerClock());
     },
   };
 }

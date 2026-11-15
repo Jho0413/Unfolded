@@ -20,6 +20,9 @@ import {
   type ValidationResult,
 } from "@/shared/validate";
 
+/** A narrated answer's narration (#105): its one cue, "c", fires on the first word. */
+const SAID = "[[c]]Here it is.";
+
 const limits = { maxNarrationChars: 2000 };
 
 /** A small valid step: matrix m (2 x 2), text t, latex l, arrow r, image i. */
@@ -596,16 +599,17 @@ describe("validate: ARCHITECTURE.md section 4 table", () => {
   });
 
   const sketch: Sketch = {
+    narration: SAID,
     objects: [{ kind: "text", id: "note", x: 400, y: 600, text: "why?" }],
     actions: [
       {
-        atMs: 0,
+        cue: "c",
         do: "highlight",
         target: { id: "m", row: 0 },
         durationMs: 400,
       },
       {
-        atMs: 500,
+        cue: "c",
         do: "move",
         target: { id: "note" },
         to: { id: "m", row: 1, col: 1 },
@@ -627,6 +631,7 @@ describe("validate: ARCHITECTURE.md section 4 table", () => {
 
   it('A sketch object reuses an id from the board it draws on: rejected: duplicate id "x"', () => {
     const reuse: Sketch = {
+      narration: SAID,
       objects: [{ kind: "text", id: "t", x: 400, y: 600, text: "dup" }],
       actions: [],
     };
@@ -642,11 +647,76 @@ describe("validate: ARCHITECTURE.md section 4 table", () => {
         {
           ...reuse,
           actions: [
-            { atMs: 0, do: "highlight", target: { id: "t" }, durationMs: 400 },
+            { cue: "c", do: "highlight", target: { id: "t" }, durationMs: 400 },
           ],
         },
         { board: lessonBoard, fresh: true },
       ),
+    );
+  });
+});
+
+// A narrated answer's narration (#105, ARCHITECTURE.md section 4): the step's narration rules,
+// shared, with the answer's own length cap.
+describe("validate: a narrated sketch's narration (#105)", () => {
+  const FRESH = { board: lessonBoard, fresh: true };
+  const said = (narration: string, cue = "c"): Sketch => ({
+    narration,
+    objects: [{ kind: "text", id: "t", x: 800, y: 450, text: "hi" }],
+    actions: [{ cue, do: "highlight", target: { id: "t" }, durationMs: 400 }],
+  });
+
+  it("A sketch's actions on cues of its narration: valid", () => {
+    expectValid(validateSketch(said("Look [[c]]here."), FRESH));
+  });
+
+  it('A sketch action\'s cue not in its narration: rejected: unknown cue "x"', () => {
+    expectErrors(
+      validateSketch(said("Look [[c]]here.", "elsewhere"), FRESH),
+      errors.unknownCue("elsewhere"),
+    );
+  });
+
+  it('A marker twice in a sketch\'s narration: rejected: duplicate cue "x"', () => {
+    expectErrors(
+      validateSketch(said("[[c]]Look [[c]]here."), FRESH),
+      errors.duplicateCue("c"),
+    );
+  });
+
+  it('A malformed marker in a sketch\'s narration: rejected: malformed marker "[[Row 1]]"', () => {
+    expectErrors(
+      validateSketch(said("[[c]]Look [[Row 1]]here."), FRESH),
+      errors.malformedMarker("[[Row 1]]"),
+    );
+  });
+
+  it("A sketch's narration with only markers: rejected: narration empty", () => {
+    expectErrors(
+      validateSketch(said("  [[c]]  "), FRESH),
+      errors.narrationEmpty(),
+    );
+  });
+
+  it("A sketch's narration over ANSWER_TEMPLATE.maxNarrationChars: rejected: narration too long", () => {
+    const max = ANSWER_TEMPLATE.maxNarrationChars;
+    expectValid(validateSketch(said(`[[c]]${"a".repeat(max)}`), FRESH));
+    expectErrors(
+      validateSketch(said(`[[c]]${"a".repeat(max + 1)}`), FRESH),
+      errors.narrationTooLong(),
+    );
+  });
+
+  it("A sketch with no narration: rejected: the schema error", () => {
+    const silent: Partial<Sketch> = said("Look [[c]]here.");
+    delete silent.narration;
+    expect(validateSketch(silent, FRESH).ok).toBe(false);
+  });
+
+  it("The same rules hold on the lesson board (not fresh)", () => {
+    expectErrors(
+      validateSketch(said("Look here.", "c"), { board: lessonBoard }),
+      errors.unknownCue("c"),
     );
   });
 });
@@ -685,6 +755,7 @@ describe("validate: a fresh sketch's answer template (#90)", () => {
     label: "divide",
   };
   const answer = (...objects: BoardObject[]): Sketch => ({
+    narration: SAID,
     objects,
     actions: [],
   });
@@ -776,10 +847,11 @@ describe("validate: a fresh sketch's answer template (#90)", () => {
       errors.outsideAnswerArea("edge"),
     );
     const moved: Sketch = {
+      narration: SAID,
       objects: [title],
       actions: [
         {
-          atMs: 0,
+          cue: "c",
           do: "move",
           target: { id: "title" },
           to: { x: 40, y: 450 },
@@ -842,10 +914,11 @@ describe("validate: a fresh sketch's answer template (#90)", () => {
       [answer({ ...a, rows: [["q_1", "2"]] }), "a"],
       [
         {
+          narration: SAID,
           objects: [title],
           actions: [
             {
-              atMs: 0,
+              cue: "c",
               do: "write",
               target: { id: "title" },
               value: "x^2",
@@ -1011,7 +1084,11 @@ describe("validate: the answer template (property, #90)", () => {
             to: { id: item.id },
           }))
         : [];
-      return { objects: [...lines, ...items, ...arrows], actions: [] };
+      return {
+        narration: SAID,
+        objects: [...lines, ...items, ...arrows],
+        actions: [],
+      };
     });
 
   it("a layout that follows the template, any kinds and sizes pushed to the content area's edges, is valid", () => {
@@ -1080,7 +1157,10 @@ describe("validate: the answer template (property, #90)", () => {
             id: "q",
           };
           expectErrors(
-            validateSketch({ objects: [first, second], actions: [] }, FRESH),
+            validateSketch(
+              { narration: SAID, objects: [first, second], actions: [] },
+              FRESH,
+            ),
             errors.overlap("p", "q", gap),
           );
         },
@@ -1102,7 +1182,7 @@ describe("validate: the answer template (property, #90)", () => {
           };
           fc.pre(objectBox(second)!.x1 <= area.x1);
           const r = validateSketch(
-            { objects: [first, second], actions: [] },
+            { narration: SAID, objects: [first, second], actions: [] },
             FRESH,
           );
           expect(r).toMatchObject({
@@ -1131,6 +1211,7 @@ describe("validate: the answer template (property, #90)", () => {
     );
     function answer(text: string): Sketch {
       return {
+        narration: SAID,
         objects: [{ kind: "text", id: "t", x: 800, y: 450, text, size: "s" }],
         actions: [],
       };

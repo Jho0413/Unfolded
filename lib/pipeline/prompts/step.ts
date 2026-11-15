@@ -12,6 +12,7 @@ import { config } from "@/lib/config";
 import {
   BOARD_ACTIONS_PROMPT,
   BOARD_OBJECTS_PROMPT,
+  NARRATION_RULES_PROMPT,
 } from "@/lib/pipeline/prompts/board";
 import {
   PAPER_REFS_PROMPT,
@@ -26,8 +27,7 @@ The paper is attached. Teach from it: use its notation, definitions and numbers 
 # Narration
 
 - Spoken aloud by a text-to-speech voice, at most ${config.maxNarrationChars} characters once markers are removed. Aim for 30 to 90 seconds of speech.
-- Plain spoken English. The voice reads symbols badly, so spell all maths out in words: "x squared", not "x²" or "x^2"; "the square root of d", not "√d"; "alpha", not "α". No markdown, no LaTeX, no maths symbols. Formulas belong on the board, in latex objects.
-- Cue markers mark the word where an action fires: \`[[name]]\` placed directly before that word, as in "take the [[first]]first row". A name is lowercase letters, digits and underscores, starting with a letter, at most 32 characters. Each name appears once. Any other use of double square brackets is an error.
+${NARRATION_RULES_PROMPT}
 
 ${BOARD_OBJECTS_PROMPT}
 

@@ -11,12 +11,13 @@ import {
   type PlayerState,
   transition,
 } from "@/player/machine";
+import type { CueTimes } from "@/shared/lesson";
 import type { Action, BoardObject, BoardState, Sketch } from "@/shared/scene";
 import { ConversationProvider } from "@/qa/conversation";
 import { AskPanel, type AskApi } from "@/qa/AskPanel";
 import {
   addAction,
-  addSketch,
+  answerLayer,
   type AskLayer,
   askScene,
   EMPTY_LAYER,
@@ -60,6 +61,8 @@ function boardOf(objects: BoardObject[]): BoardState {
   };
 }
 const CTX = { stepCount: PLAN.length };
+/** The run folder a drawn answer's audio is saved in: this page has no lesson of its own. */
+const DEV_ASK_LESSON = "dev-ask";
 
 /**
  * The player machine and the Ask layer as a tiny store: send() answers
@@ -106,15 +109,21 @@ function createMachine() {
     askId: () => askId,
     addAction: (a: Action) =>
       set({ layer: addAction(snap.layer, a, sinceOpen()) }),
-    addSketch: (sketch: Sketch, fresh: boolean) =>
-      set({ layer: addSketch(snap.layer, sketch, sinceOpen(), fresh) }),
+    showAnswer: (sketch: Sketch, cueTimes: CueTimes) =>
+      set({ layer: answerLayer(sketch, cueTimes) }),
     /** The board on screen: the frozen lesson board plus the Ask layer. */
     board: (): BoardState => {
       const { state, layer } = snap;
       const from = state.kind === "asking" ? state.from : state;
       const objects = from.kind === "loading" ? [] : BOARDS[from.step];
       if (state.kind !== "asking") return boardOf(objects);
-      return askScene({ objects, timed: [], pausedT: 0 }, layer, sinceOpen());
+      // A drawn answer shows whole: this page doesn't play its narration.
+      return askScene(
+        { objects, timed: [], pausedT: 0 },
+        layer,
+        sinceOpen(),
+        Infinity,
+      );
     },
   };
 }
@@ -123,7 +132,7 @@ function currentStep(s: PlayerState): number {
   return s.kind === "asking" ? (s.goTo ?? s.from.step) : s.step;
 }
 
-/** The board, redrawn every frame while asking so sketch actions play from arrival. */
+/** The board, redrawn every frame while asking so highlights play from arrival. */
 function AskBoardView({
   machine,
   asking,
@@ -177,8 +186,12 @@ export function AskDemo({ replay }: { replay: boolean }) {
           machine.addAction(a);
           setHighlights((h) => [...h, a]);
         },
-        // Every drawn answer is fresh (qa/drawScene.ts).
-        drawSketch: (sketch) => machine.addSketch(sketch, true),
+        // Every drawn answer is fresh (qa/drawScene.ts); it shows whole, with no narration.
+        lessonId: DEV_ASK_LESSON,
+        playAnswer: (answer) => {
+          machine.showAnswer(answer.sketch, answer.cueTimes);
+          return Promise.resolve({ kind: "shown" } as const);
+        },
         ...ask,
         send,
         isAsking: () => machine.get().state.kind === "asking",

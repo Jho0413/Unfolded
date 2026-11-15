@@ -4,6 +4,9 @@ import { describe, expect, it } from "vitest";
 import { repairPlainMaths, repairSketchPlainMaths } from "@/shared/plainMaths";
 import type { Sketch } from "@/shared/scene";
 
+/** A narrated answer's narration (#105): its one cue, "c", fires on the first word. */
+const SAID = "[[c]]Here it is.";
+
 describe("repairPlainMaths: input table", () => {
   it.each([
     ["no scripts: unchanged", "Why scale the scores?", "Why scale the scores?"],
@@ -56,6 +59,7 @@ describe("repairPlainMaths: properties", () => {
 
 describe("repairSketchPlainMaths", () => {
   const sketch: Sketch = {
+    narration: SAID,
     objects: [
       { kind: "text", id: "t", x: 800, y: 110, text: "d_k grows" },
       {
@@ -80,7 +84,7 @@ describe("repairSketchPlainMaths", () => {
         do: "write",
         target: { id: "m", row: 0, col: 0 },
         value: "q^T k",
-        atMs: 0,
+        cue: "c",
         durationMs: 400,
       },
     ],

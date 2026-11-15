@@ -4,6 +4,7 @@
 // window.__qaFake for these tests.
 import { expect, type Page, test } from "@playwright/test";
 import { answer, askByVoice, askInput, carryOn } from "./support/tutor";
+import { lessonOf, narratedReply } from "./support/answer";
 
 const ASK = {
   unavailable: "Questions are unavailable right now.",
@@ -199,8 +200,9 @@ function boardAttributes(page: Page): Promise<string> {
 
 /** A drawn answer: always on a fresh board (#90), so it names only its own objects. */
 const SKETCH = {
+  narration: "[[c]]Here it is.",
   objects: [{ kind: "text", id: "note", x: 800, y: 400, text: "row 1" }],
-  actions: [{ do: "highlight", target: { id: "note" }, atMs: 0 }],
+  actions: [{ do: "highlight", target: { id: "note" }, cue: "c" }],
 };
 
 test.describe("draw_scene on /dev/ask (ROADMAP Q5)", () => {
@@ -211,7 +213,7 @@ test.describe("draw_scene on /dev/ask (ROADMAP Q5)", () => {
     const gate = new Promise<void>((r) => (release = r));
     await page.route("**/api/sketch", async (route) => {
       await gate;
-      await route.fulfill({ json: { sketch: SKETCH } });
+      await route.fulfill({ json: narratedReply(lessonOf(route), SKETCH) });
     });
     await open(page);
     await toPlaying(page);
@@ -239,7 +241,7 @@ test.describe("draw_scene on /dev/ask (ROADMAP Q5)", () => {
     await expect(note).toHaveCount(1);
     // Only now does the agent hear back, with what is actually drawn.
     await expect(page.getByTestId("tool-log")).toContainText(
-      'draw_scene {"description":"Circle the first row of q","fresh":false} -> Drawn: the answer board now shows',
+      'draw_scene {"description":"Circle the first row of q","fresh":false} -> Shown: Here it is.',
     );
     // The sketch's highlight shows too.
     await expect
@@ -259,12 +261,18 @@ test.describe("draw_scene on /dev/ask (ROADMAP Q5)", () => {
       "a sketch invalid on the board",
       {
         status: 200,
-        json: {
-          sketch: {
-            objects: [],
-            actions: [{ do: "highlight", target: { id: "zz" }, atMs: 0 }],
-          },
-        },
+        json: narratedReply("dev-ask", {
+          narration: "[[c]]Here it is.",
+          objects: [],
+          actions: [
+            {
+              do: "highlight",
+              target: { id: "zz" },
+              cue: "c",
+              durationMs: 400,
+            },
+          ],
+        }),
       },
     ],
   ] as const) {

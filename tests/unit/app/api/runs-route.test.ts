@@ -14,7 +14,9 @@ import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "@/app/api/runs/[lessonId]/[file]/route";
 import { RUNS_ROUTE_ERRORS } from "@/app/api/runs/[lessonId]/[file]/errors";
-import { writeRunFile } from "@/lib/runs/store";
+import { GET as GET_ANSWER } from "@/app/api/runs/[lessonId]/answers/[file]/route";
+import { saveAnswer, writeRunFile } from "@/lib/runs/store";
+import { ANSWERS_DIR } from "@/shared/lesson";
 
 const dirs = vi.hoisted(() => ({ runs: "" }));
 vi.mock("@/lib/config", async (importOriginal) => {
@@ -241,4 +243,64 @@ describe("unreadable file -> 500, logged", () => {
       );
     },
   );
+});
+
+// GET /api/runs/<lessonId>/answers/<file> (#105): a drawn answer's audio, with the same checks.
+describe("serves a drawn answer's audio from runs/<lessonId>/answers/", () => {
+  function getAnswer(lessonId: string, file: string) {
+    const req = new NextRequest(
+      `http://localhost/api/runs/${lessonId}/${ANSWERS_DIR}/${file}`,
+    );
+    return GET_ANSWER(req, { params: Promise.resolve({ lessonId, file }) });
+  }
+
+  it("a saved answer's audio as audio/mpeg, byte for byte", async () => {
+    const bytes = new Uint8Array([0xff, 0xfb, 0x90, 0x00, 0x02]);
+    const file = await saveAnswer("demo-m1", { any: "record" }, bytes);
+    const res = await getAnswer("demo-m1", file);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("audio/mpeg");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(bytes);
+  });
+
+  it("an answer that isn't there: 404 with the folder in the message", async () => {
+    await mkdir(path.join(dirs.runs, "demo-m1", ANSWERS_DIR), {
+      recursive: true,
+    });
+    const res = await getAnswer("demo-m1", "nope.mp3");
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({
+      error: RUNS_ROUTE_ERRORS.missing("demo-m1", `${ANSWERS_DIR}/nope.mp3`),
+    });
+  });
+
+  it("a lesson with no answers yet: 404", async () => {
+    await writeRunFile("demo-m1", "plan.json", "{}");
+    expect((await getAnswer("demo-m1", "a.mp3")).status).toBe(404);
+  });
+
+  it("a bad lessonId or file name: 400", async () => {
+    for (const [lessonId, file] of [
+      ["../x", "a.mp3"],
+      ["demo-m1", ".."],
+      ["demo-m1", "a.exe"],
+    ]) {
+      const res = await getAnswer(lessonId, file);
+      expect(res.status, `${lessonId}/${file}`).toBe(400);
+    }
+  });
+
+  it("an answers folder that is a symlink: 400, nothing read through it", async () => {
+    const outside = await mkdtemp(path.join(tmpdir(), "outside-"));
+    await writeFile(path.join(outside, "a.mp3"), "secret");
+    await mkdir(path.join(dirs.runs, "demo-m1"), { recursive: true });
+    await symlink(outside, path.join(dirs.runs, "demo-m1", ANSWERS_DIR));
+    try {
+      const res = await getAnswer("demo-m1", "a.mp3");
+      expect(res.status).toBe(400);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
 });

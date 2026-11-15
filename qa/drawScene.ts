@@ -1,25 +1,40 @@
 // The `draw_scene` client tool (ARCHITECTURE.md section 8). It waits: the agent
-// says one short line ("Let me sketch that."), calls the tool, and gets its
-// result only once the sketch is on the board, or has failed, so it explains
-// what the learner actually sees. The browser asks POST /api/sketch for the
-// sketch. Every drawn answer goes on a clean board of its own, the Answer view
-// (section 5.6), so the browser always asks for `fresh: true` with an empty
-// board, whatever the agent passed. When the sketch arrives it's validated
-// again and drawn, replacing any earlier drawing. A failure shows "Couldn't
-// draw that." and the result tells the agent to answer in words. Only the
-// latest request counts: whatever comes back for an older one (a sketch or a
-// failure) is dropped.
-import { SKETCH_FAILED, SketchResponse } from "@/shared/lesson";
-import { EMPTY_BOARD, type BoardObject, type Sketch } from "@/shared/scene";
-import { validateSketch } from "@/shared/validate";
+// says one short line ("Let me show you."), calls the tool, and stays quiet
+// while the answer plays. The browser asks POST /api/sketch for a narrated
+// answer (#105): a sketch with a narration, its audio and its cue times. Every
+// drawn answer goes on a clean board of its own, the Answer view (section 5.6),
+// so the browser always asks for `fresh: true` with an empty board, whatever
+// the agent passed. Meanwhile the card says "Sketching…". When the answer
+// arrives it's validated again, its audio downloaded, and it plays like a
+// lesson step, replacing any earlier drawing; the tool resolves when the
+// narration ends ("Shown: <narration>"), or when the learner speaks over it. A
+// failure shows "Couldn't draw that." and the result tells the agent to answer
+// in words. Only the latest request counts: whatever comes back for an older
+// one (an answer or a failure) is dropped.
+import { fetchAudioBlob } from "@/player/stepLoader";
+import { ANSWERS_DIR, SKETCH_FAILED, SketchResponse } from "@/shared/lesson";
+import { EMPTY_BOARD } from "@/shared/scene";
+import { parseNarration, validateSketch } from "@/shared/validate";
+import { narrationUpTo } from "./context";
 import type { AskApi } from "./types";
 
 /**
- * Longer than SK1's worst case: two attempts of config.sketch.timeoutMs
- * (20 s each, ARCHITECTURE.md section 8). A unit test checks it stays longer,
- * and agent/tool_configs/draw_scene.json waits a little longer still.
+ * Longer than the route's worst case: two attempts of config.sketch.timeoutMs (20 s each,
+ * ARCHITECTURE.md section 8) plus voicing the narration (config.tts.timeoutMs). A unit test
+ * checks it stays longer, and agent/tool_configs/draw_scene.json waits longer still, for the
+ * narration to play too.
  */
-export const SKETCH_FETCH_TIMEOUT_MS = 45_000;
+export const SKETCH_FETCH_TIMEOUT_MS = 75_000;
+
+/** A narrated answer as it arrives: the route's response, validated, with its audio. */
+export type ArrivedAnswer = SketchResponse & {
+  /** The narration's audio, or null when it failed to download (it shows whole, at once). */
+  audio: Blob | null;
+};
+
+/** How an answer's first playback ended (app/lesson/[lessonId]/AnswerViewPlayback.ts). */
+export type PlayedOutcome =
+  { kind: "shown" } | { kind: "paused"; tMs: number } | { kind: "left" };
 
 export type DrawSceneDeps = {
   /** False once Ask has closed: a sketch arriving then is dropped. */
@@ -29,15 +44,24 @@ export type DrawSceneDeps = {
    * asked for in an earlier session is dropped even if Ask reopened.
    */
   askId: () => number;
+  /** The lesson whose run folder keeps the answer's audio. */
+  lessonId: string;
   /**
-   * Draws a validated sketch on an empty board, replacing any earlier drawing.
-   * `description` is what the agent asked for, to tell it what's showing.
+   * Shows a validated answer on an empty board, replacing any earlier drawing, and plays it.
+   * Resolves with how its first playback ended. `description` is what the agent asked for, to
+   * tell it what's showing.
    */
-  drawSketch: (sketch: Sketch, description: string) => void;
+  playAnswer: (
+    answer: ArrivedAnswer,
+    description: string,
+  ) => Promise<PlayedOutcome>;
   /** The Ask panel's: a failure shows SKETCH_FAILED (a success clears it). */
   showNotice: AskApi["showNotice"];
+  /** The Ask panel's: the card says "Sketching…" while the latest request is in flight. */
+  sketching?: AskApi["sketching"];
   /** Injected in tests. */
   fetch?: typeof fetch;
+  fetchAudio?: (url: string) => Promise<Blob>;
   timeoutMs?: number;
 };
 
@@ -50,39 +74,29 @@ export function sketchFailedUpdate(description: string): string {
 export const SKETCH_SUPERSEDED =
   "Not drawn: the learner moved on, or a newer sketch replaced it. Don't describe it.";
 
-/** At most this many objects are listed back to the agent, to keep the result short. */
-const LISTED_OBJECTS = 12;
-
-/** One object as the learner sees it, in a few words (pure). */
-function describeObject(o: BoardObject): string | null {
-  switch (o.kind) {
-    case "text":
-      return `text "${o.text}"`;
-    case "latex":
-      return `formula ${o.tex}`;
-    case "matrix": {
-      const size = `${o.rows.length}×${o.rows[0]?.length ?? 0}`;
-      const cells = o.rows.map((r) => r.join(" ")).join("; ");
-      return `matrix${o.label ? ` "${o.label}"` : ""} (${size}: ${cells})`;
-    }
-    case "arrow":
-      return o.label ? `arrow "${o.label}"` : null;
-    default:
-      return null;
-  }
+/** The tool's result once the narrated answer has played (or been shown whole): what was said. */
+export function answerShownResult(narration: string): string {
+  return `Shown: ${parseNarration(narration).spoken}`;
 }
 
-/**
- * The tool's result once the sketch is on the board (pure): what's drawn, so the agent
- * explains the picture the learner sees rather than the one it asked for.
- */
-export function sketchDrawnResult(sketch: Sketch): string {
-  const parts = sketch.objects
-    .map(describeObject)
-    .filter((s): s is string => s !== null)
-    .slice(0, LISTED_OBJECTS);
-  return `Drawn: the answer board now shows ${parts.join(", ")}. Explain it now, referring to what is drawn.`;
+/** The tool's result when the learner spoke over the answer: what they had heard by then. */
+export function answerPausedResult(
+  narration: string,
+  cueTimes: SketchResponse["cueTimes"],
+  tMs: number,
+): string {
+  const heard = narrationUpTo(narration, cueTimes, tMs).trim();
+  return `Paused after: ${heard === "" ? "(nothing yet)" : `${heard}…`}`;
 }
+
+/** Whether an answer's audio URL is in `lessonId`'s answers folder (pure). */
+export function answerAudioOf(audioUrl: string, lessonId: string): boolean {
+  return audioUrl.startsWith(`/api/runs/${lessonId}/${ANSWERS_DIR}/`);
+}
+
+/** The tool's result when the learner left the answer (Ask closed, or a newer one replaced it). */
+export const ANSWER_LEFT =
+  "The learner left this answer before it finished. Don't describe it.";
 
 /**
  * Whether a request's result still counts (pure): its Ask session is the one open now, and
@@ -98,8 +112,8 @@ export function stillLatest(
 
 /**
  * The draw_scene handler for one Ask panel: each call starts a sketch request and resolves
- * with the tool's result once it is drawn, failed or superseded. The agent's `fresh` isn't
- * taken: a drawn answer always starts from a clean board.
+ * with the tool's result once the answer has played, failed or been superseded. The agent's
+ * `fresh` isn't taken: a drawn answer always starts from a clean board.
  */
 export function createDrawScene(
   deps: DrawSceneDeps,
@@ -113,8 +127,16 @@ export function createDrawScene(
         askId: deps.askId(),
         newest,
       });
-    return requestSketch(deps, current, description).catch((err: unknown) =>
-      fail(current, deps, description, String(err)),
+    deps.sketching?.(true);
+    // Only the latest request turns "Sketching…" off: a newer one is still in flight.
+    const settled = () => {
+      if (current()) deps.sketching?.(false);
+    };
+    return requestSketch(deps, current, settled, description).catch(
+      (err: unknown) => {
+        settled();
+        return fail(current, deps, description, String(err));
+      },
     );
   };
 }
@@ -122,6 +144,7 @@ export function createDrawScene(
 async function requestSketch(
   deps: DrawSceneDeps,
   current: () => boolean,
+  settled: () => void,
   description: string,
 ): Promise<string> {
   const ctx = { board: EMPTY_BOARD, fresh: true };
@@ -129,24 +152,54 @@ async function requestSketch(
   const res = await doFetch("/api/sketch", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ description, ...ctx }),
+    body: JSON.stringify({ description, ...ctx, lessonId: deps.lessonId }),
     signal: AbortSignal.timeout(deps.timeoutMs ?? SKETCH_FETCH_TIMEOUT_MS),
   });
   const body: unknown = await res.json().catch(() => null);
   // Ask closed, or a newer request started: not ours to draw.
   if (!current()) return SKETCH_SUPERSEDED;
-  if (!res.ok) return fail(current, deps, description, `HTTP ${res.status}`);
+  if (!res.ok) {
+    settled();
+    return fail(current, deps, description, `HTTP ${res.status}`);
+  }
   const parsed = SketchResponse.safeParse(body);
-  if (!parsed.success) return fail(current, deps, description, "bad response");
+  // The audio must be this lesson's own (the route builds the URL; this is the boundary check).
+  if (!parsed.success || !answerAudioOf(parsed.data.audioUrl, deps.lessonId)) {
+    settled();
+    return fail(current, deps, description, "bad response");
+  }
   // Checked again in the browser, with the same rules as the route (section 4).
   const checked = validateSketch(parsed.data.sketch, ctx);
   // Spacing is soft: the route may send a sketch whose only problems are overlaps.
-  if (!checked.ok && !checked.softOnly)
+  if (!checked.ok && !checked.softOnly) {
+    settled();
     return fail(current, deps, description, checked.errors.join("; "));
+  }
   const sketch = checked.ok ? checked.value : checked.softOnly!.value;
-  deps.drawSketch(sketch, description);
+  // The audio, as the player downloads a step's. Failing to load it degrades, not fails: the
+  // answer then shows whole, at once.
+  const audio = await (deps.fetchAudio ?? fetchAudioBlob)(
+    parsed.data.audioUrl,
+  ).catch((err: unknown) => {
+    console.warn("[qa] draw_scene: the answer's audio failed to load:", err);
+    return null;
+  });
+  if (!current()) return SKETCH_SUPERSEDED;
+  settled();
   deps.showNotice(null);
-  return sketchDrawnResult(sketch);
+  const { cueTimes } = parsed.data;
+  const outcome = await deps.playAnswer(
+    { ...parsed.data, sketch, audio },
+    description,
+  );
+  switch (outcome.kind) {
+    case "shown":
+      return answerShownResult(sketch.narration);
+    case "paused":
+      return answerPausedResult(sketch.narration, cueTimes, outcome.tMs);
+    case "left":
+      return ANSWER_LEFT;
+  }
 }
 
 function fail(

@@ -9,8 +9,11 @@
 // - LessonBoard: while asking, the frozen board with Ask's highlights on top,
 //   or once a draw_scene answer arrives, the Answer view (./AnswerView.tsx)
 //   instead of the lesson, redrawn every frame; otherwise the player's board.
+//   A drawn answer is narrated (#105): ./AnswerViewAudio.ts plays it, and its
+//   clock times the drawing, so it builds up on its cues as a step does.
 //
 // Both share one AskSession (qa/askSession.ts), created by LessonView.
+import { useParams } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -18,7 +21,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { AskClose } from "@/player/controls";
+import type { AskClose, LessonCommand } from "@/player/controls";
 import type { PlayerState } from "@/player/machine";
 import type { Player } from "@/player/usePlayer";
 import { Whiteboard } from "@/player/Whiteboard";
@@ -30,7 +33,10 @@ import { type AskSignals, noteCommands } from "@/qa/askSignals";
 import { createClientTools } from "@/qa/tools";
 import type { AskApi } from "@/qa/types";
 import type { LessonPlan } from "@/shared/lesson";
+import { parseNarration } from "@/shared/validate";
 import { AnswerView } from "./AnswerView";
+import { type AnswerPlayer, createAnswerPlayer } from "./AnswerViewAudio";
+import { answerCommand } from "./AnswerViewPlayback";
 import { afterLeavingAsk, boardView, type LeaveAsk } from "./boardView";
 import { useLessonVoice } from "./useLessonVoice";
 
@@ -72,11 +78,26 @@ export function LessonAsk({
   signals?: AskSignals;
 }) {
   useSessionSync(player, session);
+  const answerPlayer = useAnswerPlayer(session);
+  // The lesson whose run folder keeps a drawn answer's audio: this page's.
+  const { lessonId } = useParams<{ lessonId: string }>();
   const { send, state, loaded, step, tMs } = player;
   // The always-on mic (issue #93): the lesson's voice session and spoken commands.
   // "Hold on" while asking closes Ask only when a drawn answer is up (#97): a bare "go back".
   const isAnswerShowing = useCallback(() => answerShowing(session), [session]);
   const voice = useLessonVoice({ player, session, isAnswerShowing });
+  const lessonControl = voice.control;
+  // A spoken command on a drawn answer: "carry on" goes on with a held answer and "say that
+  // again" replays it (./AnswerViewPlayback.ts); anything else is the lesson's, as before.
+  const control = useCallback(
+    (command: LessonCommand) => {
+      const event = answerShowing(session)
+        ? answerCommand(answerPlayer.state(), command)
+        : null;
+      if (event === null || !answerPlayer.send(event)) lessonControl(command);
+    },
+    [session, answerPlayer, lessonControl],
+  );
 
   // What Ask was opened from, read when it closes (outside render).
   const stateRef = useRef(state);
@@ -92,18 +113,24 @@ export function LessonAsk({
         ...ask,
         board: session.board,
         highlight: session.addAction,
-        // A sketch that reaches the board opens (or replaces) the Answer view, tags its
-        // answer "Drawing on the board" and tells the agent what's showing.
-        drawSketch: (sketch, description) => {
+        lessonId,
+        // An answer that arrives opens (or replaces) the Answer view, tags its answer
+        // "Drawing on the board", tells the agent what's showing, and plays its narration.
+        playAnswer: (answer, description) => {
           const was = answerShowing(session);
-          session.addSketch(sketch, true);
+          session.showAnswer(answer.sketch, answer.cueTimes);
           ask.sketchDrawn();
-          tellAnswerContext(ask.tellAgent, was, { kind: "drawn", description });
+          tellAnswerContext(ask.tellAgent, was, {
+            kind: "drawn",
+            description,
+            narration: parseNarration(answer.sketch.narration).spoken,
+          });
+          return answerPlayer.play(answer.audio);
         },
         send,
         isAsking: session.isAsking,
         askId: session.askId,
-        control: voice.control,
+        control,
         answerShowing: () => answerShowing(session),
         // "Go back to step N" for the step it stopped on: as the chip, not a restart.
         stoppedStep: () => {
@@ -116,7 +143,7 @@ export function LessonAsk({
       });
       return signals ? noteCommands(tools, signals.command) : tools;
     },
-    [session, send, voice.control, highlightPaper, signals],
+    [session, send, control, highlightPaper, signals, lessonId, answerPlayer],
   );
   useBackOnLesson(session, tellRef);
 
@@ -164,8 +191,29 @@ export function LessonAsk({
       captions={captions}
       live={voice.live}
       onLearnerMessage={signals?.heard}
+      // The learner speaking over a drawn answer holds its narration (barge-in, #105).
+      onLearnerSpeech={() => answerPlayer.send("learnerSpoke")}
     />
   );
+}
+
+/**
+ * The drawn answer's player (#105), one per page: the session's answer clock reads it, and Ask
+ * closing (however it closes) stops it, so the narration never plays over the lesson.
+ */
+function useAnswerPlayer(session: AskSession): AnswerPlayer {
+  const [answerPlayer] = useState(() => createAnswerPlayer());
+  useEffect(() => {
+    session.setAnswerClock(answerPlayer.clockMs);
+    const unsubscribe = session.subscribe(() => {
+      if (!session.isAsking()) answerPlayer.stop();
+    });
+    return () => {
+      unsubscribe();
+      answerPlayer.stop();
+    };
+  }, [session, answerPlayer]);
+  return answerPlayer;
 }
 
 /** Whether the Answer view is up: Ask is open with a drawing on its layer. */

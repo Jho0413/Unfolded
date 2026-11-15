@@ -24,6 +24,7 @@ import {
   CUE_MARKER_RE,
   gridShape,
   isGrid,
+  type CuedAction,
   isPoint,
   type SceneObject,
   Sketch,
@@ -147,6 +148,11 @@ const halfLine = (line: TemplateLine) =>
  * (app/lesson/[lessonId]/AnswerView.module.css).
  */
 export const ANSWER_TEMPLATE = {
+  /**
+   * The answer's spoken narration (#105), markers stripped: 2-4 short sentences, so it is
+   * voiced in a few seconds and over before the learner loses the question.
+   */
+  maxNarrationChars: 400,
   /** Objects other than arrows: texts, formulas and matrices, the title and takeaway included. */
   maxContent: 10,
   maxArrows: 6,
@@ -165,6 +171,7 @@ export const ANSWER_TEMPLATE = {
   takeaway: TAKEAWAY,
   gap: GAP,
 } as const satisfies {
+  maxNarrationChars: number;
   maxContent: number;
   maxArrows: number;
   gap: number;
@@ -397,27 +404,51 @@ function byId(...lists: (readonly SceneObject[])[]): Map<string, SceneObject> {
 
 // ---------------------------------------------------------------- step
 
-/** The rules zod can't express, for a step that already passed the schema. */
-export function checkStep(step: Step, limits: StepLimits): string[] {
-  const out: string[] = [];
-  const { cues, malformed, spoken } = parseNarration(step.narration);
-
+/**
+ * The narration rules a step and a narrated answer share: well-formed, unique markers, and
+ * spoken text that isn't empty or over `maxChars`. Returns the cues the narration has.
+ */
+function checkNarration(
+  narration: string,
+  maxChars: number,
+  out: string[],
+): Set<string> {
+  const { cues, malformed, spoken } = parseNarration(narration);
   for (const m of malformed) out.push(errors.malformedMarker(m));
   const seenCues = new Set<string>();
   for (const cue of cues) {
     if (seenCues.has(cue)) out.push(errors.duplicateCue(cue));
     seenCues.add(cue);
   }
-  if (spoken.length > limits.maxNarrationChars)
-    out.push(errors.narrationTooLong());
+  if (spoken.length > maxChars) out.push(errors.narrationTooLong());
   if (spoken.length === 0) out.push(errors.narrationEmpty());
+  return seenCues;
+}
 
-  const objects = byId(step.objects);
-  checkObjects(step.objects, objects, new Set(), out);
-  for (const action of step.actions) {
-    if (!seenCues.has(action.cue)) out.push(errors.unknownCue(action.cue));
+/** Each action's cue is in the narration, and the action fits the objects it can name. */
+function checkCuedActions(
+  actions: readonly CuedAction[],
+  cues: ReadonlySet<string>,
+  objects: Objects,
+  out: string[],
+): void {
+  for (const action of actions) {
+    if (!cues.has(action.cue)) out.push(errors.unknownCue(action.cue));
     out.push(...checkAction(action, objects));
   }
+}
+
+/** The rules zod can't express, for a step that already passed the schema. */
+export function checkStep(step: Step, limits: StepLimits): string[] {
+  const out: string[] = [];
+  const seenCues = checkNarration(
+    step.narration,
+    limits.maxNarrationChars,
+    out,
+  );
+  const objects = byId(step.objects);
+  checkObjects(step.objects, objects, new Set(), out);
+  checkCuedActions(step.actions, seenCues, objects, out);
   if (step.widget) out.push(...checkWidget(step.widget));
   for (const ref of step.paperRefs ?? [])
     if (ref.cue !== undefined && !seenCues.has(ref.cue))
@@ -452,6 +483,11 @@ export function sketchProblems(
   ctx: SketchContext,
 ): { hard: string[]; overlap: string[]; tight: string[] } {
   const out: string[] = ctx.fresh ? checkAnswerLayout(sketch) : [];
+  const cues = checkNarration(
+    sketch.narration,
+    ANSWER_TEMPLATE.maxNarrationChars,
+    out,
+  );
   const boardObjects = ctx.fresh ? [] : ctx.board.objects.map((s) => s.object);
   const objects = byId(sketch.objects, boardObjects);
   checkObjects(
@@ -460,8 +496,7 @@ export function sketchProblems(
     new Set(boardObjects.map((o) => o.id)),
     out,
   );
-  for (const action of sketch.actions)
-    out.push(...checkAction(action, objects));
+  checkCuedActions(sketch.actions, cues, objects, out);
   const gaps = ctx.fresh
     ? checkGaps(sketch.objects)
     : { overlap: [], tight: [] };

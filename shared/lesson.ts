@@ -22,6 +22,20 @@ export function isRunFileUrl(url: string): boolean {
   return m !== null && LESSON_ID_RE.test(m[1]) && RUN_FILE_RE.test(m[2]);
 }
 
+/** The run folder's subfolder for drawn answers' audio (#105): runs/<lessonId>/answers/. */
+export const ANSWERS_DIR = "answers";
+
+/** True for `/api/runs/<lessonId>/answers/<file>.mp3`, both parts following the rules above. */
+export function isAnswerAudioUrl(url: string): boolean {
+  const m = new RegExp(`^/api/runs/([^/]+)/${ANSWERS_DIR}/([^/]+)$`).exec(url);
+  return (
+    m !== null &&
+    LESSON_ID_RE.test(m[1]) &&
+    RUN_FILE_RE.test(m[2]) &&
+    m[2].endsWith(".mp3")
+  );
+}
+
 export const MAX_PLAN_STEPS = 12;
 
 export const PlanStep = z.object({
@@ -114,10 +128,23 @@ export const SketchRequest = z.object({
   description: z.string().min(1),
   fresh: z.boolean().default(false),
   board: BoardState,
+  /** The lesson whose run folder keeps the answer's audio (runs/<lessonId>/answers/). */
+  lessonId: LessonId,
 });
 export type SketchRequest = z.infer<typeof SketchRequest>;
 
-export const SketchResponse = z.object({ sketch: Sketch });
+/** The narrated answer (#105): the sketch, its narration's audio and when each cue is spoken. */
+export const SketchResponse = z.object({
+  sketch: Sketch,
+  /** Served by GET /api/runs/<lessonId>/answers/<file>, never a model-written URL. */
+  audioUrl: z
+    .string()
+    .refine(
+      isAnswerAudioUrl,
+      "not a /api/runs/<lessonId>/answers/<file>.mp3 URL",
+    ),
+  cueTimes: CueTimes,
+});
 export type SketchResponse = z.infer<typeof SketchResponse>;
 
 /**

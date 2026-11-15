@@ -19,18 +19,32 @@ import { ANSWER_TEMPLATE } from "@/shared/validate";
 import {
   BOARD_ACTIONS_PROMPT,
   BOARD_OBJECTS_PROMPT,
+  NARRATION_RULES_PROMPT,
 } from "@/lib/pipeline/prompts/board";
 import { retryPromptFor } from "@/lib/pipeline/prompts/retry";
 
-const { area, content, gap, maxArrows, maxContent, takeaway, title } =
-  ANSWER_TEMPLATE;
+const {
+  area,
+  content,
+  gap,
+  maxArrows,
+  maxContent,
+  maxNarrationChars,
+  takeaway,
+  title,
+} = ANSWER_TEMPLATE;
 /** The sizes the validator estimates boxes with (shared/boxes.ts), in whole pixels. */
 const LATEX_GLYPH_PX = Math.round(LATEX_FONT * KATEX_EM * GLYPH_EM);
 const LATEX_LINE_PX = Math.round(LATEX_LINE_EM * LATEX_FONT * KATEX_EM);
 const MATRIX_LABEL_PX =
   MATRIX_FRAME.bracketGap + MATRIX_FRAME.labelLift + MATRIX_FRAME.labelFont;
 
-export const SKETCH_SYSTEM_PROMPT = `You draw on a whiteboard while a voice tutor answers a learner's question about a research paper. The tutor says in plain words what to draw; you turn that into a sketch: new objects, and timed actions that show, highlight, move or write on them. The tutor keeps talking while the sketch appears, so there is no narration.
+export const SKETCH_SYSTEM_PROMPT = `You answer a learner's question about a research paper on a whiteboard, the way a lesson step does. A voice tutor says in plain words what to draw; you turn that into a short narrated answer: a narration that the lesson's narrator speaks, the objects of the sketch, and actions that show, highlight, move or write on them, each fired on a word of the narration, so the drawing builds up as the learner hears it. The tutor stays quiet while your narration plays.
+
+# Narration
+
+- Two to four short sentences, at most ${maxNarrationChars} characters once markers are removed: the answer itself, explained over the drawing as it appears. Don't greet, don't repeat the question, and don't ask whether it helped (the tutor does that).
+${NARRATION_RULES_PROMPT}
 
 ${BOARD_OBJECTS_PROMPT}
 
@@ -40,9 +54,9 @@ An object with hidden: true is not drawn until a show action. Use hidden objects
 
 # Actions
 
-Each action has an atMs (when it starts, in milliseconds after the sketch appears), a target and a durationMs (0 to ${MAX_DURATION_MS}, usually ${DEFAULT_DURATION_MS}). ${BOARD_ACTIONS_PROMPT}
+Each action has a cue (a marker name from the narration), a target and a durationMs (0 to ${MAX_DURATION_MS}, usually ${DEFAULT_DURATION_MS}). ${BOARD_ACTIONS_PROMPT}
 
-Spread the actions over a few seconds so the sketch builds up while the tutor speaks. Actions with the same atMs run in the order listed.
+Start the board with only what the narration's first words need, hide the rest, and show each part on the word that introduces it. Several actions may share a cue; they run in the order listed.
 
 # The sketch
 
