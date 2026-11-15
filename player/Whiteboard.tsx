@@ -17,15 +17,19 @@ import { Copy, Matrix } from "./primitives/Matrix";
 import { Plot } from "./primitives/Plot";
 import { Text } from "./primitives/Text";
 import { BOARD_BG, FONT } from "./primitives/style";
+import { FULL_VIEW, type ViewBox } from "./viewport";
 
 type ObjectState = BoardState["objects"][number];
 
 export function Whiteboard({
   state,
   className,
+  view = FULL_VIEW,
 }: {
   state: BoardState;
   className?: string;
+  /** The part of the canvas to show (./viewport.ts), the whole canvas by default. */
+  view?: ViewBox;
 }) {
   const { objects, copies } = state;
   const byId = new Map(objects.map((s) => [s.object.id, s]));
@@ -33,7 +37,8 @@ export function Whiteboard({
     <svg
       data-testid="whiteboard"
       className={className}
-      viewBox={`0 0 ${CANVAS.w} ${CANVAS.h}`}
+      viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
+      data-view={`${view.x} ${view.y} ${view.w} ${view.h}`}
       role="img"
       aria-label="Whiteboard"
       style={{ display: "block", width: "100%", height: "auto" }}
