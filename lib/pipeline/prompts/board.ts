@@ -15,7 +15,7 @@ export const MATRIX_CELL_MAX_CHARS = 4;
 /** The "# The whiteboard" section: the canvas and the kinds of object. */
 export const BOARD_OBJECTS_PROMPT = `# The whiteboard
 
-The canvas is ${CANVAS.w} wide and ${CANVAS.h} high, origin at the top left. Every object needs a unique id (lowercase letters, digits and underscores, starting with a letter, at most 32 characters). In objects, use only these kinds of object (there are no images):
+The canvas is ${CANVAS.w} wide and ${CANVAS.h} high, origin at the top left. Every object needs a unique id (lowercase letters, digits and underscores, starting with a letter, at most 32 characters). In objects, use only these kinds of object:
 
 - matrix: x, y is the top-left corner. rows is 1 to ${MAX_MATRIX_DIM} rows of 1 to ${MAX_MATRIX_DIM} cells, all the same length; "" is an empty cell. Every cell is ${CELL.w} wide and ${CELL.h} high, so cell (r, c) has its centre at (x + ${CELL.w}c + ${CELL.w / 2}, y + ${CELL.h}r + ${CELL.h / 2}) and the whole matrix fits in its cell box. Optional label, drawn outside the box. A cell holds at most ${MATRIX_CELL_MAX_CHARS} characters, such as 0.98, 1e-3, -2.5 or 128: round numbers to fit, since a longer value is drawn smaller than the rest. Words don't fit in cells: put names such as class labels in the label or in text objects beside the matrix.
 - text: x, y is the centre. size is "s", "m" or "l".

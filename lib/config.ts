@@ -111,6 +111,16 @@ export const config = {
   maxSignalChars: 1000,
   /** fal illustrations per lesson, cover included (E1). fal credits are tight. */
   maxImagesPerLesson: 4,
+  /** Whiteboard illustrations (E1, ARCHITECTURE.md section 5.1): a step's image objects. */
+  stepImages: {
+    /** At most this many of a step's image objects get an image; the others stay undrawn. */
+    maxPerStep: 1,
+    /**
+     * How long a step's image (generation and download) may take. It runs alongside the
+     * step's TTS, so it only delays the step when it outlasts TTS: S4 saw 4.4-4.6 s.
+     */
+    timeoutMs: 8000,
+  },
   /** The Q&A agent's WebRTC conversation token (ARCHITECTURE.md section 8). */
   agentToken: {
     url: "https://api.elevenlabs.io/v1/convai/conversation/token",

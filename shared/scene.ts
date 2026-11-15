@@ -119,6 +119,8 @@ export const ImageObject = z.object({
   w: z.number().positive(),
   h: z.number().positive(),
   prompt: z.string().min(1),
+  /** STAND-IN for team A's field (#152): set by the server, never by a model. */
+  mediaUrl: z.string().optional(),
   hidden,
 });
 

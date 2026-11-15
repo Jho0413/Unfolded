@@ -24,7 +24,6 @@ import {
   type Action,
   Anchor,
   ArrowObject,
-  BoardObject,
   type CuedAction,
   CuedPaperRef,
   HeatmapObject,
@@ -104,6 +103,13 @@ const WireCuedAction = z.object({
   ...wireOptional,
 });
 
+/**
+ * An image as a model writes it: the contract's ImageObject without `mediaUrl`, which only the
+ * step route sets, once fal's image is saved (E1). A mediaUrl a model writes is stripped here,
+ * so the page never loads a URL a model wrote, and it's never in a grammar.
+ */
+export const WireImageObject = ImageObject.omit({ mediaUrl: true });
+
 /** The objects a step's grammar carries, with the contract's own schemas. */
 export const WireStepObject = z.union([
   MatrixObject,
@@ -120,7 +126,7 @@ export type WireStepObject = z.infer<typeof WireStepObject>;
 export const JsonStepObject = z.discriminatedUnion("kind", [
   HeatmapObject,
   PlotObject,
-  ImageObject,
+  WireImageObject,
 ]);
 export type JsonStepObject = z.infer<typeof JsonStepObject>;
 
@@ -149,7 +155,15 @@ export type WireStep = z.infer<typeof WireStep>;
 
 export const WireSketch = z.object({
   narration: z.string(),
-  objects: z.array(BoardObject),
+  objects: z.array(
+    z.union([
+      MatrixObject,
+      TextObject,
+      LatexObject,
+      ArrowObject,
+      WireImageObject,
+    ]),
+  ),
   actions: z.array(WireCuedAction),
 });
 export type WireSketch = z.infer<typeof WireSketch>;

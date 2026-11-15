@@ -97,6 +97,32 @@ export function stepAudioFileName(n: number, version: number): string {
   return `step-${n}.v${version}.mp3`;
 }
 
+/**
+ * img-<n>-v<k>-<objectId>.jpg: a board illustration of that step version (E1). An object id's
+ * underscores become hyphens, since run file names have none.
+ */
+export function stepImageFileName(
+  n: number,
+  version: number,
+  objectId: string,
+): string {
+  checkStepNumbers(n, version);
+  return `img-${n}-v${version}-${objectId.replaceAll("_", "-")}.jpg`;
+}
+
+/** Any lesson's board illustrations, by name (see stepImageFileName). */
+const STEP_IMAGE_FILE_RE = /^img-\d+-v\d+-[a-z0-9-]+\.jpg$/;
+
+/**
+ * How many fal images a lesson has made, from its run files: its cover and its board
+ * illustrations (config.maxImagesPerLesson counts both).
+ */
+export function lessonImageCount(files: readonly string[]): number {
+  return files.filter(
+    (f) => f === config.cover.file || STEP_IMAGE_FILE_RE.test(f),
+  ).length;
+}
+
 function versionsOf(
   files: readonly string[],
   n: number,

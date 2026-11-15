@@ -8,7 +8,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { config } from "@/lib/config";
 import { resetEnvForTests } from "@/lib/env";
 import { readFixture, readFixtureBytes } from "@/lib/fakes";
-import { FalImageResult, falImages } from "@/lib/media/fal";
+import {
+  FalImageResult,
+  falImages,
+  ImageTimeoutError,
+  isJpeg,
+  withDeadline,
+} from "@/lib/media/fal";
 
 const runs = vi.hoisted(() => ({ dir: "" }));
 vi.mock("@/lib/config", async (importOriginal) => {
@@ -190,5 +196,45 @@ describe("the real maker (mocked client)", () => {
     expect(fal.cancel).toHaveBeenCalledWith(config.fal.model, {
       requestId: "req-42",
     });
+  });
+});
+
+describe("isJpeg", () => {
+  it.each([
+    ["a JPEG's first bytes", new Uint8Array([0xff, 0xd8, 0xff, 0xdb]), true],
+    ["empty", new Uint8Array(), false],
+    ["too short", new Uint8Array([0xff, 0xd8]), false],
+    ["a PNG", new Uint8Array([0x89, 0x50, 0x4e, 0x47]), false],
+  ])("%s", (_, bytes, expected) => {
+    expect(isJpeg(bytes)).toBe(expected);
+  });
+});
+
+describe("withDeadline", () => {
+  it("answers in time: the value, and the signal never aborts", async () => {
+    let signal: AbortSignal | undefined;
+    await expect(
+      withDeadline(async (s) => {
+        signal = s;
+        return 7;
+      }, 1000),
+    ).resolves.toBe(7);
+    expect(signal!.aborted).toBe(false);
+  });
+
+  it("past the deadline: ImageTimeoutError, and the work's signal is aborted", async () => {
+    let signal: AbortSignal | undefined;
+    const late = withDeadline((s) => {
+      signal = s;
+      return new Promise<never>(() => {});
+    }, 20);
+    await expect(late).rejects.toThrow(ImageTimeoutError);
+    expect(signal!.aborted).toBe(true);
+  });
+
+  it("an error from the work is passed on", async () => {
+    await expect(
+      withDeadline(() => Promise.reject(new Error("boom")), 1000),
+    ).rejects.toThrow("boom");
   });
 });

@@ -6,46 +6,10 @@
 import "server-only";
 import type { LessonPlan } from "@/shared/lesson";
 import { config } from "@/lib/config";
-import { falImages, type ImageMaker } from "@/lib/media/fal";
+import { falImages, type ImageMaker, makeJpeg } from "@/lib/media/fal";
 import { writeRunFile } from "@/lib/runs/store";
 
 const TAG = "[cover]";
-
-/** Every JPEG starts with these bytes (an SOI marker, then the next marker's FF). */
-const JPEG_MAGIC = [0xff, 0xd8, 0xff];
-
-/** True when `bytes` are a JPEG by their first bytes: fal's answer is untrusted. */
-export function isJpeg(bytes: Uint8Array): boolean {
-  return JPEG_MAGIC.every((b, i) => bytes[i] === b);
-}
-
-export class CoverTimeoutError extends Error {
-  override name = "CoverTimeoutError";
-}
-
-/**
- * Runs `work` with a deadline of its own: past `ms` it rejects with CoverTimeoutError and
- * aborts the signal, even if `work` ignores it, so a hung provider can't hold the plan.
- */
-export async function withDeadline<T>(
-  work: (signal: AbortSignal) => Promise<T>,
-  ms: number,
-): Promise<T> {
-  const controller = new AbortController();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const expired = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      const err = new CoverTimeoutError(`no cover after ${ms} ms`);
-      controller.abort(err);
-      reject(err);
-    }, ms);
-  });
-  try {
-    return await Promise.race([work(controller.signal), expired]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 /**
  * The plan with its cover: made with `images`, saved as config.cover.file in the lesson's run
@@ -64,13 +28,7 @@ export async function addCover(
     return plan;
   }
   try {
-    const image = await withDeadline(
-      (signal) => images.make(plan.coverPrompt, signal),
-      timeoutMs,
-    );
-    // The file is named .jpg and served as image/jpeg: anything else would be served wrongly.
-    if (!isJpeg(image))
-      throw new Error(`fal sent ${image.length} bytes that aren't a JPEG`);
+    const image = await makeJpeg(images, plan.coverPrompt, timeoutMs);
     await writeRunFile(lessonId, config.cover.file, image);
     return { ...plan, cover: config.cover.file };
   } catch (err) {

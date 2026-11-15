@@ -1,13 +1,14 @@
 // lib/pipeline/prompts/step.ts (ARCHITECTURE.md section 5.1): what a step prompt receives.
 import { describe, expect, it } from "vitest";
 import { config } from "@/lib/config";
-import { validateWireStep } from "@/lib/pipeline/outputFormat";
+import { validateWireStep, WireImageObject } from "@/lib/pipeline/outputFormat";
 import { MATRIX_CELL_MAX_CHARS } from "@/lib/pipeline/prompts/board";
 import {
   PAPER_REFS_PROMPT,
   paperContextPrompt,
 } from "@/lib/pipeline/prompts/paper";
 import {
+  IMAGE_EXAMPLE,
   retryPrompt,
   STEP_SYSTEM_PROMPT,
   stepContextPrompt,
@@ -102,9 +103,25 @@ describe("stepContextPrompt", () => {
 });
 
 describe("STEP_SYSTEM_PROMPT", () => {
-  it("doesn't offer image objects (the board draws none until E1)", () => {
-    expect(STEP_SYSTEM_PROMPT).not.toMatch(/^- image:/m);
-    expect(STEP_SYSTEM_PROMPT).toContain("there are no images");
+  it("offers at most one image (E1, #152), in objectsJson, never in objects, with no text in the picture", () => {
+    expect(STEP_SYSTEM_PROMPT).toContain("# Illustrations");
+    expect(STEP_SYSTEM_PROMPT).toContain("A step may also draw one image");
+    expect(STEP_SYSTEM_PROMPT).toContain("It goes in objectsJson");
+    // The board section (shared with sketches) no longer says there are no images.
+    expect(STEP_SYSTEM_PROMPT).not.toContain("no images");
+    expect(STEP_SYSTEM_PROMPT).toContain(
+      "no letters, words, numbers, labels, symbols or equations",
+    );
+    expect(STEP_SYSTEM_PROMPT).toContain("clear of every other object");
+  });
+
+  it("the image example is a valid wire image, 16:9 like fal's image, and its prompt asks for no text", () => {
+    const parsed = WireImageObject.parse(IMAGE_EXAMPLE);
+    expect(parsed.w / parsed.h).toBeCloseTo(16 / 9);
+    expect(IMAGE_EXAMPLE.prompt).toMatch(/No text/);
+    expect(STEP_SYSTEM_PROMPT).toContain(
+      `objectsJson: ${JSON.stringify(JSON.stringify([IMAGE_EXAMPLE]))}`,
+    );
   });
 
   it("asks for maths spelled out in the narration (TTS reads symbols badly, S1)", () => {

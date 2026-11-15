@@ -3,8 +3,9 @@
 // <event>", run through the route, plus the route's rejections (a bad lessonId or n), and one
 // test per row of adaptation's table (A1, section 5.4) with the A1 cells it covers. Nothing real is called:
 // Claude is lib/fakes/claude.ts (scripted per test) and TTS is its FAKE_APIS=1 fake, and runs go
-// to a temp runs dir.
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+// to a temp runs dir. One test per row of #152's table (E1, the step's images): fal is
+// lib/fakes/fal.ts, scripted per test.
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type Anthropic from "@anthropic-ai/sdk";
@@ -16,6 +17,7 @@ import { config } from "@/lib/config";
 import { resetEnvForTests } from "@/lib/env";
 import { readFixture } from "@/lib/fakes";
 import { resetStepRequestsForTests } from "@/lib/pipeline/lessonStep";
+import { type FakeImages, fakeImages } from "@/lib/fakes/fal";
 import {
   type FakeClaude,
   fakeClaude,
@@ -55,7 +57,15 @@ const state = vi.hoisted(() => ({
   ttsError: undefined as Error | undefined,
   ttsCalls: 0,
   runs: "",
+  /** The step images' fal (E1): a scripted fake, or none (as with no FAL_KEY). */
+  images: undefined as FakeImages | undefined,
+  /** config.stepImages.timeoutMs, when a test shortens it. */
+  imageTimeoutMs: undefined as number | undefined,
 }));
+vi.mock("@/lib/media/fal", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/media/fal")>();
+  return { ...real, falImages: () => state.images };
+});
 vi.mock("@/lib/pipeline/generate", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/pipeline/generate")>();
   return {
@@ -83,6 +93,12 @@ vi.mock("@/lib/config", async (importOriginal) => {
       ...config,
       get runsDir() {
         return state.runs;
+      },
+      get stepImages() {
+        return {
+          ...config.stepImages,
+          timeoutMs: state.imageTimeoutMs ?? config.stepImages.timeoutMs,
+        };
       },
     },
   };
@@ -175,6 +191,8 @@ afterEach(async () => {
   state.messages = undefined;
   state.ttsError = undefined;
   state.ttsCalls = 0;
+  state.images = undefined;
+  state.imageTimeoutMs = undefined;
   await rm(state.runs, { recursive: true, force: true });
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
@@ -968,5 +986,162 @@ describe("adaptation (A1, section 5.4): a question makes a step that hasn't star
       expect(body.version).toBe(1);
       expect(claude.calls).toHaveLength(0);
     });
+  });
+});
+
+describe("E1 (#152): a step's image objects, made by fal alongside TTS", () => {
+  const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xdb, 1, 2, 3]);
+  const IMAGE = {
+    kind: "image" as const,
+    id: "pic_1",
+    x: 40,
+    y: 640,
+    w: 320,
+    h: 180,
+    prompt: "a lamp on a table, no text",
+  };
+  const IMAGE_FILE = "img-0-v1-pic-1.jpg";
+
+  /** The recorded step with `images` added to its objectsJson. */
+  function withImages(...images: object[]): Anthropic.Message {
+    const block = validReply.content.find((c) => c.type === "text");
+    if (block?.type !== "text") throw new Error("the fixture has no text");
+    const wire = JSON.parse(block.text) as { objectsJson: string };
+    wire.objectsJson = JSON.stringify([
+      ...(JSON.parse(wire.objectsJson) as object[]),
+      ...images,
+    ]);
+    return fakeMessage(JSON.stringify(wire));
+  }
+
+  const imagesOf = (body: StepResponse) =>
+    body.step.objects.filter((o) => o.kind === "image");
+  const runFiles = async () => readdir(path.join(state.runs, LESSON));
+  const imageFiles = async () =>
+    (await runFiles()).filter((f) => f.startsWith("img-")).sort();
+
+  function logs() {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const text = (spy: typeof info) =>
+      spy.mock.calls
+        .flat()
+        .map((a) => (a instanceof Error ? `${a.name}: ${a.message}` : a))
+        .join(" ");
+    return { info: () => text(info), warned: () => text(warn) };
+  }
+
+  /** Step 0 generated with one image and a fal that gives `reply`; the step must still play. */
+  async function stepWithImage(
+    ...replies: Parameters<typeof fakeImages>[0] & object
+  ) {
+    state.images = fakeImages(replies);
+    script(withImages(IMAGE));
+    const res = await post(LESSON, "0");
+    expect(res.status).toBe(200);
+    return StepResponse.parse(await res.json());
+  }
+
+  it("step has an image, fal ok: the jpg is saved, mediaUrl is set in the response and the saved step", async () => {
+    const body = await stepWithImage(JPEG);
+    const url = `/api/runs/${LESSON}/${IMAGE_FILE}`;
+    expect(imagesOf(body)).toEqual([{ ...IMAGE, mediaUrl: url }]);
+    expect(state.images!.prompts).toEqual([IMAGE.prompt]);
+    expect(
+      new Uint8Array(await readFile(path.join(state.runs, LESSON, IMAGE_FILE))),
+    ).toEqual(JPEG);
+    const saved = await readRunJson(LESSON, "step-0.v1.json", SavedStep);
+    expect(saved?.step.objects.find((o) => o.kind === "image")).toEqual({
+      ...IMAGE,
+      mediaUrl: url,
+    });
+    // The narration was made too, in the same request.
+    expect(state.ttsCalls).toBe(1);
+  });
+
+  it("fal error: the step still plays; the image has no mediaUrl, no file is saved, and it's logged", async () => {
+    const log = logs();
+    const body = await stepWithImage(new Error("fal is down"));
+    expect(imagesOf(body)).toEqual([IMAGE]);
+    expect(await imageFiles()).toEqual([]);
+    expect(log.warned()).toContain('image "pic_1" not drawn');
+    expect(log.warned()).toContain("fal is down");
+  });
+
+  it("fal timeout: past config.stepImages.timeoutMs the step still plays, without the image, and it's logged", async () => {
+    const log = logs();
+    state.imageTimeoutMs = 30;
+    // The fake never answers and ignores the abort: only the image's own deadline ends it.
+    const body = await stepWithImage("hang");
+    expect(imagesOf(body)).toEqual([IMAGE]);
+    expect(await imageFiles()).toEqual([]);
+    expect(log.warned()).toContain("no image after 30 ms");
+  });
+
+  it("no FAL_KEY (no image maker): the step still plays without the image, and it's logged", async () => {
+    const log = logs();
+    state.images = undefined;
+    script(withImages(IMAGE));
+    const res = await post(LESSON, "0");
+    expect(res.status).toBe(200);
+    expect(imagesOf(StepResponse.parse(await res.json()))).toEqual([IMAGE]);
+    expect(await imageFiles()).toEqual([]);
+    expect(log.info()).toContain("images not drawn (no FAL_KEY)");
+  });
+
+  it("non-JPEG bytes: an error; the step still plays without the image, nothing is saved, and it's logged", async () => {
+    const log = logs();
+    const body = await stepWithImage(new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
+    expect(imagesOf(body)).toEqual([IMAGE]);
+    expect(await imageFiles()).toEqual([]);
+    expect(log.warned()).toContain("aren't a JPEG");
+  });
+
+  it("lesson already at the cap (its cover and board images, from its files): no fal call, the image isn't drawn, and it's logged", async () => {
+    const log = logs();
+    await writeRunFile(LESSON, config.cover.file, JPEG);
+    for (let i = 1; i < config.maxImagesPerLesson; i++)
+      await writeRunFile(LESSON, `img-1-v${i}-pic.jpg`, JPEG);
+    const body = await stepWithImage();
+    expect(state.images!.prompts).toEqual([]);
+    expect(imagesOf(body)).toEqual([IMAGE]);
+    expect(log.info()).toContain('image "pic_1" not drawn');
+  });
+
+  it("two image objects in a step: only the first is made (config.stepImages.maxPerStep)", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    state.images = fakeImages([JPEG]);
+    const second = { ...IMAGE, id: "pic_2", x: 1200, prompt: "a tree" };
+    script(withImages(IMAGE, second));
+    const body = StepResponse.parse(await (await post(LESSON, "0")).json());
+    expect(state.images.prompts).toEqual([IMAGE.prompt]);
+    expect(imagesOf(body).map((o) => o.mediaUrl)).toEqual([
+      `/api/runs/${LESSON}/${IMAGE_FILE}`,
+      undefined,
+    ]);
+  });
+
+  it("replay (REPLAY_RUN): never calls fal, even for a stale step with an undrawn image", async () => {
+    const step = Step.parse({
+      ...(await readFixture<object>("demo-m1.step.json")),
+    });
+    step.objects.push(IMAGE);
+    await saveStepVersion(
+      LESSON,
+      0,
+      { step, cueTimes: {} },
+      new Uint8Array([1]),
+    );
+    await appendSignal(LESSON, { question: "why?" });
+    state.images = fakeImages([]);
+    vi.stubEnv("REPLAY_RUN", LESSON);
+    resetEnvForTests();
+    const claude = script();
+    const body = StepResponse.parse(await (await post(LESSON, "0")).json());
+    expect(imagesOf(body)).toEqual([IMAGE]);
+    expect(state.images.prompts).toEqual([]);
+    expect(claude.calls).toHaveLength(0);
+    expect(await imageFiles()).toEqual([]);
   });
 });
