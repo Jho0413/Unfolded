@@ -5,7 +5,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
-import { SHORTCUTS } from "@/player/controls";
+import { SHORTCUTS, shortcutHintLines } from "@/player/controls";
 import { SPOKEN_COMMANDS } from "@/player/help/spoken";
 import { savedRun } from "./support/savedRun";
 import { askByKey } from "./support/tutor";
@@ -123,4 +123,36 @@ test("with Ask open, Escape closes the help, not Ask", async ({ page }) => {
   await page.keyboard.press("Escape");
   await expect(help(page)).toBeHidden();
   await expect(player(page)).toHaveAttribute("data-state", "asking");
+});
+
+test("the dev player has no Ask panel: the help lists the keys only, no spoken commands or A", async ({
+  page,
+}) => {
+  await page.goto("/dev/player");
+  await expect(player(page)).toHaveAttribute("data-state", "playing");
+  await page.keyboard.press("?");
+  await expect(help(page)).toBeVisible();
+  await expect(help(page).getByTestId("help-spoken")).toHaveCount(0);
+  await expect(help(page).locator('[data-shortcut="ask"]')).toHaveCount(0);
+  await expect(help(page).locator("[data-shortcut]")).toHaveCount(
+    SHORTCUTS.length - 1,
+  );
+  await mkdir(EVIDENCE, { recursive: true });
+  await page.screenshot({ path: path.join(EVIDENCE, "help-dev-player.png") });
+});
+
+test("the lesson outline's key hints come from the shortcut table", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await using run = await savedRun("e2e-help-outline");
+  await open(page, run.lessonId);
+  const keys = page.getByTestId("outline-keys");
+  for (const line of shortcutHintLines())
+    for (const { label, hint } of line) {
+      await expect(
+        keys.locator("kbd").getByText(label, { exact: true }),
+      ).toHaveCount(1);
+      await expect(keys).toContainText(hint);
+    }
 });

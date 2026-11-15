@@ -18,15 +18,26 @@ import {
  * their keys from here (Space: `isPlayPauseKey`; arrows and R: `shortcutEvent`; ?: `isHelpKey`),
  * so the help can't drift from what the keys do. `A` and Escape are the Ask panel's
  * (qa/AskPanel.tsx; a test checks it handles these keys); Escape closes the help too.
+ * `hint` and `line` are the lesson outline's short key hints (app/lesson/[lessonId]/Outline.tsx),
+ * grouped onto lines; a shortcut without a hint isn't in the outline.
  */
 export const SHORTCUTS = [
-  { id: "playPause", keys: [" "], label: "Space", does: "Hold on / go on" },
+  {
+    id: "playPause",
+    keys: [" "],
+    label: "Space",
+    does: "Hold on / go on",
+    hint: "hold on / go on",
+    line: 1,
+  },
   {
     id: "next",
     keys: ["ArrowRight"],
     label: "→",
     does: "Next idea",
     event: { type: "next" },
+    hint: "next idea",
+    line: 2,
   },
   {
     id: "back",
@@ -34,6 +45,8 @@ export const SHORTCUTS = [
     label: "←",
     does: "Back to the previous idea",
     event: { type: "back" },
+    hint: "back",
+    line: 2,
   },
   {
     id: "replay",
@@ -41,12 +54,16 @@ export const SHORTCUTS = [
     label: "R",
     does: "Say that again",
     event: { type: "replay" },
+    hint: "again",
+    line: 2,
   },
   {
     id: "ask",
     keys: ["a", "A"],
     label: "A",
     does: "Ask a question, by voice or typing",
+    hint: "ask by voice",
+    line: 3,
   },
   {
     id: "close",
@@ -54,13 +71,22 @@ export const SHORTCUTS = [
     label: "Esc",
     does: "Close Ask, or this help",
   },
-  { id: "help", keys: ["?"], label: "?", does: "Show this help" },
+  {
+    id: "help",
+    keys: ["?"],
+    label: "?",
+    does: "Show this help",
+    hint: "help",
+    line: 3,
+  },
 ] as const satisfies readonly {
   id: string;
   keys: readonly string[];
   label: string;
   does: string;
   event?: PlayerEvent;
+  hint?: string;
+  line?: number;
 }[];
 
 export type Shortcut = (typeof SHORTCUTS)[number];
@@ -70,6 +96,18 @@ export function shortcut<I extends Shortcut["id"]>(
   id: I,
 ): Extract<Shortcut, { id: I }> {
   return SHORTCUTS.find((s) => s.id === id) as Extract<Shortcut, { id: I }>;
+}
+
+/** The outline's key hints: the shortcuts with a hint, grouped by line, in table order. */
+export function shortcutHintLines(): { label: string; hint: string }[][] {
+  const lines = new Map<number, { label: string; hint: string }[]>();
+  for (const s of SHORTCUTS)
+    if ("hint" in s)
+      lines.set(s.line, [
+        ...(lines.get(s.line) ?? []),
+        { label: s.label, hint: s.hint },
+      ]);
+  return [...lines.entries()].sort(([a], [b]) => a - b).map(([, l]) => l);
 }
 
 const hasKey = (s: Shortcut, key: string) =>

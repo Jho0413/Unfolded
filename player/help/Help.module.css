@@ -71,6 +71,9 @@
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
   gap: 24px;
 }
+.columns[data-ask="0"] {
+  grid-template-columns: minmax(0, 1fr);
+}
 .heading {
   margin: 0 0 8px;
   font: 600 11px var(--mono-font);
@@ -112,7 +115,7 @@
   color: var(--ink);
   font-weight: 500;
 }
-.columns section:last-child .row {
+.spoken .row {
   grid-template-columns: minmax(0, 1fr);
   gap: 0;
 }
@@ -139,4 +142,9 @@
   .content {
     padding: 14px 16px 16px;
   }
+}
+
+/* Keys only (no Ask panel): a narrower dialog. */
+.dialog:has(.columns[data-ask="0"]) {
+  width: min(440px, calc(100vw - 32px));
 }

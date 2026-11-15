@@ -12,6 +12,7 @@ import {
   isPlayPauseKey,
   shortcut,
   shortcutEvent,
+  shortcutHintLines,
   SHORTCUTS,
 } from "@/player/controls";
 import { HelpContent } from "@/player/help/Help";
@@ -102,5 +103,43 @@ describe("the overlay's content", () => {
 
   it("has a Close button", () => {
     expect(html).toMatch(/<button[^>]*>Close<\/button>/);
+  });
+});
+
+describe("without the Ask panel (the dev player)", () => {
+  const html = renderToStaticMarkup(<HelpContent ask={false} />);
+
+  it("lists no spoken commands and no A key, but the other keys", () => {
+    expect(html).not.toContain('data-testid="help-spoken"');
+    expect(html).not.toContain("Say it");
+    expect(html).not.toContain('data-shortcut="ask"');
+    for (const s of SHORTCUTS)
+      if (s.id !== "ask") expect(html).toContain(`data-shortcut="${s.id}"`);
+  });
+});
+
+describe("the lesson outline's key hints", () => {
+  it("are the shortcuts with a hint, grouped by line, in table order", () => {
+    expect(shortcutHintLines()).toEqual([
+      [{ label: "Space", hint: "hold on / go on" }],
+      [
+        { label: "→", hint: "next idea" },
+        { label: "←", hint: "back" },
+        { label: "R", hint: "again" },
+      ],
+      [
+        { label: "A", hint: "ask by voice" },
+        { label: "?", hint: "help" },
+      ],
+    ]);
+  });
+
+  it("render in the outline from the table", () => {
+    const src = readFileSync(
+      path.join(process.cwd(), "app", "lesson", "[lessonId]", "Outline.tsx"),
+      "utf8",
+    );
+    expect(src).toContain("shortcutHintLines()");
+    expect(src).not.toMatch(/<kbd>(Space|A|R|→|←)<\/kbd>/);
   });
 });
