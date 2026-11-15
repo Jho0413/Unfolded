@@ -258,9 +258,9 @@ export type PlotObject = z.infer<typeof PlotObject>;
 
 /**
  * Every object a lesson step can draw: the board objects plus the data objects (issue #103).
- * `BoardObject` stays the objects the step and sketch generators write today: the wire format
- * (lib/pipeline/outputFormat.ts) embeds it, and the API has no headroom for more kinds (S3),
- * so heatmap and plot join the wire only after a real request with the bigger schema.
+ * The wire format (lib/pipeline/outputFormat.ts) has no grammar headroom for more kinds (S3):
+ * a step's grammar keeps matrix, text, latex and arrow, and its heatmap, plot and image objects
+ * come as one JSON string, `objectsJson` (#119, ARCHITECTURE.md §4). Sketches keep `BoardObject`.
  */
 export const SceneObject = z.union([
   MatrixObject,

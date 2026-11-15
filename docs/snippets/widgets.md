@@ -4,10 +4,10 @@ For the step prompt (`lib/pipeline`, Jason's side) to adopt. The contract is `Wi
 `shared/widget.ts`, on `Step.widget` (ARCHITECTURE.md §4). Both examples below are full
 `Step`s, and `tests/unit/shared/widgetSnippet.test.ts` checks that they pass `validateStep`.
 
-**Not on the wire yet.** Like #103's objects, `WireStep` has no `widget` field: add it (the
-contract's `Widget` schema is small and flat) and run a real request with the bigger schema
-before merging; the size-guard test in `outputFormat.test.ts` moves with it, and the
-`widget` exception in its top-level-fields test goes.
+**Not on the wire yet.** `WireStep` has no `widget` field. It comes next as a JSON string,
+`widgetJson`, like #119's `objectsJson` (ARCHITECTURE.md §4, "Heatmaps and plots on the
+wire"), in Jason's #110 work; until then the `widget` exception in `outputFormat.test.ts`'s
+top-level-fields test stays.
 
 ## When to add one
 

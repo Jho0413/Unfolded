@@ -5,10 +5,13 @@ For the step prompt (`lib/pipeline`, Jason's side) to adopt. The contract is
 below are full `Step`s, and `tests/unit/shared/vizSnippet.test.ts` checks that they pass
 `validateStep`.
 
-**Not on the wire yet.** `WireStep` and `WireSketch` embed `BoardObject`, which doesn't
-include these kinds: the API has no grammar headroom for more object kinds (S3, #27). To use
-them, put `SceneObject` (or a subset) in the wire schema, and run a real request with the
-bigger schema before merging (the size-guard test in `outputFormat.test.ts` moves with it).
+**On the wire as `objectsJson` (#119).** The grammar has no room for more object kinds (S3,
+#27), so `WireStep` keeps matrix, text, latex and arrow in its grammar, and heatmap, plot and
+image come as one required string, `objectsJson`: a JSON array that `wireToStep` parses and
+checks against these contract schemas before `validateStep`. The step prompt
+(`lib/pipeline/prompts/step.ts`) adapts this guidance with generic examples. Sketches keep
+`BoardObject`, so Q&A drawings don't use these kinds. Details and measurements: ARCHITECTURE.md
+§4, "Heatmaps and plots on the wire".
 
 ## When to use them
 
