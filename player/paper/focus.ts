@@ -39,6 +39,26 @@ export const DEFAULT_FOCUS: FocusState = {
   untilMs: 0,
 };
 
+/**
+ * The timer that ends the current hold: when to fire, and the tick to send then. The tick is
+ * dated at least `untilMs`, since setTimeout truncates a fractional delay and can fire a
+ * fraction of a millisecond early: a tick dated before `untilMs` would leave the hold on with
+ * no timer left to end it (main's CI, after #116).
+ */
+export function holdTimer(
+  state: FocusState,
+  nowMs: number,
+): { delayMs: number; tick: (firedAtMs: number) => FocusEvent } | null {
+  if (state.by === "default") return null;
+  return {
+    delayMs: Math.max(0, Math.ceil(state.untilMs - nowMs)),
+    tick: (firedAtMs) => ({
+      type: "tick",
+      atMs: Math.max(firedAtMs, state.untilMs),
+    }),
+  };
+}
+
 export function focusReducer(state: FocusState, event: FocusEvent): FocusState {
   const { atMs } = event;
   const held = atMs < state.untilMs;

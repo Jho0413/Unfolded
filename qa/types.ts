@@ -53,6 +53,11 @@ export type AskApi = {
   tellAgent: (text: string) => void;
   /** A draw_scene sketch was drawn: the card tags the answer "Drawing on the board". */
   sketchDrawn: () => void;
+  /**
+   * A highlight reached the board (`highlight`) or the paper (`highlight_paper`): the card
+   * tags the answer "Pointing at the board" or "... the paper" unless it drew (#91).
+   */
+  pointed: (at: "board" | "paper") => void;
   /** A draw_scene answer is being made (true) or no longer (false): the card's "Sketching…". */
   sketching: (on: boolean) => void;
   /**

@@ -9,7 +9,12 @@
 // On a desktop the compact state changes nothing.
 import { type FormEvent, type ReactNode, useState } from "react";
 import type { Caption } from "./captions";
-import { CARD_TEXT, type CardButton, type CardView } from "./cardView";
+import {
+  CARD_TEXT,
+  TAG_TEXT,
+  type CardButton,
+  type CardView,
+} from "./cardView";
 import styles from "./TutorCard.module.css";
 
 export function TutorCard<A>({
@@ -77,9 +82,7 @@ export function TutorCard<A>({
             data-testid="answer-tag"
             data-tag={view.tag}
           >
-            {view.tag === "drawing"
-              ? CARD_TEXT.tagDrawing
-              : CARD_TEXT.tagSpoken}
+            {TAG_TEXT[view.tag]}
           </span>
         )}
         {view.hold !== null && (

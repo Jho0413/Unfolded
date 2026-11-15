@@ -9,12 +9,14 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { config } from "@/lib/config";
 import { readFixture } from "@/lib/fakes";
 import {
+  JsonStepObject,
   SKETCH_OUTPUT_FORMAT,
   STEP_OUTPUT_FORMAT,
   validateWireSketch,
   validateWireStep,
   WireSketch,
   WireStep,
+  WireStepObject,
   wireErrors,
   wireToSketch,
   wireToStep,
@@ -24,6 +26,7 @@ import {
   CuedAction,
   MAX_DURATION_MS,
   MAX_PAPER_QUOTE_CHARS,
+  SceneObject,
   Sketch,
   Step,
 } from "@/shared/scene";
@@ -34,15 +37,18 @@ const SAID = "[[c]]Here it is.";
 
 const LIMITS = { maxNarrationChars: config.maxNarrationChars };
 
+const isJsonObject = (o: SceneObject): o is JsonStepObject =>
+  JsonStepObject.options.some((k) => k.shape.kind.value === o.kind);
+
 /**
- * A parsed contract step read as wire. This compiles only while every contract action kind
- * and field type fits the wire; a new field is caught by the field-coverage tests below.
+ * A parsed contract step as wire: the heatmap, plot and image objects as JSON text, the rest in
+ * the grammar. This compiles only while every contract action kind and field type fits the
+ * wire; a new field is caught by the field-coverage tests below.
  */
 const stepToWire = (step: Step): WireStep => ({
   ...step,
-  // Heatmap and plot objects (#103) aren't on the wire yet (S3: no grammar headroom), so only
-  // the objects are cast. Jason removes the cast once the wire has them.
-  objects: step.objects as WireStep["objects"],
+  objects: step.objects.filter((o): o is WireStepObject => !isJsonObject(o)),
+  objectsJson: JSON.stringify(step.objects.filter(isJsonObject)),
 });
 const sketchToWire = (sketch: Sketch): WireSketch => sketch;
 
@@ -61,7 +67,8 @@ const anchor = fc.oneof(target, point);
 const hidden = { hidden: fc.boolean() };
 const cell = fc.string({ maxLength: 3 });
 
-const boardObject = fc.oneof(
+/** The objects a step's grammar carries. */
+const wireObject = fc.oneof(
   fc.integer({ min: 1, max: 8 }).chain((cols) =>
     fc.record(
       {
@@ -113,20 +120,110 @@ const boardObject = fc.oneof(
     },
     { requiredKeys: ["kind", "id", "from", "to"] },
   ),
-  fc.record(
-    {
-      kind: fc.constant("image" as const),
-      id,
-      x: coord,
-      y: coord,
-      w: fc.integer({ min: 1, max: 800 }),
-      h: fc.integer({ min: 1, max: 800 }),
-      prompt: fc.string({ minLength: 1 }),
-      ...hidden,
-    },
-    { requiredKeys: ["kind", "id", "x", "y", "w", "h", "prompt"] },
-  ),
 );
+
+const image = fc.record(
+  {
+    kind: fc.constant("image" as const),
+    id,
+    x: coord,
+    y: coord,
+    w: fc.integer({ min: 1, max: 800 }),
+    h: fc.integer({ min: 1, max: 800 }),
+    prompt: fc.string({ minLength: 1 }),
+    ...hidden,
+  },
+  { requiredKeys: ["kind", "id", "x", "y", "w", "h", "prompt"] },
+);
+
+/** Every board object a sketch can draw. */
+const boardObject = fc.oneof(wireObject, image);
+
+/** A finite number as JSON gives it back (no -0, which JSON writes as 0). */
+const value = fc
+  .double({ min: -1e6, max: 1e6, noNaN: true })
+  .map((v) => (Object.is(v, -0) ? 0 : v));
+const vizSize = fc.integer({ min: 120, max: 800 });
+const vizLabel = fc.string({ minLength: 1, maxLength: 24 });
+
+const heatmap = fc
+  .tuple(fc.integer({ min: 1, max: 12 }), fc.integer({ min: 1, max: 12 }))
+  .chain(([rows, cols]) =>
+    fc.record(
+      {
+        kind: fc.constant("heatmap" as const),
+        id,
+        x: coord,
+        y: coord,
+        w: vizSize,
+        h: vizSize,
+        values: fc.array(
+          fc.array(value, { minLength: cols, maxLength: cols }),
+          {
+            minLength: rows,
+            maxLength: rows,
+          },
+        ),
+        rowLabels: fc.array(vizLabel, { minLength: rows, maxLength: rows }),
+        colLabels: fc.array(vizLabel, { minLength: cols, maxLength: cols }),
+        scale: fc.record({ min: fc.constant(0), max: fc.constant(1) }),
+        showValues: fc.boolean(),
+        cellsHidden: fc.boolean(),
+        label: fc.string(),
+        ...hidden,
+      },
+      { requiredKeys: ["kind", "id", "x", "y", "w", "h", "values"] },
+    ),
+  );
+
+/** A line series' points: x never decreases. */
+const linePoints = fc
+  .array(fc.tuple(value, value), { minLength: 2, maxLength: 20 })
+  .map((ps) => ps.map(([x, y]) => [x, y]).sort((a, b) => a[0] - b[0]));
+
+const plot = fc.record(
+  {
+    kind: fc.constant("plot" as const),
+    id,
+    x: coord,
+    y: coord,
+    w: vizSize,
+    h: vizSize,
+    xRange: fc.constant([-6, 6]),
+    yRange: fc.constant([0, 1]),
+    series: fc.array(
+      fc.record(
+        {
+          points: linePoints,
+          label: vizLabel,
+          style: fc.constant("line" as const),
+          hidden: fc.boolean(),
+        },
+        { requiredKeys: ["points"] },
+      ),
+      { minLength: 1, maxLength: 4 },
+    ),
+    xLabel: vizLabel,
+    yLabel: vizLabel,
+    ...hidden,
+  },
+  {
+    requiredKeys: [
+      "kind",
+      "id",
+      "x",
+      "y",
+      "w",
+      "h",
+      "xRange",
+      "yRange",
+      "series",
+    ],
+  },
+);
+
+/** The objects a step's wire carries as JSON text. */
+const jsonObject = fc.oneof(heatmap, plot, image);
 
 const durationMs = fc.integer({ min: 0, max: MAX_DURATION_MS });
 const color = fc.constantFrom("accent" as const, "warn" as const);
@@ -181,7 +278,13 @@ const step = fc
     {
       title: fc.string({ minLength: 1 }),
       narration: fc.string({ minLength: 1 }),
-      objects: fc.array(boardObject, { maxLength: 5 }),
+      // As wireToStep orders them: the JSON objects first.
+      objects: fc
+        .tuple(
+          fc.array(jsonObject, { maxLength: 3 }),
+          fc.array(wireObject, { maxLength: 5 }),
+        )
+        .map(([json, grammar]) => [...json, ...grammar]),
       actions: fc.array(
         action.chain((a) => cue.map((c) => ({ ...a, cue: c }))),
         { maxLength: 8 },
@@ -250,6 +353,7 @@ function wireStepWith(...actions: WireStep["actions"]): WireStep {
         ],
       },
     ],
+    objectsJson: "[]",
     actions,
   };
 }
@@ -387,15 +491,38 @@ describe("field coverage: the wire has every contract action field and kind", ()
   });
 
   it("the wire step and sketch have the contract's top-level fields", () => {
+    // objectsJson is the wire's own: it carries some of the contract's objects.
     expect(Object.keys(WireStep.shape).sort()).toEqual(
-      Object.keys(Step.shape)
-        // widget (#110) isn't on the wire yet (S3: no grammar headroom); same for Jason.
-        .filter((k) => k !== "widget")
-        .sort(),
+      [
+        // widget (#110) isn't on the wire yet: it follows in its own change.
+        ...Object.keys(Step.shape).filter((k) => k !== "widget"),
+        "objectsJson",
+      ].sort(),
     );
     expect(Object.keys(WireSketch.shape).sort()).toEqual(
       Object.keys(Sketch.shape).sort(),
     );
+  });
+});
+
+describe("field coverage: every contract object kind is on the wire step once", () => {
+  const kinds = (u: {
+    options: readonly { shape: { kind: { value: string } } }[];
+  }) => u.options.map((o) => o.shape.kind.value);
+
+  it("each scene object kind is in the grammar or in objectsJson, never both", () => {
+    const grammar = kinds(WireStepObject);
+    const json = kinds(JsonStepObject);
+    expect([...grammar, ...json].sort()).toEqual(kinds(SceneObject).sort());
+    expect(grammar.filter((k) => json.includes(k))).toEqual([]);
+  });
+
+  it("the grammar's objects are the contract's own schemas, and so are objectsJson's", () => {
+    const byKind = new Map(
+      SceneObject.options.map((o) => [o.shape.kind.value, o]),
+    );
+    for (const o of [...WireStepObject.options, ...JsonStepObject.options])
+      expect(o).toBe(byKind.get(o.shape.kind.value));
   });
 });
 
@@ -456,6 +583,182 @@ describe("wireToStep: paperRefs (#98), one test per row", () => {
         expect.stringMatching(/^paperRefs\.1 dropped: /),
       ]);
     }
+  });
+});
+
+/** A cells-hidden 2x2 heatmap `w` and a one-series plot `p`, valid against the contract. */
+const HEATMAP = {
+  kind: "heatmap",
+  id: "w",
+  x: 300,
+  y: 200,
+  w: 400,
+  h: 400,
+  values: [
+    [0.7, 0.3],
+    [0.2, 0.8],
+  ],
+  rowLabels: ["a", "b"],
+  colLabels: ["a", "b"],
+  scale: { min: 0, max: 1 },
+  cellsHidden: true,
+} as const;
+const PLOT = {
+  kind: "plot",
+  id: "p",
+  x: 900,
+  y: 200,
+  w: 500,
+  h: 400,
+  xRange: [-1, 1],
+  yRange: [0, 1],
+  series: [
+    {
+      points: [
+        [-1, 0],
+        [0, 0.5],
+        [1, 1],
+      ],
+      hidden: true,
+    },
+  ],
+} as const;
+
+describe("objectsJson: one test per row", () => {
+  const withJson = (objectsJson: string, ...actions: WireStep["actions"]) => ({
+    ...wireStepWith(...actions),
+    objectsJson,
+  });
+
+  it('"[]": no more objects, no errors', () => {
+    const { value, errors: errs } = wireToStep(withJson("[]"));
+    expect(value.objects.map((o) => o.id)).toEqual(["a"]);
+    expect(errs).toEqual([]);
+  });
+
+  it("blank (empty or whitespace): no more objects, as for []", () => {
+    for (const blank of ["", "  \n "]) {
+      const { value, errors: errs } = wireToStep(withJson(blank));
+      expect(value.objects.map((o) => o.id)).toEqual(["a"]);
+      expect(errs).toEqual([]);
+    }
+  });
+
+  it("an array of heatmap, plot and image objects: the step's first objects, in order, before objects", () => {
+    const image = {
+      kind: "image",
+      id: "img",
+      x: 0,
+      y: 0,
+      w: 10,
+      h: 10,
+      prompt: "a cat",
+    };
+    const { value, errors: errs } = wireToStep(
+      withJson(JSON.stringify([PLOT, HEATMAP, image])),
+    );
+    expect(errs).toEqual([]);
+    expect(value.objects).toStrictEqual([
+      PLOT,
+      HEATMAP,
+      image,
+      wireStepWith().objects[0],
+    ]);
+  });
+
+  it("not JSON: rejected with objectsJson: not valid JSON, and no more objects", () => {
+    const { value, errors: errs } = wireToStep(withJson('[{"kind": "plot",'));
+    expect(value.objects.map((o) => o.id)).toEqual(["a"]);
+    expect(errs).toEqual([
+      expect.stringMatching(/^objectsJson: not valid JSON \(.+\)$/),
+    ]);
+  });
+
+  it("an id in objectsJson and in objects is a duplicate: ids are shared", () => {
+    const result = validateWireStep(
+      withJson(JSON.stringify([{ ...HEATMAP, id: "a" }])),
+      LIMITS,
+    );
+    expect(result).toStrictEqual({
+      ok: false,
+      errors: [errors.duplicateId("a")],
+    });
+  });
+
+  it("JSON but not an array: rejected with objectsJson: must be a JSON array", () => {
+    const { value, errors: errs } = wireToStep(
+      withJson(JSON.stringify(HEATMAP)),
+    );
+    expect(value.objects.map((o) => o.id)).toEqual(["a"]);
+    expect(errs).toEqual([wireErrors.objectsJsonNotArray]);
+  });
+
+  it("an object that fails its schema (a grammar kind, a bad field) is dropped with its objectsJson path; the rest are kept", () => {
+    const matrix = { kind: "matrix", id: "m", x: 0, y: 0, rows: [["1"]] };
+    const noValues = { ...HEATMAP, id: "h2", values: undefined };
+    const { value, errors: errs } = wireToStep(
+      withJson(JSON.stringify([matrix, PLOT, noValues])),
+    );
+    expect(value.objects.map((o) => o.id)).toEqual(["p", "a"]);
+    expect(errs).toEqual([
+      expect.stringMatching(/^objectsJson\.0\.kind: /),
+      expect.stringMatching(/^objectsJson\.2\.values: /),
+    ]);
+  });
+
+  it("actions on objectsJson's objects validate as on any object: a heatmap row shown, a plot series drawn on", () => {
+    const wire = {
+      ...withJson(
+        JSON.stringify([HEATMAP, PLOT]),
+        { do: "show", target: { id: "w", row: 0 }, durationMs: 400, cue: "go" },
+        {
+          do: "show",
+          target: { id: "p", row: 0 },
+          durationMs: 1500,
+          cue: "go",
+        },
+      ),
+    };
+    const result = validateWireStep(wire, LIMITS);
+    expect(result.ok).toBe(true);
+    if (result.ok)
+      expect(result.value.objects.map((o) => o.kind)).toEqual([
+        "heatmap",
+        "plot",
+        "matrix",
+      ]);
+  });
+
+  it("the contract's errors on objectsJson's objects come back with the conversion's, for one retry", () => {
+    const tiny = {
+      ...HEATMAP,
+      w: 120,
+      h: 120,
+      values: Array(12).fill(Array(12).fill(0.5)),
+      rowLabels: undefined,
+      colLabels: undefined,
+    };
+    const result = validateWireStep(
+      withJson(
+        JSON.stringify([tiny, { kind: "pie" }]),
+        {
+          do: "show",
+          target: { id: "w", row: 12 },
+          durationMs: 400,
+          cue: "go",
+        },
+        { do: "move", target: { id: "a" }, durationMs: 400, cue: "go" },
+      ),
+      LIMITS,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok)
+      expect(result.errors).toEqual([
+        expect.stringMatching(/^objectsJson\.1\.kind: /),
+        wireErrors.moveNeedsTo("a"),
+        errors.tooSmall("w"),
+        errors.targetOutOfRange("w"),
+      ]);
   });
 });
 
@@ -719,11 +1022,12 @@ describe("validateWireStep / validateWireSketch", () => {
 /**
  * The API compiles each schema into a grammar and rejects one that is too large (#27). Its
  * limit isn't documented, so these are the measured sizes of the schemas a real request
- * accepted, with a little room: 3864 bytes for the step with paperRefs (#98, 2026-11-15).
- * Size isn't the whole story: one more object kind on top of the 2026-11-14 schemas (about
- * 280 bytes, a member of the object union) was rejected (S3), while paperRefs (about 420
- * bytes, no union) was accepted. Probe a bigger schema with a real request before raising
- * the budget.
+ * accepted, with a little room: 3864 bytes for the step with paperRefs (#98, 2026-11-15),
+ * and 3341 bytes for the step with objectsJson and paperRefs (#103, 2026-11-15). Size isn't
+ * the whole story: one more object kind on top of the 2026-11-14 schemas (about 280 bytes, a member of the
+ * object union) was rejected (S3), while paperRefs (about 420 bytes, no union) was accepted,
+ * and the grammar takes only about 6 more string fields (ARCHITECTURE.md section 4). Probe a
+ * bigger schema with a real request before raising the budget.
  */
 const SCHEMA_BUDGET_BYTES = 4000;
 /** The documented cap on optional properties across a request's strict schemas. */
@@ -802,6 +1106,19 @@ describe("output format size guard (#27)", () => {
     }
   });
 
+  // The actions name objectsJson's objects, so it is written before them: required, and listed
+  // after objects and before actions (required properties are written in schema order).
+  it("the wire step requires objectsJson, between objects and actions", () => {
+    const schema = STEP_OUTPUT_FORMAT.schema as {
+      properties: object;
+      required: string[];
+    };
+    const keys = Object.keys(schema.properties);
+    expect(schema.required).toContain("objectsJson");
+    expect(keys.indexOf("objectsJson")).toBe(keys.indexOf("objects") + 1);
+    expect(keys.indexOf("actions")).toBe(keys.indexOf("objectsJson") + 1);
+  });
+
   it("the wire schemas stay under the documented optional-property cap", () => {
     for (const format of [STEP_OUTPUT_FORMAT, SKETCH_OUTPUT_FORMAT])
       expect(optionalPerUse(format.schema)).toBeLessThanOrEqual(
@@ -813,8 +1130,9 @@ describe("output format size guard (#27)", () => {
 // ------------------------------------------------------------ recorded response
 
 describe("the recorded step response (lib/fakes)", () => {
-  // Its paperRefs were added by hand (#98): two real sentences from page 4 of the Attention
-  // paper, so FAKE_APIS=1 on the seeded m2-attention highlights them.
+  // Recorded with objectsJson and paperRefs on the wire and the paper's page text in the
+  // request (#103): a heatmap, a plot and one quote from page 4 of the Attention paper, all
+  // written by the model.
   it("is a real Sonnet 5.5 wire step that converts and passes validateStep", async () => {
     const message = await readFixture<Anthropic.Message>(config.step.fixture);
     expect(message.stop_reason).toBe("end_turn");

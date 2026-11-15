@@ -5,6 +5,7 @@ import {
   DEFAULT_FOCUS,
   type FocusEvent,
   focusReducer,
+  holdTimer,
   PAPER_HOLD_MS,
   PAPER_MIN_MS,
   USER_HOLD_MS,
@@ -102,5 +103,15 @@ describe("focusReducer", () => {
         { type: "user", pane: "board", atMs: 1 },
       ).pane,
     ).toBe("board");
+  });
+
+  it("the hold's timer ends it even when setTimeout fires a fraction of a millisecond early", () => {
+    const s = run({ type: "paper", atMs: 1000.4 });
+    const timer = holdTimer(s, 1000.4)!;
+    expect(timer.delayMs).toBe(PAPER_HOLD_MS);
+    // setTimeout truncates the fractional delay, so it fires just before untilMs.
+    const early = 1000.4 + PAPER_HOLD_MS - 0.4;
+    expect(focusReducer(s, timer.tick(early))).toBe(DEFAULT_FOCUS);
+    expect(holdTimer(DEFAULT_FOCUS, 0)).toBeNull();
   });
 });
