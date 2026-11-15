@@ -14,7 +14,7 @@ import {
   type FakeReply,
 } from "@/lib/fakes/claude";
 import { ApiError, SKETCH_FAILED, SketchResponse } from "@/shared/lesson";
-import { errors } from "@/shared/validate";
+import { ANSWER_TEMPLATE, errors } from "@/shared/validate";
 import {
   type BoardState,
   type ObjectState,
@@ -141,6 +141,58 @@ describe("POST /api/sketch: a fresh answer and its template (#90)", () => {
     ],
     actions: [],
   };
+
+  /** Two formulas about 37 apart: only a spacing problem, so still drawable. */
+  const CRAMPED: Sketch = {
+    objects: [
+      { kind: "text", id: "title", x: 800, y: 110, text: "Why scale?" },
+      { kind: "latex", id: "f", x: 700, y: 450, tex: "x" },
+      { kind: "latex", id: "g", x: 760, y: 450, tex: "y" },
+    ],
+    actions: [],
+  };
+  /** Three formulas side by side, each pair too close: more spacing problems. */
+  const MORE_CRAMPED: Sketch = {
+    ...CRAMPED,
+    objects: [
+      ...CRAMPED.objects,
+      { kind: "latex", id: "h", x: 820, y: 450, tex: "z" },
+    ],
+  };
+
+  it("spacing only, twice: retried with the feedback, then 200 with the attempt with fewer spacing problems, and a warning", async () => {
+    const logs = quietLogs();
+    const fake = script(reply(CRAMPED), reply(MORE_CRAMPED));
+    const res = await post({ description: "why", fresh: true, board: EMPTY });
+    expect(res.status).toBe(200);
+    expect(SketchResponse.parse(await res.json()).sketch).toEqual(CRAMPED);
+    expect(fake.calls).toHaveLength(2);
+    expect(fake.calls[1].body.messages.at(-1)?.content).toContain(
+      errors.tooClose("f", "g", ANSWER_TEMPLATE.gap),
+    );
+    expect(logs.warned()).toContain("used with soft problems only");
+  });
+
+  it("hard, then spacing only: 200 with the second", async () => {
+    quietLogs();
+    const hardFirst: Sketch = {
+      ...CRAMPED,
+      objects: [{ kind: "text", id: "t", x: 800, y: 110, text: "d_k" }],
+    };
+    script(reply(hardFirst), reply(CRAMPED));
+    const res = await post({ description: "why", fresh: true, board: EMPTY });
+    expect(res.status).toBe(200);
+    expect(SketchResponse.parse(await res.json()).sketch).toEqual(CRAMPED);
+  });
+
+  it("rejected twice: the second attempt's output goes to the server log", async () => {
+    const logs = quietLogs();
+    script(reply(SCATTERED), reply(SCATTERED));
+    const res = await post({ description: "why", fresh: true, board: EMPTY });
+    await expectFailed(res, 502);
+    expect(logs.logged()).toContain("rejected output (second attempt)");
+    expect(logs.logged()).toContain('"Why divide by d_k?"');
+  });
 
   it("a sketch breaking the template: retried once with the template's errors, 200 with the fixed one", async () => {
     const logs = quietLogs();

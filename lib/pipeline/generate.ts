@@ -1,7 +1,9 @@
 // One structured-output Claude request, validated and retried once (ARCHITECTURE.md sections
 // 4 and 6.2). Shared by the step, sketch and plan generators: a rejection (output that isn't JSON, a
 // zod schema error or a validate.ts rejection) is retried once with the errors, and a second
-// rejection, a refusal, a cut-off or a provider error fails with a typed GenerationError.
+// rejection, a refusal, a cut-off or a provider error fails with a typed GenerationError. An
+// attempt with only soft problems (a sketch's spacing) is used when neither is valid
+// (chooseAttempt).
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import type { ValidationResult } from "@/shared/validate";
@@ -76,12 +78,51 @@ export async function generateWithRetry<T>(
     ],
   };
   const secondTry = await attempt(gen, messages, retry);
-  if (secondTry.result.ok) return secondTry.result.value;
+  const chosen = chooseAttempt(firstTry.result, secondTry.result);
+  if ("value" in chosen) {
+    if (chosen.softErrors.length > 0)
+      console.warn(
+        `[pipeline] ${gen.label} used with soft problems only: ${chosen.softErrors.join("; ")}`,
+      );
+    return chosen.value;
+  }
+  // The rejected output, so the next failure can be diagnosed (server log only).
+  console.error(
+    `[pipeline] ${gen.label} rejected output (second attempt): ${truncate(secondTry.text, MAX_LOGGED_OUTPUT_CHARS)}`,
+  );
   throw new GenerationError(
     "rejected",
-    `${gen.label}: rejected twice: ${secondTry.result.errors.join("; ")}`,
-    secondTry.result.errors,
+    `${gen.label}: rejected twice: ${chosen.errors.join("; ")}`,
+    chosen.errors,
   );
+}
+
+/** How much of a rejected output goes to the server log. */
+export const MAX_LOGGED_OUTPUT_CHARS = 4000;
+
+function truncate(text: string, max: number): string {
+  return text.length <= max
+    ? text
+    : `${text.slice(0, max)}… (${text.length - max} more characters)`;
+}
+
+/**
+ * Which of two attempts to use (pure; ARCHITECTURE.md section 4). A valid attempt wins, the
+ * first if both are. Failing that, one with only soft problems (a sketch's spacing) can still
+ * be used: the one with fewer, the second on a tie. With a hard problem in both, it fails
+ * with the second attempt's errors.
+ */
+export function chooseAttempt<T>(
+  first: ValidationResult<T>,
+  second: ValidationResult<T>,
+): { value: T; softErrors: string[] } | { errors: string[] } {
+  if (first.ok) return { value: first.value, softErrors: [] };
+  if (second.ok) return { value: second.value, softErrors: [] };
+  const [a, b] = [first.softOnly, second.softOnly];
+  if (b && (!a || b.count <= a.count))
+    return { value: b.value, softErrors: second.errors };
+  if (a) return { value: a.value, softErrors: first.errors };
+  return { errors: second.errors };
 }
 
 /**
@@ -106,6 +147,8 @@ export function providerError(
 interface Attempt<T> {
   result: ValidationResult<T>;
   content: Anthropic.ContentBlock[];
+  /** The output's text, for the log when it's rejected. */
+  text: string;
 }
 
 async function attempt<T>(
@@ -152,9 +195,10 @@ async function attempt<T>(
     return {
       result: { ok: false, errors: ["the output is not valid JSON"] },
       content: message.content,
+      text,
     };
   }
-  return { result: gen.validate(json), content: message.content };
+  return { result: gen.validate(json), content: message.content, text };
 }
 
 /** The part of the SDK client that uploads the paper (Files API), so tests can pass a fake. */

@@ -27,7 +27,7 @@ import {
   Step,
   TimedSketchAction,
 } from "@/shared/scene";
-import { errors } from "@/shared/validate";
+import { ANSWER_TEMPLATE, errors } from "@/shared/validate";
 
 const LIMITS = { maxNarrationChars: config.maxNarrationChars };
 
@@ -581,6 +581,28 @@ describe("validateWireStep / validateWireSketch", () => {
     expect(result).toStrictEqual({
       ok: false,
       errors: ['move needs to "t"', errors.unknownObject("ghost")],
+    });
+  });
+
+  it("a fresh sketch with a conversion error and a spacing problem: not drawable (no softOnly)", () => {
+    const result = validateWireSketch(
+      {
+        objects: [
+          { kind: "latex", id: "f", x: 700, y: 450, tex: "x" },
+          { kind: "latex", id: "g", x: 760, y: 450, tex: "y" },
+        ],
+        actions: [
+          { do: "move", target: { id: "f" }, durationMs: 400, atMs: 0 },
+        ],
+      },
+      { board: EMPTY_BOARD, fresh: true },
+    );
+    expect(result).toStrictEqual({
+      ok: false,
+      errors: [
+        'move needs to "f"',
+        errors.tooClose("f", "g", ANSWER_TEMPLATE.gap),
+      ],
     });
   });
 
