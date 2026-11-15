@@ -53,6 +53,9 @@ export const PaperViewer = memo(function PaperViewer({
   // The same element, for writing the test attributes (the scroll ref is only read).
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
+  // The height left between the paddings: on a phone it shrinks as the floating card over the
+  // paper grows (its height is the bottom padding), and the passage is put back above it.
+  const [clearHeight, setClearHeight] = useState(0);
   const [layers, setLayers] = useState<Layers>([]);
   // The highlighted passage the viewer keeps in view, until the learner scrolls.
   const followRef = useRef<HTMLElement | null>(null);
@@ -60,9 +63,10 @@ export const PaperViewer = memo(function PaperViewer({
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (el === null) return;
-    const observer = new ResizeObserver(([entry]) =>
-      setWidth(Math.floor(entry.contentRect.width)),
-    );
+    const observer = new ResizeObserver(([entry]) => {
+      setWidth(Math.floor(entry.contentRect.width));
+      setClearHeight(Math.round(entry.contentRect.height));
+    });
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
@@ -99,7 +103,7 @@ export const PaperViewer = memo(function PaperViewer({
     const scroller = scrollRef.current;
     if (mark !== null && mark.isConnected && scroller !== null)
       scrollToMark(scroller, mark, "auto");
-  }, [width]);
+  }, [width, clearHeight]);
   const stopFollowing = () => {
     followRef.current = null;
   };
@@ -366,7 +370,7 @@ function unmark(marks: readonly HTMLElement[]): void {
   }
 }
 
-/** Scrolls the pane so the mark sits a third of the way down it. */
+/** Scrolls the pane so the mark sits a third of the way down its uncovered part. */
 function scrollToMark(
   scroller: HTMLElement,
   mark: HTMLElement,
@@ -374,8 +378,12 @@ function scrollToMark(
 ): void {
   const box = scroller.getBoundingClientRect();
   const top = mark.getBoundingClientRect().top - box.top;
+  // A third of the way down the part nothing covers: on a phone the tutor card floats over the
+  // bottom of the paper, and the layout says how much as scroll-padding-bottom (QA A10).
+  const covered = parseFloat(getComputedStyle(scroller).scrollPaddingBottom);
+  const visible = box.height - (Number.isFinite(covered) ? covered : 0);
   scroller.scrollTo({
-    top: scroller.scrollTop + top - box.height / 3,
+    top: scroller.scrollTop + top - Math.max(0, visible) / 3,
     behavior,
   });
 }
