@@ -13,7 +13,7 @@ import { ANSWER_SHOWING } from "@/qa/tools";
 import { CANVAS } from "@/shared/scene";
 import { ANSWER_TEMPLATE } from "@/shared/validate";
 import { savedRun } from "./support/savedRun";
-import { answer, askQuestion, carryOn } from "./support/tutor";
+import { answer, askQuestion, carryOn, goOn } from "./support/tutor";
 
 test.use({
   launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
@@ -132,6 +132,32 @@ test("Got it, carry on: the narration resumes where it stopped, not from the sta
   await expect(player(page)).toHaveAttribute("data-state", "playing");
   await expect(player(page)).toHaveAttribute("data-step", "0");
   // Resumed from where it stopped (give or take a moment of playback), never from 0.
+  const resumedAt = await now();
+  expect(resumedAt).toBeGreaterThanOrEqual(stoppedAt - 0.1);
+  expect(resumedAt).toBeLessThan(stoppedAt + 1);
+});
+
+test('"go back to step 1" from the answer view: back where it stopped, then carry on resumes there (a real case)', async ({
+  page,
+}) => {
+  await using run = await savedRun("e2e-answer-go-back-step");
+  await fakeSketches(page);
+  await page.goto(`/lesson/${run.lessonId}`);
+  await expect(player(page)).toHaveAttribute("data-state", "playing");
+  const audio = page.getByTestId("player-audio");
+  const now = () => audio.evaluate((a: HTMLAudioElement) => a.currentTime);
+  await expect.poll(now).toBeGreaterThan(1);
+  await askQuestion(page, "can you draw it?");
+  await expect(answerView(page)).toBeVisible();
+  const stoppedAt = await now();
+  // The learner reads the chip aloud: the agent calls go_to_step for the step it stopped on.
+  await askQuestion(page, "go back to step 1");
+  await expect(answerView(page)).toHaveCount(0);
+  await expect(player(page)).toHaveAttribute("data-state", "paused");
+  await expect(player(page)).toHaveAttribute("data-step", "0");
+  expect(await now()).toBeCloseTo(stoppedAt, 1);
+  await goOn(page).click();
+  await expect(player(page)).toHaveAttribute("data-state", "playing");
   const resumedAt = await now();
   expect(resumedAt).toBeGreaterThanOrEqual(stoppedAt - 0.1);
   expect(resumedAt).toBeLessThan(stoppedAt + 1);

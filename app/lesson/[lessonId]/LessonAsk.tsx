@@ -70,6 +70,11 @@ export function LessonAsk({
   const isAnswerShowing = useCallback(() => answerShowing(session), [session]);
   const voice = useLessonVoice({ player, session, isAnswerShowing });
 
+  // What Ask was opened from, read when it closes (outside render).
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  });
   // The panel's tellAgent, once it has made the tools: the Answer view's updates use it.
   const tellRef = useRef<AskApi["tellAgent"] | null>(null);
   const tools = useCallback(
@@ -92,6 +97,12 @@ export function LessonAsk({
         askId: session.askId,
         control: voice.control,
         answerShowing: () => answerShowing(session),
+        // "Go back to step N" for the step it stopped on: as the chip, not a restart.
+        stoppedStep: () => {
+          const now = stateRef.current;
+          return now.kind === "asking" ? now.from.step : now.step;
+        },
+        backToLesson: () => leaveAsk(send, session, "back", stateRef.current),
       });
     },
     [session, send, voice.control],
@@ -103,11 +114,6 @@ export function LessonAsk({
   const onAsk = useCallback(() => {
     if (send({ type: "ask" }).outcome === "changed") session.open();
   }, [send, session]);
-  // What Ask was opened from, read when it closes (outside render).
-  const stateRef = useRef(state);
-  useEffect(() => {
-    stateRef.current = state;
-  });
   // Closing Ask (ARCHITECTURE.md section 5.6): "Got it, carry on" resumes a lesson stopped
   // mid-step; Escape or the agent ending goes back to how it was before Ask (from the
   // Answer view: paused where the learner was).

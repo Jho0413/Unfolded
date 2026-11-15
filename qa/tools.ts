@@ -4,7 +4,8 @@
 //
 //   highlight          checked against the board on screen; "ok" or the error
 //                      (a no-op while the Answer view is up)
-//   go_to_step         goToStep(step - 1); "ok" or "no step n"
+//   go_to_step         goToStep(step - 1); "ok" or "no step n". The step the lesson stopped on
+//                      means back to where it stopped (the "Back to step N" chip), not a restart
 //   simplify_upcoming  stub until A1 (returns nothing)
 //   draw_scene         waits: resolves once the sketch is drawn (what's on the board), failed or
 //                      superseded, so the agent explains what is drawn (qa/drawScene.ts)
@@ -49,6 +50,13 @@ export type ClientToolDeps = {
    * 5.6): `highlight` has nothing to point at. Absent: never.
    */
   answerShowing?: () => boolean;
+  /**
+   * The step the lesson stopped on for this Ask (0-based), and how to go back to it where it
+   * stopped (the Answer view's "Back to step N" chip). With both, go_to_step to that step
+   * returns there instead of loading the step again from its start.
+   */
+  stoppedStep?: () => number;
+  backToLesson?: () => void;
 } & Pick<
   DrawSceneDeps,
   "askId" | "drawSketch" | "showNotice" | "fetch" | "timeoutMs"
@@ -56,6 +64,10 @@ export type ClientToolDeps = {
 
 /** What a tool that changes the board or the step returns after Ask closed. */
 export const ASK_CLOSED = "Ask is closed";
+
+/** What `go_to_step` returns for the step the lesson stopped on. */
+export const BACK_WHERE_STOPPED =
+  "ok: back on the lesson where it stopped, paused. Say the learner can carry on when ready.";
 
 /** What `highlight` returns while the Answer view is up. */
 export const ANSWER_SHOWING =
@@ -83,6 +95,11 @@ export function createClientTools(deps: ClientToolDeps): QaTools {
     // A late call after Ask closed would start the narration at a new step.
     go_to_step: ({ step }) => {
       if (!deps.isAsking()) return ASK_CLOSED;
+      // "Back to step N" for the step it stopped on: back where it stopped, not from the start.
+      if (deps.backToLesson && deps.stoppedStep?.() === step - 1) {
+        deps.backToLesson();
+        return BACK_WHERE_STOPPED;
+      }
       const result = deps.send({ type: "goToStep", n: step - 1 });
       return result.outcome === "rejected" ? result.message : "ok";
     },

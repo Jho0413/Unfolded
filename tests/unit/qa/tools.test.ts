@@ -12,6 +12,7 @@ import {
 import {
   ANSWER_SHOWING,
   ASK_CLOSED,
+  BACK_WHERE_STOPPED,
   createClientTools,
   type HighlightAction,
 } from "@/qa/tools";
@@ -181,6 +182,24 @@ describe("go_to_step", () => {
       type: "loadStep",
       step: 1,
     });
+  });
+});
+
+describe("go_to_step: the step the lesson stopped on (a real case, #90)", () => {
+  it("goes back where it stopped (as the Back to step N chip), not a restart", async () => {
+    const backToLesson = vi.fn();
+    const h = harness(asking, { stoppedStep: () => 0, backToLesson });
+    expect(await h.tools.go_to_step?.({ step: 1 })).toBe(BACK_WHERE_STOPPED);
+    expect(backToLesson).toHaveBeenCalledOnce();
+    expect(h.state()).toEqual(asking); // no goToStep: the step isn't loaded again
+  });
+
+  it("another step still jumps there", async () => {
+    const backToLesson = vi.fn();
+    const h = harness(asking, { stoppedStep: () => 0, backToLesson });
+    expect(await h.tools.go_to_step?.({ step: 2 })).toBe("ok");
+    expect(backToLesson).not.toHaveBeenCalled();
+    expect(h.state()).toEqual({ ...asking, goTo: 1 });
   });
 });
 
