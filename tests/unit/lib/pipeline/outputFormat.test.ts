@@ -45,10 +45,11 @@ const isJsonObject = (o: SceneObject): o is JsonStepObject =>
  * the grammar. This compiles only while every contract action kind and field type fits the
  * wire; a new field is caught by the field-coverage tests below.
  */
-const stepToWire = (step: Step): WireStep => ({
+const stepToWire = ({ widget, ...step }: Step): WireStep => ({
   ...step,
   objects: step.objects.filter((o): o is WireStepObject => !isJsonObject(o)),
   objectsJson: JSON.stringify(step.objects.filter(isJsonObject)),
+  ...(widget && { widgetJson: JSON.stringify(widget) }),
 });
 const sketchToWire = (sketch: Sketch): WireSketch => sketch;
 
@@ -269,6 +270,57 @@ const paperRef = fc.record(
   { requiredKeys: ["page", "quote"] },
 );
 
+const widgetPrompt = fc.string({ minLength: 1, maxLength: 160 });
+const sliderOf = (min: number, max: number) =>
+  fc.record({
+    min: fc.constant(min),
+    max: fc.constant(max),
+    step: fc.constant(0.1),
+    value: fc.double({ min, max, noNaN: true }),
+  });
+
+/** Schema-valid widgets of both kinds (#110), optional fields present or not. */
+const widget = fc.oneof(
+  fc.record(
+    {
+      kind: fc.constant("plot" as const),
+      prompt: widgetPrompt,
+      expr: fc.constantFrom("a * x", "a * exp(-b * x^2)", "sin(x)"),
+      x: fc.constant([-3, 3]),
+      y: fc.constant([0, 3]),
+      params: fc.array(
+        fc.tuple(id, sliderOf(0, 2)).map(([name, s]) => ({
+          name: name.slice(0, 16),
+          label: "a knob",
+          ...s,
+        })),
+        { maxLength: 4 },
+      ),
+      xLabel: vizLabel,
+      yLabel: vizLabel,
+    },
+    { requiredKeys: ["kind", "prompt", "expr", "x", "params"] },
+  ),
+  fc.integer({ min: 1, max: 8 }).chain((n) =>
+    fc.record(
+      {
+        kind: fc.constant("heatmap" as const),
+        prompt: widgetPrompt,
+        values: fc.array(fc.array(value, { minLength: n, maxLength: n }), {
+          minLength: n,
+          maxLength: n,
+        }),
+        rowLabels: fc.array(vizLabel, { minLength: n, maxLength: n }),
+        colLabels: fc.array(vizLabel, { minLength: n, maxLength: n }),
+        transform: fc.constant("softmax-rows" as const),
+        temperature: sliderOf(0.1, 3),
+      },
+      // A temperature needs softmax-rows, so a heatmap widget here always transforms.
+      { requiredKeys: ["kind", "prompt", "values", "transform"] },
+    ),
+  ),
+);
+
 /**
  * Schema-valid contract steps, as Step.parse returns them (defaults filled in). paperRefs is
  * absent or non-empty: an empty list isn't kept (wireToStep).
@@ -290,6 +342,7 @@ const step = fc
         { maxLength: 8 },
       ),
       paperRefs: fc.array(paperRef, { minLength: 1, maxLength: 3 }),
+      widget,
     },
     { requiredKeys: ["title", "narration", "objects", "actions"] },
   )
@@ -492,11 +545,12 @@ describe("field coverage: the wire has every contract action field and kind", ()
 
   it("the wire step and sketch have the contract's top-level fields", () => {
     // objectsJson is the wire's own: it carries some of the contract's objects.
+    // objectsJson and widgetJson carry the objects and the widget the grammar has no room for.
     expect(Object.keys(WireStep.shape).sort()).toEqual(
       [
-        // widget (#110) isn't on the wire yet: it follows in its own change.
         ...Object.keys(Step.shape).filter((k) => k !== "widget"),
         "objectsJson",
+        "widgetJson",
       ].sort(),
     );
     expect(Object.keys(WireSketch.shape).sort()).toEqual(
@@ -527,6 +581,137 @@ describe("field coverage: every contract object kind is on the wire step once", 
 });
 
 // ------------------------------------------------------------ conversion rows
+
+describe("widgetJson (#110): one test per row", () => {
+  const PLOT_WIDGET = {
+    kind: "plot",
+    prompt: "Try it yourself: move a.",
+    expr: "a * x",
+    x: [-1, 1],
+    params: [
+      { name: "a", label: "slope", min: 0, max: 2, step: 0.1, value: 1 },
+    ],
+  } as const;
+  const HEATMAP_WIDGET = {
+    kind: "heatmap",
+    prompt: "Try it yourself: change a score.",
+    values: [
+      [1, 2],
+      [3, 4],
+    ],
+    transform: "softmax-rows",
+    temperature: { min: 0.1, max: 3, step: 0.1, value: 1 },
+  } as const;
+  const withWidget = (widgetJson?: string): WireStep => ({
+    ...wireStepWith(),
+    ...(widgetJson !== undefined && { widgetJson }),
+  });
+
+  it("absent: no widget, no errors", () => {
+    const { value, errors: errs } = wireToStep(withWidget());
+    expect(value).not.toHaveProperty("widget");
+    expect(errs).toEqual([]);
+  });
+
+  it("blank (empty or whitespace): no widget, no errors", () => {
+    for (const blank of ["", " \n"]) {
+      const { value, errors: errs } = wireToStep(withWidget(blank));
+      expect(value).not.toHaveProperty("widget");
+      expect(errs).toEqual([]);
+    }
+  });
+
+  it("a plot widget: the step's widget, its params as given", () => {
+    const { value, errors: errs } = wireToStep(
+      withWidget(JSON.stringify(PLOT_WIDGET)),
+    );
+    expect(errs).toEqual([]);
+    expect(value.widget).toStrictEqual(PLOT_WIDGET);
+  });
+
+  it("a heatmap widget: the step's widget", () => {
+    const result = validateWireStep(
+      withWidget(JSON.stringify(HEATMAP_WIDGET)),
+      LIMITS,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.widget).toStrictEqual(HEATMAP_WIDGET);
+  });
+
+  it("a plot widget without params: params default to none, as the contract's do", () => {
+    // JSON.stringify leaves out an undefined field.
+    const { value } = wireToStep(
+      withWidget(
+        JSON.stringify({ ...PLOT_WIDGET, expr: "x", params: undefined }),
+      ),
+    );
+    expect(value.widget).toStrictEqual({
+      ...PLOT_WIDGET,
+      expr: "x",
+      params: [],
+    });
+  });
+
+  it("not JSON: rejected with widgetJson: not valid JSON, and no widget", () => {
+    const { value, errors: errs } = wireToStep(withWidget('{"kind": "plot",'));
+    expect(value).not.toHaveProperty("widget");
+    expect(errs).toEqual([
+      expect.stringMatching(/^widgetJson: not valid JSON \(.+\)$/),
+    ]);
+  });
+
+  it("JSON that fails the widget schema (an unknown kind, a missing prompt, a temperature without softmax-rows): rejected with its widgetJson path, no widget", () => {
+    // JSON.stringify leaves out an undefined field.
+    const noTransform = { ...HEATMAP_WIDGET, transform: undefined };
+    const noPrompt = { ...PLOT_WIDGET, prompt: undefined };
+    for (const [bad, path] of [
+      [{ ...PLOT_WIDGET, kind: "slider" }, /^widgetJson\.kind: /],
+      [noPrompt, /^widgetJson\.prompt: /],
+      [noTransform, /^widgetJson\.temperature: /],
+      [[PLOT_WIDGET], /^widgetJson: /],
+    ] as const) {
+      const { value, errors: errs } = wireToStep(
+        withWidget(JSON.stringify(bad)),
+      );
+      expect(value).not.toHaveProperty("widget");
+      expect(errs).toEqual([expect.stringMatching(path)]);
+    }
+  });
+
+  it("a widget the contract rejects (an expr with an unknown name): validateStep's named error, for the retry", () => {
+    const result = validateWireStep(
+      withWidget(JSON.stringify({ ...PLOT_WIDGET, expr: "a * y" })),
+      LIMITS,
+    );
+    expect(result).toStrictEqual({
+      ok: false,
+      errors: [expect.stringMatching(/^widget expr: unknown name "y"/)],
+    });
+  });
+
+  it("widgetJson's errors come back with objectsJson's and the actions', in one list", () => {
+    const result = validateWireStep(
+      {
+        ...wireStepWith({
+          do: "move",
+          target: { id: "a" },
+          durationMs: 400,
+          cue: "go",
+        }),
+        objectsJson: "[",
+        widgetJson: "{",
+      },
+      LIMITS,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok)
+      expect(result.errors).toEqual([
+        expect.stringMatching(/^objectsJson: not valid JSON/),
+        wireErrors.moveNeedsTo("a"),
+        expect.stringMatching(/^widgetJson: not valid JSON/),
+      ]);
+  });
+});
 
 describe("wireToStep: paperRefs (#98), one test per row", () => {
   const REF = { page: 2, quote: "A sentence.", label: "Eq. 1", cue: "go" };
@@ -1119,6 +1304,18 @@ describe("output format size guard (#27)", () => {
     expect(keys.indexOf("actions")).toBe(keys.indexOf("objectsJson") + 1);
   });
 
+  // A widget comes at the end of a step, so widgetJson is optional (written after the actions).
+  it("the wire step's widgetJson is an optional string after the actions", () => {
+    const schema = STEP_OUTPUT_FORMAT.schema as {
+      properties: Record<string, { type?: string }>;
+      required: string[];
+    };
+    const keys = Object.keys(schema.properties);
+    expect(schema.required).not.toContain("widgetJson");
+    expect(schema.properties.widgetJson.type).toBe("string");
+    expect(keys.indexOf("widgetJson")).toBeGreaterThan(keys.indexOf("actions"));
+  });
+
   it("the wire schemas stay under the documented optional-property cap", () => {
     for (const format of [STEP_OUTPUT_FORMAT, SKETCH_OUTPUT_FORMAT])
       expect(optionalPerUse(format.schema)).toBeLessThanOrEqual(
@@ -1130,9 +1327,9 @@ describe("output format size guard (#27)", () => {
 // ------------------------------------------------------------ recorded response
 
 describe("the recorded step response (lib/fakes)", () => {
-  // Recorded with objectsJson and paperRefs on the wire and the paper's page text in the
-  // request (#103): a heatmap, a plot and one quote from page 4 of the Attention paper, all
-  // written by the model.
+  // Recorded with objectsJson, widgetJson and paperRefs on the wire and the paper's page text
+  // in the request (#110): a heatmap, a heatmap widget and one quote from page 4 of the
+  // Attention paper, all written by the model.
   it("is a real Sonnet 5.5 wire step that converts and passes validateStep", async () => {
     const message = await readFixture<Anthropic.Message>(config.step.fixture);
     expect(message.stop_reason).toBe("end_turn");

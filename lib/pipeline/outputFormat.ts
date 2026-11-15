@@ -8,7 +8,8 @@
 //
 // The grammar has almost no headroom: a step's grammar holds only the board objects (matrix,
 // text, latex, arrow), and the kinds it has no room for (heatmap and plot, #103, and the
-// unused image) come as a JSON array in one string, `objectsJson`, parsed and checked here.
+// unused image) come as a JSON array in one string, `objectsJson`, parsed and checked here; a
+// step's "try it yourself" widget (#110) comes the same way, in `widgetJson`.
 // Even one compact heatmap kind in the grammar was rejected (#103). A sketch keeps the board
 // objects, image included, in its grammar. Probe a bigger schema with a real request before
 // it merges; the size budget in tests/unit/lib/pipeline/outputFormat.test.ts moves with it.
@@ -18,6 +19,7 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import { LessonPlanOutput } from "@/shared/lesson";
 import { repairSketchPlainMaths } from "@/shared/plainMaths";
+import { HeatmapWidget, PlotWidget, type Widget } from "@/shared/widget";
 import {
   type Action,
   Anchor,
@@ -122,6 +124,12 @@ export const JsonStepObject = z.discriminatedUnion("kind", [
 ]);
 export type JsonStepObject = z.infer<typeof JsonStepObject>;
 
+/** The widget as `widgetJson` carries it: the contract's own schemas, by kind (see above). */
+export const JsonWidget = z.discriminatedUnion("kind", [
+  PlotWidget,
+  HeatmapWidget,
+]);
+
 export const WireStep = z.object({
   title: z.string(),
   narration: z.string(),
@@ -132,6 +140,8 @@ export const WireStep = z.object({
    */
   objectsJson: z.string(),
   actions: z.array(WireCuedAction),
+  /** The step's widget (#110) as a JSON object in a string; absent or blank for none. */
+  widgetJson: z.string().optional(),
   /** Last, after everything the board needs (#98). An empty list isn't saved. */
   paperRefs: z.array(WirePaperRef).optional(),
 });
@@ -161,8 +171,8 @@ export const wireErrors = {
   /** Not a rejection: the ref is dropped and this is logged (#98). */
   badPaperRef: (i: number, problems: readonly string[]) =>
     `paperRefs.${i} dropped: ${problems.join("; ")}`,
-  objectsJsonNotJson: (reason: string) =>
-    `objectsJson: not valid JSON (${reason})`,
+  notJson: (field: "objectsJson" | "widgetJson", reason: string) =>
+    `${field}: not valid JSON (${reason})`,
   objectsJsonNotArray:
     "objectsJson: must be a JSON array of heatmap, plot and image objects",
 } as const;
@@ -223,26 +233,46 @@ function toActions<W extends WireAction, A>(
  * "[]". Errors carry the wire's own path (`objectsJson.0.values: ...`), as the wire schema's do.
  */
 function parseObjectsJson(text: string): Converted<JsonStepObject[]> {
-  if (text.trim() === "") return { value: [], errors: [] };
-  let json: unknown;
-  try {
-    json = JSON.parse(text);
-  } catch (err) {
-    return {
-      value: [],
-      errors: [wireErrors.objectsJsonNotJson((err as Error).message)],
-    };
-  }
-  if (!Array.isArray(json))
+  const read = readJson("objectsJson", text);
+  if (read.json === undefined) return { value: [], errors: read.errors };
+  if (!Array.isArray(read.json))
     return { value: [], errors: [wireErrors.objectsJsonNotArray] };
   const value: JsonStepObject[] = [];
   const errors: string[] = [];
-  json.forEach((item: unknown, i) => {
+  read.json.forEach((item: unknown, i) => {
     const parsed = JsonStepObject.safeParse(item);
     if (parsed.success) value.push(parsed.data);
     else errors.push(...schemaErrors(parsed.error, ["objectsJson", `${i}`]));
   });
   return { value, errors };
+}
+
+/**
+ * `widgetJson` as a widget, or why it can't be read: no widget then, and the step is rejected
+ * so the retry runs (#110). Absent or blank is no widget.
+ */
+function parseWidgetJson(
+  text: string | undefined,
+): Converted<Widget | undefined> {
+  const read = readJson("widgetJson", text ?? "");
+  if (read.json === undefined) return { value: undefined, errors: read.errors };
+  const parsed = JsonWidget.safeParse(read.json);
+  return parsed.success
+    ? { value: parsed.data, errors: [] }
+    : { value: undefined, errors: schemaErrors(parsed.error, ["widgetJson"]) };
+}
+
+/** A wire field's JSON text: its value, nothing when blank, or why it isn't JSON. */
+function readJson(
+  field: "objectsJson" | "widgetJson",
+  text: string,
+): { json?: unknown; errors: string[] } {
+  if (text.trim() === "") return { errors: [] };
+  try {
+    return { json: JSON.parse(text), errors: [] };
+  } catch (err) {
+    return { errors: [wireErrors.notJson(field, (err as Error).message)] };
+  }
 }
 
 /**
@@ -253,6 +283,7 @@ function parseObjectsJson(text: string): Converted<JsonStepObject[]> {
 export function wireToStep(wire: WireStep): Converted<Step> {
   const json = parseObjectsJson(wire.objectsJson);
   const actions = toActions(wire.actions, (w) => ({ cue: w.cue }));
+  const widget = parseWidgetJson(wire.widgetJson);
   const paperRefs: CuedPaperRef[] = [];
   const warnings: string[] = [];
   (wire.paperRefs ?? []).forEach((ref, i) => {
@@ -266,10 +297,11 @@ export function wireToStep(wire: WireStep): Converted<Step> {
       narration: wire.narration,
       objects: [...json.value, ...wire.objects] satisfies SceneObject[],
       actions: actions.value satisfies CuedAction[],
+      ...(widget.value && { widget: widget.value }),
       // An empty list isn't saved: a step with no passages has no paperRefs.
       ...(paperRefs.length > 0 && { paperRefs }),
     },
-    errors: [...json.errors, ...actions.errors],
+    errors: [...json.errors, ...actions.errors, ...widget.errors],
     ...(warnings.length > 0 && { warnings }),
   };
 }
