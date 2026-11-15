@@ -43,11 +43,11 @@ const userText = (req: SketchRequestBody) => {
 };
 
 describe("buildSketchRequest", () => {
-  it("uses the sketch model, low effort and the output cap from lib/config.ts", () => {
+  it("uses the sketch model, medium effort and the output cap from lib/config.ts", () => {
     const body = buildSketchRequest(REQ);
     expect(body.model).toBe(config.models.sketch);
-    expect(body.output_config?.effort).toBe("low");
-    expect(config.effort.sketch).toBe("low");
+    expect(body.output_config?.effort).toBe("medium");
+    expect(config.effort.sketch).toBe("medium");
     expect(body.max_tokens).toBe(config.sketch.maxTokens);
   });
 
