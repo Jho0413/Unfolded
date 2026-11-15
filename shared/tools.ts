@@ -2,7 +2,7 @@
 // the agent config in agent/ and the handlers in qa/tools.ts. A test checks
 // both match it. No node-only imports.
 import { z } from "zod";
-import { ObjectId } from "./scene";
+import { MAX_PAPER_QUOTE_CHARS, ObjectId } from "./scene";
 
 const index = z.number().int().min(0);
 
@@ -26,6 +26,25 @@ export const DrawSceneParams = z.object({
 
 export const SimplifyUpcomingParams = z.object({
   reason: z.string().min(1).describe("Why the learner needs it simpler"),
+});
+
+/**
+ * highlight_paper (issue #98): scrolls the paper viewer to a passage and highlights it. The
+ * quote is found with shared/paperText.ts `findQuote`, on `page` first, then on any page.
+ * Registered in CLIENT_TOOLS together with its agent config (agent/tool_configs).
+ */
+export const HighlightPaperParams = z.object({
+  quote: z
+    .string()
+    .min(1)
+    .max(MAX_PAPER_QUOTE_CHARS)
+    .describe("A short verbatim quote from the paper, a sentence or less"),
+  page: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe("1-based page of the paper the quote is on, if known"),
 });
 
 /** The lesson control tools take nothing: they act on the step on screen. */

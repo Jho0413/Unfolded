@@ -176,6 +176,13 @@ type Step = {                                 // what Claude writes for one less
   narration: string;                          // with cue markers: "Take the first [[row1]]row..."
   objects: BoardObject[];                     // the board when the step starts
   actions: (Action & { cue: string })[];      // fired when the cue's word is spoken
+  paperRefs?: (PaperRef & { cue?: string })[]; // #98: highlighted in the paper from cueTimes[cue], or from 0 without a cue, until the next one
+};
+
+type PaperRef = {                             // #98: a passage of the uploaded paper
+  page: number;                               // 1-based
+  quote: string;                              // verbatim, 1..300 chars: found with shared/paperText.ts findQuote
+  label?: string;                             // e.g. "Eq. 1", "Section 3.2"
 };
 
 type Sketch = {                               // what /api/sketch returns for a Q&A drawing
@@ -184,6 +191,7 @@ type Sketch = {                               // what /api/sketch returns for a 
 };
 ```
 
+- **Paper quotes (#98).** "Verbatim" means `shared/paperText.ts`: `paperKey(text)` is the text NFKC-normalised (ligatures become letters), lower-cased, curly quotes folded, and whitespace, soft hyphens, zero-width characters, hyphens and dashes dropped, with each key character mapped back to its source index; `findQuote(pageText, quote)` is the first span of the page whose key equals the quote's, or null. A page's text is its PDF text items joined in order (the separator doesn't matter). The server checks each quote is on its page with it, and the browser finds the quote in the text layer with it, so an accepted quote is always found. The `highlight_paper` tool's args are `HighlightPaperParams` in `shared/tools.ts`: `{ quote, page? }`.
 - `mediaUrl` isn't part of the schema Claude fills in. The server adds it after fal returns and the image is saved to `runs/`. The page never loads a URL that a model wrote.
 - When several actions start at the same time, `sceneAt` applies them in their array order.
 - **Geometry.** Cell (r, c) of a matrix at x,y has its centre at (x + 64c + 32, y + 48r + 24). Brackets and the label are drawn outside that box. A whole matrix's centre is the centre of its cell box. The centre of a row or column is the centre of its cells, an arrow's is the midpoint of its ends, and an image's is the middle of its box. `CELL` is exported from `shared/scene.ts`, and the renderer and the prompts both use it.
@@ -205,6 +213,7 @@ type Sketch = {                               // what /api/sketch returns for a 
 | Every rule holds | valid |
 | The output isn't JSON, or fails the zod schema (`validateStep` parses it, section 5.1) | rejected: `the output is not valid JSON`, or the schema error |
 | A cue in `actions` doesn't appear in `narration` | rejected: `unknown cue "x"` |
+| A `paperRefs` cue that doesn't appear in `narration` | rejected: `unknown cue "x"` |
 | A marker appears twice in `narration` | rejected: `duplicate cue "x"` |
 | A malformed marker (`[[Row 1]]`, a stray `[[` or `]]`) | rejected: `malformed marker "[[Row 1]]"` (otherwise it would be read aloud) |
 | A marker in `narration` that no action uses | allowed (it's ignored) |

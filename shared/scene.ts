@@ -185,6 +185,32 @@ export type CuedAction = z.infer<typeof CuedAction>;
 export const TimedSketchAction = actionUnion({ atMs: z.number().int().min(0) });
 export type TimedSketchAction = z.infer<typeof TimedSketchAction>;
 
+/** The longest `PaperRef.quote`: a sentence or two, never a paragraph. */
+export const MAX_PAPER_QUOTE_CHARS = 300;
+
+/**
+ * A passage of the uploaded paper (issue #98). `quote` is verbatim from page `page`: it is
+ * found with shared/paperText.ts `findQuote`, which ignores case, whitespace, hyphens and
+ * ligatures, so the server and the browser agree on what "verbatim" means.
+ */
+export const PaperRef = z.object({
+  /** 1-based page of the PDF. */
+  page: z.number().int().min(1),
+  quote: z.string().min(1).max(MAX_PAPER_QUOTE_CHARS),
+  /** What the passage is, e.g. "Eq. 1" or "Section 3.2". */
+  label: z.string().min(1).optional(),
+});
+export type PaperRef = z.infer<typeof PaperRef>;
+
+/**
+ * A paper passage the step points at: highlighted from when its cue's word is spoken
+ * (`cueTimes[cue]`), or from the step's start without a cue, until the next one starts.
+ */
+export const CuedPaperRef = PaperRef.extend({
+  cue: z.string().regex(OBJECT_ID_RE).optional(),
+});
+export type CuedPaperRef = z.infer<typeof CuedPaperRef>;
+
 /** What Claude writes for one lesson step. */
 export const Step = z.object({
   title: z.string().min(1),
@@ -193,6 +219,8 @@ export const Step = z.object({
   /** The board when the step starts. */
   objects: z.array(BoardObject),
   actions: z.array(CuedAction),
+  /** Passages of the paper, in narration order (issue #98). Absent in older runs. */
+  paperRefs: z.array(CuedPaperRef).optional(),
 });
 export type Step = z.infer<typeof Step>;
 
