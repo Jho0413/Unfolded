@@ -95,6 +95,10 @@ export class AgentTurn {
     ) => setTimeout(fn, ms),
   ) {}
 
+  get isSpeaking(): boolean {
+    return this.speaking;
+  }
+
   setSpeaking(speaking: boolean): void {
     this.speaking = speaking;
     if (!speaking) this.flush();

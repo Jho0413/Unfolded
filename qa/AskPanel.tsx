@@ -170,14 +170,15 @@ export function AskPanel({
     onConnect: () => connectorRef.current?.connected(),
     onDisconnect: (reason) => connectorRef.current?.disconnected(reason),
     onMessage: (m) => {
-      // Words in the lesson's session with Ask closed: the learner spoke, or the agent did.
-      if (m.role === "user") bargeIn.transcript(m.text);
-      else bargeIn.agentSpeaking(true);
-      // Typed questions are added in submit(); skip the SDK's echo, if any.
+      // Typed questions are added in submit(); skip the SDK's echo, if any (it's never the
+      // learner speaking).
       if (m.role === "user" && typedEcho.current.includes(m.text)) {
         typedEcho.current.splice(typedEcho.current.indexOf(m.text), 1);
         return;
       }
+      // Words in the lesson's session with Ask closed: the learner spoke, or the agent did.
+      if (m.role === "user") bargeIn.transcript(m.text);
+      else bargeIn.agentSpeaking(true);
       addMessage(m);
     },
     onError: (message) => connectorRef.current?.error(message),
@@ -260,12 +261,17 @@ export function AskPanel({
     }
     return () => {
       connector.close();
+      // Closed while the agent was still answering: cut it off (issue #93).
+      if (agentTurn.isSpeaking) {
+        agentTurn.setSpeaking(false);
+        connector.interruptLive();
+      }
       setMessages([]);
       setDraft("");
       setToolNotice(null);
       setDrawn(NO_DRAWING);
     };
-  }, [open, replay, addMessage]);
+  }, [open, replay, addMessage, agentTurn]);
 
   // Tell the agent about every step change (or jump) while connected.
   const { phase } = session;
@@ -289,9 +295,11 @@ export function AskPanel({
   }, [phase, step, conversation]);
 
   const ask = useCallback(() => {
+    // Ask is opening: nothing more counts as barge-in (the effect below catches up later).
+    bargeIn.disarm();
     connectorRef.current?.clearNotice();
     onAsk();
-  }, [onAsk]);
+  }, [onAsk, bargeIn]);
   useEffect(() => {
     bargeIn.setHandler((signal) => {
       console.info(`[qa] barge-in (${signal})`);

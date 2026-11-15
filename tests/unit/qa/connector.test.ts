@@ -642,3 +642,23 @@ describe("the lesson's voice session (issue #93)", () => {
     expect(starts).toHaveLength(1);
   });
 });
+
+describe("cutting the agent off (issue #93)", () => {
+  it("interruptLive reopens the lesson's session with Ask closed; it does nothing with Ask open or no session", async () => {
+    const { c, starts, conversation } = setup();
+    c.interruptLive();
+    expect(conversation.end).not.toHaveBeenCalled();
+    c.setLive(true);
+    await settle();
+    c.connected();
+    c.open();
+    c.interruptLive();
+    expect(conversation.end).not.toHaveBeenCalled();
+    c.close();
+    c.interruptLive();
+    expect(conversation.end).toHaveBeenCalledOnce();
+    await settle();
+    expect(starts).toHaveLength(2);
+    expect(c.current).toMatchObject({ phase: "connecting", live: true });
+  });
+});

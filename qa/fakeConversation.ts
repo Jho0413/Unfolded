@@ -174,9 +174,10 @@ export class FakeConversation {
    */
   async say(text: string): Promise<void> {
     if (this.status !== "connected" || this.textOnly || this.micMuted) return;
+    // Scores about every 100 ms, as the server sends them; speech lasts a few frames.
     for (const score of [0.2, 0.9, 0.95, 0.97]) {
       this.callbacks.onVadScore?.(score);
-      await tick();
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
     if (this.status !== "connected") return;
     await this.answer(text);

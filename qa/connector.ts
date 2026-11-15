@@ -259,6 +259,23 @@ export class AskConnector {
     if (this.wantLive) this.startLive();
   }
 
+  /**
+   * Cuts the agent off by reopening the lesson's voice session (Ask closed while it was still
+   * answering, so it never talks over the narration). Nothing else stops an agent mid-sentence.
+   */
+  interruptLive(): void {
+    if (this.askOpen || !this.state.live || this.state.phase !== "connected")
+      return;
+    this.deps.log.info(
+      "[qa] Ask closed mid-answer: reopening the voice session",
+    );
+    this.begin();
+    this.queue = [];
+    this.deps.conversation.end();
+    this.set({ phase: "idle", live: false, transport: null });
+    this.startLive();
+  }
+
   /** Clears a leftover notice (Ask opened again). */
   clearNotice(): void {
     this.set({ notice: null });
