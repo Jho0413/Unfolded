@@ -12,6 +12,7 @@ import {
   textBox,
 } from "./boxes";
 import { KATEX_OPTIONS } from "./latex";
+import { heatmapLayout, plotLayout, VIZ_MIN } from "./viz";
 import {
   type Action,
   type Anchor,
@@ -20,7 +21,10 @@ import {
   CANVAS,
   CELL,
   CUE_MARKER_RE,
+  gridShape,
+  isGrid,
   isPoint,
+  type SceneObject,
   Sketch,
   Step,
   type Target,
@@ -113,6 +117,10 @@ export const errors = {
     `"${a}" and "${b}" overlap (leave ${gap} between them)`,
   mathsInPlainText: (id: string) =>
     `"_" or "^" in plain text "${id}" (write maths as a latex object)`,
+  needsSeries: (verb: "show" | "hide", id: string) =>
+    `${verb} on "${id}" needs the whole plot or one series ({ id, row })`,
+  tooSmall: (id: string) =>
+    `"${id}" is too small for its labels (make the box bigger)`,
 } as const;
 
 /** One line of text, a title or a takeaway, centred at x, y in a text size. */
@@ -186,7 +194,7 @@ function boxInCanvas(x: number, y: number, w: number, h: number): boolean {
   return inCanvas(x, y) && inCanvas(x + w, y + h);
 }
 
-function objectOnCanvas(obj: BoardObject): boolean {
+function objectOnCanvas(obj: SceneObject): boolean {
   switch (obj.kind) {
     case "matrix":
       return boxInCanvas(
@@ -199,10 +207,25 @@ function objectOnCanvas(obj: BoardObject): boolean {
     case "latex":
       return inCanvas(obj.x, obj.y);
     case "image":
+    case "heatmap":
+    case "plot":
       return boxInCanvas(obj.x, obj.y, obj.w, obj.h);
     case "arrow":
       return [obj.from, obj.to].every((a) => !isPoint(a) || inCanvas(a.x, a.y));
   }
+}
+
+/** Whether a heatmap's cells or a plot's area keep a legible size once labels take their room. */
+function fitsLabels(obj: SceneObject): boolean {
+  if (obj.kind === "heatmap") {
+    const l = heatmapLayout(obj);
+    return Math.min(l.cellW, l.cellH) >= VIZ_MIN.cell;
+  }
+  if (obj.kind === "plot") {
+    const { area } = plotLayout(obj);
+    return Math.min(area.w, area.h) >= VIZ_MIN.area;
+  }
+  return true;
 }
 
 /**
@@ -230,27 +253,39 @@ function latexParses(tex: string): boolean {
 
 // ---------------------------------------------------------------- references
 
-type Objects = ReadonlyMap<string, BoardObject>;
+type Objects = ReadonlyMap<string, SceneObject>;
 
 /** Checks a target's id and row/col. Returns its object if the id is known. */
 function checkTarget(
   target: Target,
   objects: Objects,
   out: string[],
-): BoardObject | undefined {
+): SceneObject | undefined {
   const obj = objects.get(target.id);
   if (!obj) {
     out.push(errors.unknownObject(target.id));
     return undefined;
   }
   if (target.row !== undefined || target.col !== undefined) {
-    const inRange =
-      obj.kind === "matrix" &&
-      (target.row === undefined || target.row < obj.rows.length) &&
-      (target.col === undefined || target.col < obj.rows[0].length);
-    if (!inRange) out.push(errors.targetOutOfRange(target.id));
+    if (
+      !isGrid(obj) ||
+      !partInRange(gridShape(obj), target, obj.kind === "plot")
+    )
+      out.push(errors.targetOutOfRange(target.id));
   }
   return obj;
+}
+
+/**
+ * Whether row/col name cells of a grid with these row lengths. A plot's rows are its series,
+ * of different lengths, so a column needs its series (`perRow`).
+ */
+function partInRange(shape: number[], t: Target, perRow: boolean): boolean {
+  const { row, col } = t;
+  if (row !== undefined && row >= shape.length) return false;
+  if (col === undefined) return true;
+  if (row === undefined) return !perRow && col < shape[0];
+  return col < shape[row];
 }
 
 /** `owner`: the id an off-canvas point is reported under (the moving object). */
@@ -277,18 +312,31 @@ export function checkAction(action: Action, objects: Objects): string[] {
   const { row, col } = action.target;
   switch (action.do) {
     case "show":
-      if (row !== undefined || col !== undefined)
+      // A heatmap reveals any of its cells; a plot draws on a whole series.
+      if (obj?.kind === "plot") {
+        if (col !== undefined) out.push(errors.needsSeries("show", obj.id));
+      } else if (
+        obj?.kind !== "heatmap" &&
+        (row !== undefined || col !== undefined)
+      )
         out.push(errors.showNeedsWhole());
       break;
     case "move":
-      if (obj?.kind === "arrow") out.push(errors.cantMove(obj.id));
+      if (
+        obj?.kind === "arrow" ||
+        ((obj?.kind === "heatmap" || obj?.kind === "plot") &&
+          (row !== undefined || col !== undefined))
+      )
+        out.push(errors.cantMove(obj.id));
       checkAnchor(action.to, action.target.id, objects, out);
       break;
     case "write":
       if (
         obj?.kind === "latex" ||
         obj?.kind === "arrow" ||
-        obj?.kind === "image"
+        obj?.kind === "image" ||
+        obj?.kind === "heatmap" ||
+        obj?.kind === "plot"
       )
         out.push(errors.cantWrite(obj.id));
       else if (
@@ -298,6 +346,10 @@ export function checkAction(action: Action, objects: Objects): string[] {
         out.push(errors.writeNeedsCell());
       break;
     case "hide":
+      // A plot hides a whole series, as it draws one.
+      if (obj?.kind === "plot" && col !== undefined)
+        out.push(errors.needsSeries("hide", obj.id));
+      break;
     case "highlight":
     case "unhighlight":
       // show on a visible object, hide on a hidden one, or hide on a part
@@ -309,7 +361,7 @@ export function checkAction(action: Action, objects: Objects): string[] {
 
 /** Duplicate ids, canvas bounds, LaTeX and arrow anchors of new objects. */
 function checkObjects(
-  newObjects: readonly BoardObject[],
+  newObjects: readonly SceneObject[],
   known: Objects,
   takenIds: ReadonlySet<string>,
   out: string[],
@@ -319,6 +371,7 @@ function checkObjects(
     if (seen.has(obj.id)) out.push(errors.duplicateId(obj.id));
     seen.add(obj.id);
     if (!objectOnCanvas(obj)) out.push(errors.offCanvas(obj.id));
+    if (!fitsLabels(obj)) out.push(errors.tooSmall(obj.id));
     if (obj.kind === "latex" && !latexParses(obj.tex))
       out.push(errors.invalidLatex(obj.id));
     if (obj.kind === "arrow") {
@@ -334,8 +387,8 @@ function checkObjects(
   }
 }
 
-function byId(...lists: (readonly BoardObject[])[]): Map<string, BoardObject> {
-  const map = new Map<string, BoardObject>();
+function byId(...lists: (readonly SceneObject[])[]): Map<string, SceneObject> {
+  const map = new Map<string, SceneObject>();
   for (const list of lists)
     for (const obj of list) if (!map.has(obj.id)) map.set(obj.id, obj);
   return map;

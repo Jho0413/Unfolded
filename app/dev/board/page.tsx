@@ -5,6 +5,7 @@
 //   /dev/board?scene=m1&t=3400              demo-m1 at 3400 ms, via sceneAt
 //   /dev/board?scene=m1-late-highlight&t=…  demo-m1 with a highlight after the slide
 //   /dev/board?scene=arrows&t=…             arrows following moving objects
+//   /dev/board?scene=viz&t=…                heatmap rows revealed, plot series drawn on
 //
 // Production servers answer 404 unless in fake mode (app/dev/devOnly.ts).
 import type { Metadata } from "next";

@@ -4,19 +4,23 @@
 import {
   type Action,
   type Anchor,
-  type BoardObject,
   type BoardState,
   CELL,
   cellCentre,
   type CuedAction,
+  type GridObject,
+  gridShape,
   type HighlightColor,
+  isGrid,
   isPoint,
   type MatrixObject,
   type ObjectState,
   type PartCopy,
   type Point,
+  type SceneObject,
   type Target,
 } from "@/shared/scene";
+import { heatmapCellCentre, plotPoint } from "@/shared/viz";
 import type { CueTimes } from "@/shared/lesson";
 import { easeInOutCubic } from "./easing";
 
@@ -69,12 +73,26 @@ export function partKey(t: Target): string {
   }`;
 }
 
-/** Whether a target names a part of a matrix (a row, column or cell), not a whole object. */
+/** Whether a target names a part of a grid object (a row, column or cell), not a whole object. */
 export function isPart(t: Target): boolean {
   return t.row !== undefined || t.col !== undefined;
 }
 
-function initialBoard(objects: readonly BoardObject[]): Board {
+/** A grid object's cells all set to `value`, in its shape. */
+function grid<T>(obj: GridObject, value: (r: number) => T): T[][] {
+  return gridShape(obj).map((n, r) =>
+    Array.from({ length: n }, () => value(r)),
+  );
+}
+
+/** Which cells of a heatmap or plot start drawn: unless hidden, or in a hidden series. */
+function initialCellVisible(obj: SceneObject): boolean[][] | undefined {
+  if (obj.kind === "heatmap") return grid(obj, () => !obj.cellsHidden);
+  if (obj.kind === "plot") return grid(obj, (r) => !obj.series[r].hidden);
+  return undefined;
+}
+
+function initialBoard(objects: readonly SceneObject[]): Board {
   const states: ObjectState[] = [];
   const byId = new Map<string, ObjectState>();
   for (const source of objects) {
@@ -84,10 +102,10 @@ function initialBoard(objects: readonly BoardObject[]): Board {
       object,
       visible: !object.hidden,
       highlight: null,
-      ...(object.kind === "matrix"
-        ? { cellHighlight: object.rows.map((r) => r.map(() => null)) }
-        : {}),
+      ...(isGrid(object) ? { cellHighlight: grid(object, () => null) } : {}),
     };
+    const cellVisible = initialCellVisible(object);
+    if (cellVisible) state.cellVisible = cellVisible;
     states.push(state);
     byId.set(object.id, state);
   }
@@ -132,15 +150,41 @@ export function coversCell(t: Target, r: number, c: number): boolean {
   );
 }
 
-/** Cells (r, c) a target covers in its matrix. */
-function cellsOf(matrix: MatrixObject, t: Target): [number, number][] {
+/** The grid object behind a part target, if the target is a valid part of one. */
+function gridPart(
+  board: Board,
+  t: Target,
+): { state: ObjectState; obj: GridObject } | undefined {
+  const state = board.byId.get(t.id);
+  if (!state || !isGrid(state.object)) return undefined;
+  const shape = gridShape(state.object);
+  if (t.row !== undefined && (t.row < 0 || t.row >= shape.length))
+    return undefined;
+  if (t.col !== undefined && t.col < 0) return undefined;
+  const cols = t.row !== undefined ? shape[t.row] : Math.min(...shape);
+  if (t.col !== undefined && t.col >= cols) return undefined;
+  return { state, obj: state.object };
+}
+
+/** Cells (r, c) a target covers in its grid object. */
+function cellsOf(obj: GridObject, t: Target): [number, number][] {
   const out: [number, number][] = [];
-  matrix.rows.forEach((row, r) =>
-    row.forEach((_, c) => {
-      if (coversCell(t, r, c)) out.push([r, c]);
-    }),
-  );
+  gridShape(obj).forEach((n, r) => {
+    for (let c = 0; c < n; c++) if (coversCell(t, r, c)) out.push([r, c]);
+  });
   return out;
+}
+
+/** Centre of cell (r, c) of a grid object: a matrix or heatmap cell, a plot point. */
+function cellCentreOf(obj: GridObject, r: number, c: number): Point {
+  switch (obj.kind) {
+    case "matrix":
+      return cellCentre(obj.x, obj.y, r, c);
+    case "heatmap":
+      return heatmapCellCentre(obj, r, c);
+    case "plot":
+      return plotPoint(obj, r, c);
+  }
 }
 
 function mean(points: Point[]): Point {
@@ -157,12 +201,10 @@ function sourceCentre(board: Board, t: Target): Point | undefined {
   if (!state) return undefined;
   const obj = state.object;
   if (isPart(t)) {
-    const part = matrixPart(board, t);
+    const part = gridPart(board, t);
     if (!part) return undefined;
-    const { matrix } = part;
-    return mean(
-      cellsOf(matrix, t).map(([r, c]) => cellCentre(matrix.x, matrix.y, r, c)),
-    );
+    const { obj: g } = part;
+    return mean(cellsOf(g, t).map(([r, c]) => cellCentreOf(g, r, c)));
   }
   switch (obj.kind) {
     case "matrix":
@@ -174,6 +216,8 @@ function sourceCentre(board: Board, t: Target): Point | undefined {
     case "latex":
       return { x: obj.x, y: obj.y };
     case "image":
+    case "heatmap":
+    case "plot":
       return { x: obj.x + obj.w / 2, y: obj.y + obj.h / 2 };
     case "arrow": {
       // Arrow ends never name arrows (validate.ts), so this doesn't recurse further.
@@ -220,7 +264,7 @@ export function resolveAnchor(
   );
 }
 
-function moveObjectCentre(obj: BoardObject, to: Point): void {
+function moveObjectCentre(obj: SceneObject, to: Point): void {
   switch (obj.kind) {
     case "matrix":
       obj.x = to.x - (obj.rows[0].length * CELL.w) / 2;
@@ -232,6 +276,8 @@ function moveObjectCentre(obj: BoardObject, to: Point): void {
       obj.y = to.y;
       break;
     case "image":
+    case "heatmap":
+    case "plot":
       obj.x = to.x - obj.w / 2;
       obj.y = to.y - obj.h / 2;
       break;
@@ -273,15 +319,27 @@ function setHighlight(
   if (!state) return;
   const clears = (current: HighlightColor | null) =>
     color !== null || only === undefined || current === only;
-  if (state.object.kind !== "matrix") {
+  if (!isGrid(state.object)) {
     if (!isPart(t) && clears(state.highlight)) state.highlight = color;
     return;
   }
-  const part = matrixPart(board, t);
-  const grid = state.cellHighlight;
-  if (!part || !grid) return;
-  for (const [r, c] of cellsOf(part.matrix, t))
-    if (clears(grid[r][c])) grid[r][c] = color;
+  const part = gridPart(board, t);
+  const cells = state.cellHighlight;
+  if (!part || !cells) return;
+  for (const [r, c] of cellsOf(part.obj, t))
+    if (clears(cells[r][c])) cells[r][c] = color;
+}
+
+/**
+ * Reveals or conceals the cells a part target covers in a heatmap or plot (a plot's series
+ * draws on). True when the target is such a part, so the caller handles nothing else.
+ */
+function setCellsVisible(board: Board, t: Target, visible: boolean): boolean {
+  const part = gridPart(board, t);
+  const cells = part?.state.cellVisible;
+  if (!part || !cells || !isPart(t)) return false;
+  for (const [r, c] of cellsOf(part.obj, t)) cells[r][c] = visible;
+  return true;
 }
 
 function apply(
@@ -296,12 +354,14 @@ function apply(
   if (!state) return; // unknown target: validation rejects it upstream
   switch (action.do) {
     case "show":
-      // Visible from the start, so the renderer can fade it in with progress.
+      // Visible from the start, so the renderer can fade it in (or draw it on) with progress.
+      if (setCellsVisible(board, t, true)) break;
       if (!isPart(t)) state.visible = true;
       break;
     case "hide":
       // Visible until the end, so the renderer can fade it out with progress.
       if (p < 1) break;
+      if (setCellsVisible(board, t, false)) break;
       if (!isPart(t)) state.visible = false;
       else {
         const copy = board.copyByKey.get(partKey(t));
@@ -368,6 +428,7 @@ function planMove(board: Board, action: Action): MovePlan | undefined {
   const t = action.target;
   const kind = board.byId.get(t.id)?.object.kind;
   if (kind === undefined || kind === "arrow") return undefined;
+  // Only a matrix's parts move (as copies); a heatmap or plot moves whole.
   if (isPart(t) && !matrixPart(board, t)) return undefined;
   const from = anchorOnBoard(board, t);
   const to = anchorOnBoard(board, action.to);
@@ -444,16 +505,19 @@ function changesBoard(
 }
 
 /** Which part of a cell an action sets, if it sets one. */
-type CellField = "highlight" | "value";
+type CellField = "highlight" | "value" | "visible";
 
 function cellField(action: Action): CellField | undefined {
   if (action.do === "highlight" || action.do === "unhighlight")
     return "highlight";
   if (action.do === "write") return "value";
+  // A show or hide of a heatmap's cells or a plot's series (see `setCellsVisible`).
+  if ((action.do === "show" || action.do === "hide") && isPart(action.target))
+    return "visible";
   return undefined;
 }
 
-/** Cells [r, c] of matrix `id` whose `field` differs between two boards. */
+/** Cells [r, c] of grid object `id` whose `field` differs between two boards. */
 function changedCells(
   before: Board,
   after: Board,
@@ -462,18 +526,21 @@ function changedCells(
 ): [number, number][] {
   const a = before.byId.get(id);
   const b = after.byId.get(id);
-  if (a?.object.kind !== "matrix" || b?.object.kind !== "matrix") return [];
-  const aRows = a.object.rows;
+  if (!a || !b || !isGrid(a.object) || !isGrid(b.object)) return [];
+  const aRows = a.object.kind === "matrix" ? a.object.rows : undefined;
+  const bRows = b.object.kind === "matrix" ? b.object.rows : undefined;
   const out: [number, number][] = [];
-  b.object.rows.forEach((row, r) =>
-    row.forEach((value, c) => {
+  gridShape(b.object).forEach((n, r) => {
+    for (let c = 0; c < n; c++) {
       const differs =
         field === "value"
-          ? value !== aRows[r][c]
-          : b.cellHighlight?.[r][c] !== a.cellHighlight?.[r][c];
+          ? bRows?.[r][c] !== aRows?.[r][c]
+          : field === "visible"
+            ? b.cellVisible?.[r][c] !== a.cellVisible?.[r][c]
+            : b.cellHighlight?.[r][c] !== a.cellHighlight?.[r][c];
       if (differs) out.push([r, c]);
-    }),
-  );
+    }
+  });
   return out;
 }
 
@@ -494,7 +561,7 @@ function changedCells(
  *   them before they reach the player).
  */
 export function sceneAt(
-  objects: readonly BoardObject[],
+  objects: readonly SceneObject[],
   timed: readonly TimedAction[],
   tMs: number,
 ): BoardState {
@@ -578,14 +645,19 @@ export function sceneAt(
         !changesBoard(beforeOf(i), e, plans[i])
       )
         return [];
-      const onMatrix =
-        cellField(e.action) !== undefined &&
-        base.byId.get(e.action.target.id)?.object.kind === "matrix";
+      const target = base.byId.get(e.action.target.id)?.object;
+      const field = cellField(e.action);
+      // A matrix part's show or hide is about its copy, not its cells: no `cells`.
+      const onGrid =
+        field !== undefined &&
+        target !== undefined &&
+        isGrid(target) &&
+        !(field === "visible" && target.kind === "matrix");
       return [
         {
           action: structuredClone(e.action),
           progress: progressAt(e, tMs),
-          ...(onMatrix ? { cells: cellsStillSet(i) } : {}),
+          ...(onGrid ? { cells: cellsStillSet(i) } : {}),
         },
       ];
     }),

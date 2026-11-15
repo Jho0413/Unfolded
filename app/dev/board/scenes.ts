@@ -8,6 +8,7 @@ import {
   Step,
 } from "@/shared/scene";
 import { sceneAt, type TimedAction, timeline } from "@/player/sceneAt";
+import { VIZ_CUE_TIMES, VIZ_STEP } from "./vizStep";
 
 /**
  * A fixed BoardState covering every matrix, text, latex and arrow feature:
@@ -319,7 +320,15 @@ const arrowActions: CuedAction[] = [
 
 const arrowTimed = timeline(arrowActions, ARROW_TIMES);
 
-export const SCENES = ["fixed", "m1", "m1-late-highlight", "arrows"] as const;
+const vizTimed = timeline(VIZ_STEP.actions, VIZ_CUE_TIMES);
+
+export const SCENES = [
+  "fixed",
+  "m1",
+  "m1-late-highlight",
+  "arrows",
+  "viz",
+] as const;
 export type SceneName = (typeof SCENES)[number];
 
 /** The times a timed scene's page links to, by name (ms). */
@@ -327,6 +336,7 @@ export const SCENE_TIMES: Record<Exclude<SceneName, "fixed">, CueTimes> = {
   m1: M1_CUE_TIMES,
   "m1-late-highlight": M1_CUE_TIMES,
   arrows: ARROW_TIMES,
+  viz: VIZ_CUE_TIMES,
 };
 
 export function isScene(name: string): name is SceneName {
@@ -344,5 +354,7 @@ export function sceneState(name: SceneName, tMs: number): BoardState {
       return sceneAt(m1.objects, lateHighlight, tMs);
     case "arrows":
       return sceneAt(ARROW_OBJECTS, arrowTimed, tMs);
+    case "viz":
+      return sceneAt(VIZ_STEP.objects, vizTimed, tMs);
   }
 }

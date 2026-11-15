@@ -9,6 +9,7 @@ import {
   type Point,
 } from "@/shared/scene";
 import { objectBox, type Size, TEXT_SIZE, textBox } from "@/shared/boxes";
+import { heatmapLayout } from "@/shared/viz";
 import { renderLatex } from "./katex";
 import { ARROW } from "./style";
 
@@ -52,6 +53,21 @@ export function targetBox(
       return renderLatex(object.tex).size;
     case "image":
       return { w: object.w, h: object.h };
+    case "heatmap": {
+      // #103: the whole box, or the cells of a row, column or cell.
+      if (anchor.row === undefined && anchor.col === undefined)
+        return { w: object.w, h: object.h };
+      const { cellW, cellH } = heatmapLayout(object);
+      return {
+        w: (anchor.col === undefined ? object.values[0].length : 1) * cellW,
+        h: (anchor.row === undefined ? object.values.length : 1) * cellH,
+      };
+    }
+    case "plot":
+      // #103: the whole box; a series or point is a point the arrow ends on.
+      return anchor.row === undefined
+        ? { w: object.w, h: object.h }
+        : undefined;
   }
 }
 

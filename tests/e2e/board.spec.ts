@@ -1,7 +1,11 @@
 // The whiteboard renderer on /dev/board (ROADMAP P3, P7). Asserts on data-*
 // attributes, never pixels, and checks timing by loading a time (?t=ms), never
 // by waiting. demo-m1 cue times are in app/dev/board/scenes.ts.
+import { mkdir } from "node:fs/promises";
+import path from "node:path";
 import { expect, type Locator, type Page, test } from "@playwright/test";
+
+const EVIDENCE = path.join(process.cwd(), "evidence", "103");
 
 function object(page: Page, id: string): Locator {
   return page.locator(`[data-object-id="${id}"]`);
@@ -425,4 +429,97 @@ test.describe("draw-on and reduced motion (issue #101)", () => {
     await page.emulateMedia({ reducedMotion: "no-preference" });
     expect(await computed(line(page), "stroke-dasharray")).not.toBe("none");
   });
+});
+
+// Heatmap and plot (issue #103): app/dev/board/vizStep.ts, cue times VIZ_CUE_TIMES.
+test.describe("heatmap and plot through sceneAt", () => {
+  const at = (page: Page, t: number) =>
+    page.goto(`/dev/board?scene=viz&t=${t}`);
+  const series = (page: Page, s: number) =>
+    object(page, "soft").locator(`[data-series="${s}"]`);
+
+  test("before any cue: heatmap cells blank, both series undrawn", async ({
+    page,
+  }) => {
+    await at(page, 0);
+    const attn = object(page, "attn");
+    await expect(attn).toHaveAttribute("data-kind", "heatmap");
+    await expect(attn.locator("[data-cell]")).toHaveCount(36);
+    await expect(attn.locator('[data-revealed="true"]')).toHaveCount(0);
+    await expect(attn.locator("[data-row-label]")).toHaveCount(6);
+    await expect(object(page, "soft")).toHaveAttribute("data-kind", "plot");
+    await expect(series(page, 0)).toHaveAttribute("data-drawn", "false");
+    await expect(series(page, 1)).toHaveAttribute("data-drawn", "false");
+  });
+
+  test("row0 at 500, 600 ms: row 0 fades in with progress", async ({
+    page,
+  }) => {
+    await at(page, 800);
+    const attn = object(page, "attn");
+    await expect(cell(attn, 0, 0)).toHaveAttribute("data-revealed", "true");
+    await expect(cell(attn, 0, 0)).toHaveAttribute(
+      "data-reveal-opacity",
+      "0.5",
+    );
+    await expect(cell(attn, 0, 0)).toHaveAttribute("data-value", "0.7");
+    await expect(cell(attn, 1, 0)).toHaveAttribute("data-revealed", "false");
+  });
+
+  test("peak at 3500: every row revealed, the cell it attends to highlighted warn", async ({
+    page,
+  }) => {
+    await at(page, 4000);
+    const attn = object(page, "attn");
+    await expect(attn.locator('[data-revealed="true"]')).toHaveCount(36);
+    await expect(cell(attn, 4, 1)).toHaveAttribute("data-highlight", "warn");
+    await expect(cell(attn, 4, 1)).toHaveAttribute(
+      "data-highlight-opacity",
+      "1",
+    );
+  });
+
+  test("curve at 4500, 1500 ms: series 0 draws on along x", async ({
+    page,
+  }) => {
+    await at(page, 5250);
+    await expect(series(page, 0)).toHaveAttribute("data-drawn", "true");
+    await expect(series(page, 0)).toHaveAttribute("data-draw-progress", "0.5");
+    // The pen is eased (motion.ts): halfway in time it is at z = 4.5, past 22 of 25 points.
+    await expect(series(page, 0)).toHaveAttribute("data-drawn-points", "22");
+    await expect(series(page, 1)).toHaveAttribute("data-drawn", "false");
+    await at(page, 6000);
+    await expect(series(page, 0)).toHaveAttribute("data-draw-progress", "1");
+    await expect(series(page, 0)).toHaveAttribute("data-drawn-points", "25");
+  });
+
+  test("point at 8500: the point at z = 0 is ringed, and seeking back undoes it", async ({
+    page,
+  }) => {
+    await at(page, 9000);
+    await expect(series(page, 1)).toHaveAttribute("data-draw-progress", "1");
+    await expect(
+      object(page, "soft").locator('[data-point="0,12"]'),
+    ).toHaveAttribute("data-highlight", "accent");
+    await at(page, 5250);
+    await expect(object(page, "soft").locator("[data-point]")).toHaveCount(0);
+    await expect(series(page, 0)).toHaveAttribute("data-draw-progress", "0.5");
+  });
+
+  for (const theme of ["dark", "light"] as const)
+    test(`renders in the ${theme} theme (evidence)`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme: theme });
+      for (const [name, t] of [
+        ["reveal", 1800],
+        ["draw-on", 5250],
+        ["end", 9000],
+      ] as const) {
+        await at(page, t);
+        await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+        await mkdir(EVIDENCE, { recursive: true });
+        await page.getByTestId("whiteboard").screenshot({
+          path: path.join(EVIDENCE, `viz-${name}-${theme}.png`),
+        });
+      }
+    });
 });
