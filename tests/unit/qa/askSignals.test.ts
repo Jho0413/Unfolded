@@ -1,6 +1,11 @@
 // The learner's Ask signals (issue #102, qa/askSignals.ts, ARCHITECTURE.md section 5.4).
 import { describe, expect, it, vi } from "vitest";
-import { COMMAND_TOOLS, createAskSignals, noteCommands } from "@/qa/askSignals";
+import {
+  COMMAND_TOOLS,
+  createAskSignals,
+  isAnswerControl,
+  noteCommands,
+} from "@/qa/askSignals";
 import type { QaTools } from "@/qa/types";
 import type { Signal } from "@/shared/lesson";
 
@@ -93,6 +98,71 @@ describe("createAskSignals", () => {
     h.signals.simplify("b");
     await h.signals.flush();
     for (const s of h.posted) expect(Signal.safeParse(s).success).toBe(true);
+  });
+});
+
+describe("isAnswerControl (holding or steering a drawn answer, demo rehearsal)", () => {
+  it.each([
+    "hold on",
+    "Hold on.",
+    "ok, hold on please",
+    "wait",
+    "wait wait",
+    "Hold on, hold on!",
+    "wait a second",
+    "hang on",
+    "pause",
+    "stop",
+    "okay carry on",
+    "go on",
+    "continue",
+    "keep going",
+    "say that again",
+    "sorry, say that again please",
+    "once more",
+  ])("%s: only a command", (text) => {
+    expect(isAnswerControl(text)).toBe(true);
+  });
+
+  it.each([
+    "hold on, why is it squared?",
+    "wait what does temperature do",
+    "why do we divide by root d",
+    "carry on with the next idea about softmax",
+    "stop sign",
+    "",
+    "ok",
+  ])("%s: not only a command", (text) => {
+    expect(isAnswerControl(text)).toBe(false);
+  });
+});
+
+describe("heard while a drawn answer is up", () => {
+  it("'hold on' over the Answer view is never posted, and isn't a question", async () => {
+    const h = harness();
+    h.signals.heard("hold on", { answerShowing: true });
+    expect(await h.signals.flush()).toBe(false);
+    expect(h.posted).toEqual([]);
+  });
+
+  it("the question before it still posts; a real question over the answer still counts", async () => {
+    const h = harness();
+    h.signals.heard("why is it squared?", { answerShowing: true });
+    h.signals.heard("wait", { answerShowing: true });
+    h.signals.heard("and what about the bias?", { answerShowing: true });
+    await h.signals.flush();
+    expect(h.posted.map((s) => ("question" in s ? s.question : null))).toEqual([
+      "why is it squared?",
+      "and what about the bias?",
+    ]);
+  });
+
+  it("'hold on' on the lesson board (no Answer view) is held as before (a control tool drops it)", async () => {
+    const h = harness();
+    h.signals.heard("hold on");
+    h.signals.heard("hold on", { answerShowing: false });
+    await h.signals.flush();
+    expect(h.posted).toHaveLength(2);
   });
 });
 

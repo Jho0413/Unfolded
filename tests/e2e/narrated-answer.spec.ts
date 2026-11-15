@@ -8,7 +8,8 @@ import { answerShownResult } from "@/qa/drawScene";
 import { CARD_TEXT } from "@/player/cardView";
 import { fakeAnswerAudio, lessonOf, narratedReply } from "./support/answer";
 import { savedRun } from "./support/savedRun";
-import { card } from "./support/tutor";
+import { card, carryOn } from "./support/tutor";
+import type { Signal } from "@/shared/lesson";
 
 test.use({
   launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
@@ -219,4 +220,42 @@ test("Ask closes while the answer plays (Got it, carry on): the narration stops 
   await expect
     .poll(() => drawResults(page))
     .toEqual([expect.stringContaining("left this answer")]);
+});
+
+test("'wait' over a drawn answer only holds it: no question signal, and the recap lists no question (demo rehearsal)", async ({
+  page,
+}) => {
+  await using run = await savedRun("e2e-narrated-hold-not-asked", {
+    steps: 1,
+  });
+  const bodies: Signal[] = [];
+  await page.route(`**/api/lessons/${run.lessonId}/signals`, async (route) => {
+    bodies.push(route.request().postDataJSON() as Signal);
+    await route.fulfill({ json: { version: 1 } });
+  });
+  await fakeAnswerAudio(page, AUDIO_MS);
+  const release = await gatedAnswer(page);
+  await askForDrawing(page, run.lessonId);
+  release();
+  await expect.poll(() => visible(page, "p1")).toBe("true");
+
+  // As the real agent in the Answer view, the fake calls no tool for "wait".
+  await say(page, "wait");
+  await expect
+    .poll(() => drawResults(page))
+    .toEqual([expect.stringMatching(/^Paused after:/)]);
+  await carryOn(page).click();
+  await expect(player(page)).not.toHaveAttribute("data-state", "asking");
+  // Only "can you draw it?" was a question; "wait" was never posted.
+  await expect
+    .poll(() => bodies.filter((b) => "question" in b))
+    .toEqual([expect.objectContaining({ question: "can you draw it?" })]);
+
+  // The lesson's end: the recap lists the real question only.
+  await page.getByTestId("player-audio").evaluate((a: HTMLAudioElement) => {
+    a.currentTime = Math.max(0, a.duration - 0.1);
+  });
+  const questions = page.getByTestId("recap-questions");
+  await expect(questions).toContainText("can you draw it?");
+  await expect(questions).not.toContainText("“wait”");
 });
