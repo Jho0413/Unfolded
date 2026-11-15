@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   canSend,
   afterAskEvent,
+  commandEvent,
   type AskClose,
   isTextEntry,
   isPlayPauseKey,
@@ -400,5 +401,99 @@ describe("afterAskEvent (what closing Ask goes on with)", () => {
   ];
   it.each(rows)("%s", (_, how, origin, afterClose, expected) => {
     expect(afterAskEvent(how, origin, afterClose)).toEqual(expected);
+  });
+});
+
+describe("commandEvent (spoken commands, issue #93: existing events only)", () => {
+  const three = { stepCount: 3 };
+  const rows: [
+    string,
+    Parameters<typeof commandEvent>[0],
+    PlayerState,
+    unknown,
+  ][] = [
+    [
+      "resume while held on",
+      "resume",
+      { kind: "paused", step: 1 },
+      { type: "resume" },
+    ],
+    [
+      "resume while explaining: nothing",
+      "resume",
+      { kind: "playing", step: 1 },
+      null,
+    ],
+    [
+      "pause while explaining",
+      "pause",
+      { kind: "playing", step: 1 },
+      { type: "pause" },
+    ],
+    [
+      "pause while held on: nothing",
+      "pause",
+      { kind: "paused", step: 1 },
+      null,
+    ],
+    [
+      "next mid-step: a jump that starts",
+      "next",
+      { kind: "playing", step: 0 },
+      { type: "goToStep", n: 1 },
+    ],
+    [
+      "next while held on: a jump",
+      "next",
+      { kind: "paused", step: 1 },
+      { type: "goToStep", n: 2 },
+    ],
+    [
+      "next mid-step on the last step: nothing",
+      "next",
+      { kind: "playing", step: 2 },
+      null,
+    ],
+    [
+      "next at the end of a step",
+      "next",
+      { kind: "stepEnded", step: 0 },
+      { type: "next" },
+    ],
+    [
+      "next at the end of the last step: finished",
+      "next",
+      { kind: "stepEnded", step: 2 },
+      { type: "next" },
+    ],
+    [
+      "next after a failed step skips it",
+      "next",
+      { kind: "failed", step: 0, message: "x" },
+      { type: "next" },
+    ],
+    ["previous", "previous", { kind: "playing", step: 2 }, { type: "back" }],
+    [
+      "previous on step 0 starts it again",
+      "previous",
+      { kind: "paused", step: 0 },
+      { type: "back" },
+    ],
+    ["replay", "replay", { kind: "stepEnded", step: 1 }, { type: "replay" }],
+    [
+      "replay after the lesson",
+      "replay",
+      { kind: "finished", step: 2 },
+      { type: "replay" },
+    ],
+    [
+      "anything while loading: nothing",
+      "replay",
+      { kind: "loading", step: 1, autoplay: true },
+      null,
+    ],
+  ];
+  it.each(rows)("%s", (_, command, state, event) => {
+    expect(commandEvent(command, state, three)).toEqual(event);
   });
 });

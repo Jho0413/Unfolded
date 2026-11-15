@@ -22,7 +22,7 @@ import { RUNS_DIR } from "./support/runsDir";
 import { silentMp3 } from "./support/savedRun";
 import {
   answer,
-  askByVoice,
+  askByKey,
   askQuestion,
   carryOn,
   goOn,
@@ -186,7 +186,7 @@ test("upload → plan → step plays → highlight at its cue → Next → Ask �
   await expectState(page, "paused", 1);
   await seek(page, 0);
   const before = await settledBoard(page);
-  await askByVoice(page).click();
+  await askByKey(page);
   await expectState(page, "asking", 1);
   await expect(page.getByTestId("ask-panel")).toHaveAttribute(
     "data-phase",

@@ -4,6 +4,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ATTEMPT_TIMEOUT_MS,
+  LIVE_RETRY_MS,
+  MAX_LIVE_RETRIES,
   AskConnector,
   CONNECTOR_MESSAGES,
   type ConnectorDeps,
@@ -475,5 +477,188 @@ describe("WebRTC blocked: the websocket fallback", () => {
     expect(starts.at(-1)?.transport).toBe("webrtc");
     c.connected();
     expect(c.current.transport).toBe("webrtc");
+  });
+});
+
+describe("the lesson's voice session (issue #93)", () => {
+  it("setLive(true): asks for the mic, then opens a voice session with Ask closed", async () => {
+    const { c, starts, deps } = setup();
+    c.setLive(true);
+    await settle();
+    expect(deps.requestMicrophone).toHaveBeenCalledOnce();
+    expect(starts).toEqual([
+      { transport: "webrtc", conversationToken: "tok", textOnly: false },
+    ]);
+    c.connected();
+    expect(c.current).toMatchObject({
+      phase: "connected",
+      live: true,
+      textOnly: false,
+      notice: null,
+    });
+    expect(deps.onConnected).toHaveBeenCalledOnce();
+  });
+
+  it("mic refused: no lesson session, no message; Ask then works as before", async () => {
+    const { c, starts } = setup({
+      requestMicrophone: vi.fn(async () => false),
+    });
+    c.setLive(true);
+    await settle();
+    expect(starts).toEqual([]);
+    expect(c.current).toMatchObject({
+      phase: "idle",
+      live: false,
+      notice: null,
+    });
+    c.open();
+    await settle();
+    expect(starts[0].textOnly).toBe(true);
+    expect(c.current.notice).toBe(CONNECTOR_MESSAGES.micOff);
+  });
+
+  it("Ask uses the lesson's session, and closing Ask keeps it", async () => {
+    const { c, starts, conversation, sent } = setup();
+    c.setLive(true);
+    await settle();
+    c.connected();
+    c.open();
+    await settle();
+    expect(starts).toHaveLength(1);
+    expect(c.send("why?")).toBe(true);
+    expect(sent).toEqual(["why?"]);
+    c.close();
+    expect(conversation.end).not.toHaveBeenCalled();
+    expect(c.current).toMatchObject({ phase: "connected", live: true });
+  });
+
+  it("a voice Ask session is kept as the lesson's when Ask closes; a text-only one is replaced", async () => {
+    const voice = setup();
+    voice.c.open();
+    await settle();
+    voice.c.connected();
+    voice.c.setLive(true);
+    voice.c.close();
+    expect(voice.conversation.end).not.toHaveBeenCalled();
+    expect(voice.c.current).toMatchObject({ phase: "connected", live: true });
+
+    const text = setup();
+    text.c.open();
+    text.c.typing();
+    await settle();
+    text.c.connected();
+    text.c.setLive(true);
+    text.c.close();
+    await settle();
+    expect(text.conversation.end).toHaveBeenCalled();
+    expect(text.starts.map((s) => s.textOnly)).toEqual([true, false]);
+  });
+
+  it("drops with Ask closed: no message, the machine isn't told, reopened after LIVE_RETRY_MS", async () => {
+    const { c, starts, deps } = setup();
+    c.setLive(true);
+    await settle();
+    c.connected();
+    c.disconnected("error");
+    expect(c.current).toMatchObject({
+      phase: "idle",
+      live: false,
+      notice: null,
+    });
+    expect(deps.onDropped).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(LIVE_RETRY_MS);
+    await settle();
+    expect(starts).toHaveLength(2);
+  });
+
+  it("can't connect with Ask closed: quiet, retried MAX_LIVE_RETRIES times, then given up", async () => {
+    const { c, starts } = setup({
+      fetchToken: async () => null,
+      fetchSignedUrl: async () => null,
+    });
+    c.setLive(true);
+    for (let i = 0; i < MAX_LIVE_RETRIES + 2; i++) {
+      await settle();
+      await vi.advanceTimersByTimeAsync(LIVE_RETRY_MS);
+    }
+    await settle();
+    expect(starts).toEqual([]);
+    expect(c.current).toMatchObject({ phase: "idle", notice: null });
+    // Ask still opens its own session, and says so if it fails.
+    c.open();
+    await settle();
+    expect(c.current.notice).toBe(CONNECTOR_MESSAGES.unavailable);
+  });
+
+  it("drops while Ask is open: 'Q&A ended unexpectedly.' as before, reopened once Ask closes", async () => {
+    const { c, starts, deps } = setup();
+    c.setLive(true);
+    await settle();
+    c.connected();
+    c.open();
+    c.disconnected("error");
+    expect(c.current.notice).toBe(CONNECTOR_MESSAGES.ended);
+    expect(deps.onDropped).toHaveBeenCalledOnce();
+    c.close();
+    await settle();
+    expect(starts).toHaveLength(2);
+    expect(c.current.live).toBe(true);
+  });
+
+  it("setLive(false) ends it with Ask closed; with Ask open, once Ask closes", async () => {
+    const a = setup();
+    a.c.setLive(true);
+    await settle();
+    a.c.connected();
+    a.c.setLive(false);
+    expect(a.conversation.end).toHaveBeenCalledOnce();
+    expect(a.c.current).toMatchObject({ phase: "idle", live: false });
+
+    const b = setup();
+    b.c.setLive(true);
+    await settle();
+    b.c.connected();
+    b.c.open();
+    b.c.setLive(false);
+    expect(b.conversation.end).not.toHaveBeenCalled();
+    b.c.close();
+    expect(b.conversation.end).toHaveBeenCalledOnce();
+    expect(b.c.current.phase).toBe("idle");
+  });
+
+  it("Ask opened while the lesson's mic prompt is open: Ask's own session, as before", async () => {
+    const mic = deferred<boolean>();
+    const { c, starts } = setup({ requestMicrophone: () => mic.promise });
+    c.setLive(true);
+    await settle();
+    c.open();
+    c.typing();
+    await settle();
+    expect(starts).toEqual([
+      { transport: "webrtc", conversationToken: "tok", textOnly: true },
+    ]);
+    mic.resolve(true);
+    await settle();
+    expect(starts).toHaveLength(1);
+  });
+});
+
+describe("cutting the agent off (issue #93)", () => {
+  it("interruptLive reopens the lesson's session with Ask closed; it does nothing with Ask open or no session", async () => {
+    const { c, starts, conversation } = setup();
+    c.interruptLive();
+    expect(conversation.end).not.toHaveBeenCalled();
+    c.setLive(true);
+    await settle();
+    c.connected();
+    c.open();
+    c.interruptLive();
+    expect(conversation.end).not.toHaveBeenCalled();
+    c.close();
+    c.interruptLive();
+    expect(conversation.end).toHaveBeenCalledOnce();
+    await settle();
+    expect(starts).toHaveLength(2);
+    expect(c.current).toMatchObject({ phase: "connecting", live: true });
   });
 });

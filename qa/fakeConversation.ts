@@ -36,6 +36,32 @@ export const DEFAULT_SCRIPT: readonly FakeTurn[] = [
     tool: { name: "go_to_step", params: { step: 1 } },
     reply: "Sure, we'll go there once you close this.",
   },
+  // The learner's spoken commands (issue #93).
+  {
+    match: /\b(carry on|go on|continue)\b/i,
+    tool: { name: "resume_lesson", params: {} },
+    reply: "Sure.",
+  },
+  {
+    match: /\b(hold on|pause)\b/i,
+    tool: { name: "pause_lesson", params: {} },
+    reply: "Okay, holding on.",
+  },
+  {
+    match: /\b(skip ahead|next step)\b/i,
+    tool: { name: "next_step", params: {} },
+    reply: "Moving on.",
+  },
+  {
+    match: /\b(go back|previous step)\b/i,
+    tool: { name: "previous_step", params: {} },
+    reply: "Going back.",
+  },
+  {
+    match: /\bsay that again\b/i,
+    tool: { name: "replay_step", params: {} },
+    reply: "Once more.",
+  },
   {
     match: /first row/i,
     tool: { name: "highlight", params: { target_id: "q", row: 0 } },
@@ -142,10 +168,32 @@ export class FakeConversation {
   /** Test hook: the next sendUserMessage throws, as the SDK would on a broken session. */
   failNextSend = false;
 
+  /**
+   * Test hook: the learner speaks into the mic (a voice session). The server's VAD scores the
+   * speech first, then the transcript arrives and the agent answers, as for a typed question.
+   */
+  async say(text: string): Promise<void> {
+    if (this.status !== "connected" || this.textOnly || this.micMuted) return;
+    // Scores about every 100 ms, as the server sends them; speech lasts a few frames.
+    for (const score of [0.2, 0.9, 0.95, 0.97]) {
+      this.callbacks.onVadScore?.(score);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    if (this.status !== "connected") return;
+    await this.answer(text);
+  }
+
+  /** Test hook: one VAD score (e.g. the narration leaking into the mic, scored low). */
+  vad(score: number): void {
+    if (this.status === "connected") this.callbacks.onVadScore?.(score);
+  }
+
   private async answer(text: string): Promise<void> {
     this.emit({ role: "user", text });
     const turn = this.script.find((t) => t.match.test(text));
     if (!turn) return;
+    // The agent speaks its reply; a no-wait tool is called during it, as the real agent does.
+    this.callbacks.onAgentSpeaking?.(true);
     if (turn.tool) {
       const { name } = turn.tool;
       const params = toolParams(turn, text, this.contextUpdates.at(-1));
@@ -155,6 +203,8 @@ export class FakeConversation {
     await tick();
     if (this.status !== "connected") return;
     this.emit({ role: "agent", text: turn.reply });
+    await tick();
+    if (this.status === "connected") this.callbacks.onAgentSpeaking?.(false);
   }
 
   sendUserActivity(): void {

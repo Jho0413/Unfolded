@@ -30,6 +30,14 @@ export const askInput = (page: Page) => page.getByLabel("Type your question");
 export const askByVoice = (page: Page) =>
   page.getByRole("button", { name: "Ask by voice" });
 
+/**
+ * Opens Ask by voice with the `A` key. On the lesson page, once the lesson's always-on mic is
+ * listening (issue #93), the box's mic button is its mute switch, so the lesson specs use `A`.
+ */
+export async function askByKey(page: Page) {
+  await page.keyboard.press("a");
+}
+
 /** Types a question in the Ask box and presses Enter (it opens Ask if it's closed). */
 export async function askQuestion(page: Page, text: string) {
   await askInput(page).fill(text);

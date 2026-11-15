@@ -168,3 +168,44 @@ export function afterAskEvent(
   if (origin.kind === "loading" && origin.autoplay) return resume;
   return null;
 }
+
+/** A spoken lesson command (issue #93): the agent's control tools (shared/tools.ts). */
+export type LessonCommand = "resume" | "pause" | "next" | "previous" | "replay";
+
+/**
+ * The machine event for a spoken command, in the state the player is in once Ask is closed
+ * (ARCHITECTURE.md section 8). Existing events only, so machine.ts doesn't change:
+ * - resume: Go on from held on (`resume`).
+ * - pause: hold on while explaining (`pause`).
+ * - next: the end-of-step Next (`next`, or finished on the last step); mid-step, where the
+ *   machine only takes Next after the step ends, a jump to the next step (`goToStep`, which
+ *   starts at once); after a failed step, `next` skips it.
+ * - previous: `back` (step 0 starts again).
+ * - replay: `replay` (from the start of the step).
+ * Null when the command means nothing now (e.g. next on the last step mid-step).
+ */
+export function commandEvent(
+  command: LessonCommand,
+  state: PlayerState,
+  ctx: PlayerContext,
+): PlayerEvent | null {
+  const event = ((): PlayerEvent | null => {
+    switch (command) {
+      case "resume":
+        return { type: "resume" };
+      case "pause":
+        return { type: "pause" };
+      case "previous":
+        return { type: "back" };
+      case "replay":
+        return { type: "replay" };
+      case "next":
+        if (state.kind === "playing" || state.kind === "paused")
+          return state.step + 1 < ctx.stepCount
+            ? { type: "goToStep", n: state.step + 1 }
+            : null;
+        return { type: "next" };
+    }
+  })();
+  return event !== null && canSend(state, event, ctx) ? event : null;
+}

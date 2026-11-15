@@ -1,0 +1,15 @@
+{
+  "type": "client",
+  "name": "pause_lesson",
+  "description": "Hold the lesson where it is until the learner says to carry on.",
+  "expects_response": false,
+  "parameters": {
+    "type": "object",
+    "description": "Nothing: it acts on the lesson on screen",
+    "required": [],
+    "properties": {}
+  },
+  "dynamic_variables": {
+    "dynamic_variable_placeholders": {}
+  }
+}

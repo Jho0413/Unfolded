@@ -1,0 +1,15 @@
+{
+  "type": "client",
+  "name": "previous_step",
+  "description": "Go back to the previous step; it starts at once.",
+  "expects_response": false,
+  "parameters": {
+    "type": "object",
+    "description": "Nothing: it acts on the lesson on screen",
+    "required": [],
+    "properties": {}
+  },
+  "dynamic_variables": {
+    "dynamic_variable_placeholders": {}
+  }
+}

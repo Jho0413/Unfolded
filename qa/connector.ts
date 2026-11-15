@@ -16,6 +16,12 @@
 //   once: a websocket with a signed URL when WebRTC is blocked on venue Wi-Fi. The conversation
 //   starts each session fresh (qa/sdkSessions.ts), so a hung WebRTC start can't block it, and
 //   the abandoned start's late callbacks are dropped there and ignored here.
+// - The lesson's voice session (issue #93): while the lesson wants it (setLive), a voice session
+//   stays open with Ask closed, so the learner can just talk (barge-in, spoken commands). It
+//   asks for the mic first; refused, there's no lesson session and Ask works as before. Ask
+//   opening uses it; closing Ask keeps it (a voice Ask session is kept as the lesson's). It
+//   drops or fails quietly with Ask closed (no message: the learner didn't ask) and is retried
+//   up to MAX_LIVE_RETRIES times, LIVE_RETRY_MS apart.
 // - Failures are logged and shown with the section 7 messages: "Questions are unavailable right
 //   now." when no session starts, "Q&A ended unexpectedly." when a session drops or a question
 //   can't be sent.
@@ -30,6 +36,9 @@ import type {
 
 /** How long one connect attempt may take, credentials included, before it counts as failed. */
 export const ATTEMPT_TIMEOUT_MS = 8000;
+/** The lesson's voice session: how long to wait before reopening it, and how many times in a row. */
+export const LIVE_RETRY_MS = 3000;
+export const MAX_LIVE_RETRIES = 3;
 
 export const CONNECTOR_MESSAGES = {
   unavailable: QA_UNAVAILABLE,
@@ -53,6 +62,8 @@ export type ConnectorState = {
   micDenied: boolean;
   transport: Transport | null;
   notice: string | null;
+  /** The session is the lesson's voice session, open with Ask closed (issue #93). */
+  live: boolean;
 };
 
 export type ConnectorDeps = {
@@ -80,6 +91,7 @@ export const INITIAL_CONNECTOR_STATE: ConnectorState = {
   micDenied: false,
   transport: null,
   notice: null,
+  live: false,
 };
 
 /** One connect attempt; on failure before connecting, `canFallBack` tries the other transport. */
@@ -108,6 +120,12 @@ export class AskConnector {
   /** The attempt whose callbacks count; null between attempts (callbacks are then stale). */
   private attempt: Attempt | null = null;
   private preferred: Transport = "webrtc";
+  /** The lesson wants its voice session (setLive). */
+  private wantLive = false;
+  /** Whether Ask is open (between open() and close()). */
+  private askOpen = false;
+  private liveRetries = 0;
+  private liveTimer: unknown = null;
   private readonly setTimer: (fn: () => void, ms: number) => unknown;
   private readonly clearTimer: (handle: unknown) => void;
 
@@ -122,8 +140,37 @@ export class AskConnector {
     return this.state;
   }
 
+  /**
+   * Whether the lesson wants its voice session now (issue #93): from the first play until the
+   * lesson ends, the tab has been hidden a while, or the page goes. Off ends it once Ask is closed.
+   */
+  setLive(want: boolean): void {
+    if (want === this.wantLive) return;
+    this.wantLive = want;
+    this.liveRetries = 0;
+    this.cancelLiveRetry();
+    if (this.askOpen) return; // decided when Ask closes
+    if (want) {
+      if (this.state.phase === "idle" || this.state.phase === "failed")
+        this.startLive();
+    } else if (this.state.live) {
+      this.begin();
+      this.queue = [];
+      this.deps.conversation.end();
+      this.set({ phase: "idle", live: false, transport: null });
+    }
+  }
+
   /** Ask opened: fetch credentials and ask for the mic in parallel; the first answer decides. */
   open(): void {
+    this.askOpen = true;
+    this.cancelLiveRetry();
+    const { phase, live } = this.state;
+    if (live && (phase === "connected" || phase === "connecting")) {
+      // The lesson's voice session is already there: Ask uses it.
+      this.set({ notice: null });
+      return;
+    }
     const gen = this.begin();
     this.set({ ...INITIAL_CONNECTOR_STATE, phase: "waiting" });
     const decided = new Promise<boolean>((resolve) => (this.decide = resolve));
@@ -177,8 +224,29 @@ export class AskConnector {
     );
   }
 
-  /** Ask closed: drop everything in flight, end the session. */
+  /**
+   * Ask closed: drop everything in flight and end the session, unless the lesson wants its
+   * voice session: then a voice session is kept as the lesson's, and otherwise one is started.
+   */
   close(): void {
+    this.askOpen = false;
+    const { phase, textOnly } = this.state;
+    const working = phase === "connected" || phase === "connecting";
+    if (
+      this.wantLive &&
+      working &&
+      !textOnly &&
+      this.attempt?.micSwitch !== true
+    ) {
+      this.queue = [];
+      // Only a dropped session's message outlives the panel.
+      const notice =
+        this.state.notice === CONNECTOR_MESSAGES.ended
+          ? CONNECTOR_MESSAGES.ended
+          : null;
+      this.set({ live: true, notice });
+      return;
+    }
     this.begin();
     this.queue = [];
     this.deps.conversation.end();
@@ -188,6 +256,24 @@ export class AskConnector {
         ? CONNECTOR_MESSAGES.ended
         : null;
     this.set({ ...INITIAL_CONNECTOR_STATE, notice });
+    if (this.wantLive) this.startLive();
+  }
+
+  /**
+   * Cuts the agent off by reopening the lesson's voice session (Ask closed while it was still
+   * answering, so it never talks over the narration). Nothing else stops an agent mid-sentence.
+   */
+  interruptLive(): void {
+    if (this.askOpen || !this.state.live || this.state.phase !== "connected")
+      return;
+    this.deps.log.info(
+      "[qa] Ask closed mid-answer: reopening the voice session",
+    );
+    this.begin();
+    this.queue = [];
+    this.deps.conversation.end();
+    this.set({ phase: "idle", live: false, transport: null });
+    this.startLive();
   }
 
   /** Clears a leftover notice (Ask opened again). */
@@ -217,6 +303,7 @@ export class AskConnector {
       return;
     }
     this.stopTimer();
+    if (this.state.live) this.liveRetries = 0;
     this.preferred = attempt.transport;
     this.set({ phase: "connected", transport: attempt.transport });
     this.deps.onConnected(this.state);
@@ -227,6 +314,14 @@ export class AskConnector {
 
   disconnected(reason: DisconnectReason): void {
     const { phase } = this.state;
+    if (phase === "connected" && this.state.live && !this.askOpen) {
+      // The lesson's session ended with Ask closed (a drop, or the platform's time limit):
+      // reopen it quietly; the learner didn't ask anything.
+      this.deps.log.warn(`[qa] the lesson's voice session ended (${reason})`);
+      this.set({ phase: "idle", live: false, transport: null });
+      this.retryLive();
+      return;
+    }
     if (phase === "connecting") {
       // "user" is the end() of an attempt we abandoned ourselves.
       if (reason !== "user")
@@ -249,6 +344,65 @@ export class AskConnector {
   }
 
   // ---- internals
+
+  /** Opens the lesson's voice session: the mic first, then the credentials and the attempt. */
+  private startLive(): void {
+    const gen = this.begin();
+    this.set({
+      phase: "waiting",
+      textOnly: false,
+      live: true,
+      transport: null,
+    });
+    void (async () => {
+      const mic = await this.deps.requestMicrophone().catch(() => false);
+      if (gen !== this.gen) return;
+      if (!mic) {
+        // No lesson session; Ask works as before (and says "Mic is off…" when opened).
+        this.deps.log.info("[qa] no mic: no voice session for the lesson");
+        this.set({ phase: "idle", live: false, micDenied: true });
+        return;
+      }
+      this.set({ phase: "connecting" });
+      const transport = this.preferred;
+      await this.tryTransport(
+        gen,
+        {
+          transport,
+          textOnly: false,
+          canFallBack: true,
+          micSwitch: false,
+        },
+        this.credentials(transport).catch(() => null),
+      );
+    })();
+  }
+
+  /** Reopens the lesson's voice session later, a bounded number of times in a row. */
+  private retryLive(): void {
+    if (!this.wantLive || this.askOpen) return;
+    if (this.liveRetries >= MAX_LIVE_RETRIES) {
+      this.deps.log.warn("[qa] giving up on the lesson's voice session");
+      return;
+    }
+    this.liveRetries++;
+    this.cancelLiveRetry();
+    this.liveTimer = this.setTimer(() => {
+      this.liveTimer = null;
+      const { phase } = this.state;
+      if (
+        this.wantLive &&
+        !this.askOpen &&
+        (phase === "idle" || phase === "failed")
+      )
+        this.startLive();
+    }, LIVE_RETRY_MS);
+  }
+
+  private cancelLiveRetry(): void {
+    if (this.liveTimer !== null) this.clearTimer(this.liveTimer);
+    this.liveTimer = null;
+  }
 
   private begin(): number {
     this.stopTimer();
@@ -358,8 +512,18 @@ export class AskConnector {
       );
       return;
     }
+    if (this.state.live && !this.askOpen) {
+      // The lesson's session couldn't start: quietly, and Ask still works when opened.
+      this.set({ phase: "idle", live: false, transport: null });
+      this.retryLive();
+      return;
+    }
     this.queue = [];
-    this.set({ phase: "failed", notice: CONNECTOR_MESSAGES.unavailable });
+    this.set({
+      phase: "failed",
+      live: false,
+      notice: CONNECTOR_MESSAGES.unavailable,
+    });
   }
 
   private sendNow(text: string): boolean {

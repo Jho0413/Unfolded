@@ -24,6 +24,10 @@ export type ConversationCallbacks = {
   onDisconnect?: (reason: DisconnectReason) => void;
   onMessage?: (message: QaMessage) => void;
   onError?: (message: string) => void;
+  /** The server's voice activity score for the learner's mic, 0 to 1 (issue #93's barge-in). */
+  onVadScore?: (score: number) => void;
+  /** The agent started or stopped speaking. */
+  onAgentSpeaking?: (speaking: boolean) => void;
 };
 
 /**
@@ -49,6 +53,12 @@ export type AskApi = {
   tellAgent: (text: string) => void;
   /** A draw_scene sketch was drawn: the card tags the answer "Drawing on the board". */
   sketchDrawn: () => void;
+  /**
+   * Runs `fn` once the agent has finished speaking (after a short wait for it to start if it's
+   * quiet: qa/bargeIn.ts AgentTurn), so a spoken command
+   * never starts the narration over the agent (issue #93).
+   */
+  afterAgentSpeaks: (fn: () => void) => void;
 };
 
 /**

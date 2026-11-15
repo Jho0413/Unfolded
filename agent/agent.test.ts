@@ -116,6 +116,34 @@ describe("agent config", () => {
     expect(prompt).toMatch(/wait silently/);
   });
 
+  it("stays silent through the narration and steers the lesson by voice (issue #93)", () => {
+    const prompt: string = agent.conversation_config.agent.prompt.prompt;
+    expect(prompt).toMatch(/Stay completely silent while the lesson plays/);
+    expect(prompt).toMatch(/Never answer the narration itself/);
+    expect(prompt).toMatch(/Never move the lesson on your own/);
+    // The answer view's contextual updates (#90's qa/answerContext.ts), quoted exactly.
+    expect(prompt).toContain('"Answer board showing: <title>"');
+    expect(prompt).toContain('"Back on the lesson."');
+  });
+
+  it("sends the VAD scores barge-in uses, keeping the events the panel needs (issue #93)", () => {
+    const { client_events, max_duration_seconds } =
+      agent.conversation_config.conversation;
+    expect(client_events).toEqual(
+      expect.arrayContaining([
+        "audio",
+        "interruption",
+        "agent_response",
+        "user_transcript",
+        "agent_response_correction",
+        "agent_tool_response",
+        "vad_score",
+      ]),
+    );
+    // A lesson-long session; past this, the connector reopens it quietly.
+    expect(max_duration_seconds).toBeGreaterThanOrEqual(1800);
+  });
+
   it("never takes a turn on the learner's silence (no 'are you still there?')", () => {
     expect(agent.conversation_config.turn.turn_timeout).toBe(-1);
   });

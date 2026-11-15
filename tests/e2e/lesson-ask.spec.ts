@@ -6,7 +6,7 @@ import { expect, type Page, test } from "@playwright/test";
 import { savedRun, savedStepTitle } from "./support/savedRun";
 import {
   answer,
-  askByVoice,
+  askByKey,
   askQuestion,
   carryOn,
   holdOn,
@@ -83,7 +83,7 @@ test("typed question -> asking -> highlight and draw -> carry on -> the lesson g
     })
     .toBe(true);
 
-  await askByVoice(page).click();
+  await askByKey(page);
   await expect(player(page)).toHaveAttribute("data-state", "asking");
   await expect(page.getByTestId("ask-panel")).toHaveAttribute(
     "data-phase",
@@ -181,7 +181,7 @@ test("Ask opened mid-fade: the fade completes with nothing drawn", async ({
   const opacity = () =>
     cell(page, "a", 0, 0).getAttribute("data-highlight-opacity");
   await expect.poll(async () => Number(await opacity())).toBeLessThan(1);
-  await askByVoice(page).click();
+  await askByKey(page);
   await expect(player(page)).toHaveAttribute("data-state", "asking");
   // Q&A time is pausedT + the time since Ask opened (ARCH 5.3).
   await expect.poll(opacity).toBe("1");
@@ -200,7 +200,7 @@ test("Ask while loading: the board stays empty when the step arrives, then plays
   });
   await page.goto(`/lesson/${run.lessonId}`);
   await expect(player(page)).toHaveAttribute("data-state", "loading");
-  await askByVoice(page).click();
+  await askByKey(page);
   await expect(player(page)).toHaveAttribute("data-state", "asking");
   await expect(page.getByTestId("ask-panel")).toHaveAttribute(
     "data-phase",
