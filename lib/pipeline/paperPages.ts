@@ -38,7 +38,10 @@ function loadPdfjs(): Promise<Pdfjs> {
     const worker = await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
     (globalThis as { pdfjsWorker?: unknown }).pdfjsWorker = worker;
     return import("pdfjs-dist/legacy/build/pdf.mjs");
-  })();
+  })().catch((err: unknown) => {
+    pdfjs = undefined; // the next step tries again
+    throw err;
+  });
   return pdfjs;
 }
 
@@ -70,11 +73,24 @@ export async function extractPageTexts(pdf: Uint8Array): Promise<string[]> {
  * The lesson's paper as page text, or undefined when there is none to check quotes against: a
  * run made before #98 has no paper.pdf (normal), a PDF pdf.js can't read is logged, and a
  * scanned paper has no text at all. Read from paper-text.json when it is this paper.pdf's,
- * otherwise extracted and saved there.
+ * otherwise extracted and saved there. Never throws: a step is made without quotes rather
+ * than failed.
  */
 export async function readPaperPages(
   lessonId: string,
 ): Promise<string[] | undefined> {
+  try {
+    return await loadPaperPages(lessonId);
+  } catch (err) {
+    console.error(
+      `${TAG} ${lessonId}: couldn't read the paper's text, so no paper quotes`,
+      err,
+    );
+    return undefined;
+  }
+}
+
+async function loadPaperPages(lessonId: string): Promise<string[] | undefined> {
   const pdf = await readRunFile(lessonId, PAPER_PDF_FILE);
   if (pdf.kind === "missing") return undefined;
   if (pdf.kind === "refused") {
@@ -104,10 +120,13 @@ export async function readPaperPages(
     );
     return undefined;
   }
+  // A cache that can't be written (a full disk) only means extracting again next time.
   await writeRunJson(lessonId, PAPER_TEXT_FILE, {
     pdfSha256,
     pages,
-  } satisfies PaperText);
+  } satisfies PaperText).catch((err: unknown) =>
+    console.warn(`${TAG} ${lessonId}: couldn't save ${PAPER_TEXT_FILE}`, err),
+  );
   return withText(pages);
 }
 

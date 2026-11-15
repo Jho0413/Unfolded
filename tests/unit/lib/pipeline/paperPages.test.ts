@@ -2,7 +2,7 @@
 // extracted with pdf.js as the paper viewer reads it, and cached in paper-text.json. The PDFs
 // are made on the fly (the e2e paper fixture, and a text-less one); runs go to a temp dir.
 import { createHash } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -130,6 +130,31 @@ describe("readPaperPages", () => {
     expect(error).toHaveBeenCalledOnce();
     expect(error.mock.calls[0][0]).toContain(LESSON);
     expect(error.mock.calls[0][0]).toContain("no paper quotes");
+  });
+
+  it("paper-text.json can't be written (a full disk, here a folder in its place): the pages anyway, logged", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await writeRunFile(LESSON, PAPER_PDF_FILE, new Uint8Array(paperPdf()));
+    await mkdir(path.join(dirs.runs, LESSON, PAPER_TEXT_FILE));
+    await expect(readPaperPages(LESSON)).resolves.toEqual(
+      PAPER_PAGES.map((lines) => lines.join("")),
+    );
+    expect(warn.mock.calls.flat().join(" ")).toContain(
+      `couldn't save ${PAPER_TEXT_FILE}`,
+    );
+  });
+
+  it("paper.pdf can't be read (an I/O error, here no permission): undefined, logged, never thrown", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    await writeRunFile(LESSON, PAPER_PDF_FILE, new Uint8Array(paperPdf()));
+    const file = path.join(dirs.runs, LESSON, PAPER_PDF_FILE);
+    await chmod(file, 0o000);
+    try {
+      await expect(readPaperPages(LESSON)).resolves.toBeUndefined();
+    } finally {
+      await chmod(file, 0o600);
+    }
+    expect(error.mock.calls[0][0]).toContain(`${LESSON}: couldn't read`);
   });
 
   it("a paper with no text at all (a scan): undefined, so no quotes are asked for", async () => {
