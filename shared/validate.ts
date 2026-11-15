@@ -139,7 +139,7 @@ const halfLine = (line: TemplateLine) =>
  */
 export const ANSWER_TEMPLATE = {
   /** Objects other than arrows: texts, formulas and matrices, the title and takeaway included. */
-  maxContent: 8,
+  maxContent: 10,
   maxArrows: 6,
   /**
    * Starts 70 down, leaving the Answer view's tag and chip a strip above it, and a title

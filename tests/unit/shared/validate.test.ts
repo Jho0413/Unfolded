@@ -692,8 +692,8 @@ describe("validate: a fresh sketch's answer template (#90)", () => {
     expectValid(validateSketch(answer(title, a, f, join), FRESH));
   });
 
-  describe("counts: at most 8 objects besides arrows, and at most 6 arrows", () => {
-    /** Small texts on a 3 x 3 grid, well apart. */
+  describe("counts: at most 10 objects besides arrows, and at most 6 arrows", () => {
+    /** Small texts on a 3-wide grid, well apart. */
     const texts = (n: number) =>
       Array.from({ length: n }, (_, i): BoardObject => ({
         kind: "text",
@@ -718,13 +718,13 @@ describe("validate: a fresh sketch's answer template (#90)", () => {
       arrow(0, 3),
     ];
 
-    it("8 objects and 6 arrows: valid", () => {
-      expectValid(validateSketch(answer(...texts(8), ...sixArrows), FRESH));
+    it("10 objects and 6 arrows: valid", () => {
+      expectValid(validateSketch(answer(...texts(10), ...sixArrows), FRESH));
     });
 
-    it("9 objects besides arrows: rejected: too many objects", () => {
+    it("11 objects besides arrows: rejected: too many objects", () => {
       expectErrors(
-        validateSketch(answer(...texts(9)), FRESH),
+        validateSketch(answer(...texts(11)), FRESH),
         errors.tooManyObjects(ANSWER_TEMPLATE.maxContent + 1),
       );
     });
