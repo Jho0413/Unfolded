@@ -104,7 +104,7 @@ export const PaperViewer = memo(function PaperViewer({
     followRef.current = null;
   };
 
-  const picked = useSelectionChip(scrollRef, onAskAbout !== undefined);
+  const picked = useSelectionChip(scrollRef, onAskAbout !== undefined, width);
 
   return (
     <>
@@ -185,19 +185,24 @@ const CHIP_HALF_WIDTH_PX = 64;
 function useSelectionChip(
   scrollRef: React.RefObject<HTMLDivElement | null>,
   enabled: boolean,
+  /** The pane's width: a resize moves the selection, and the chip with it. */
+  width: number,
 ): Picked | null {
   const [picked, setPicked] = useState<Picked | null>(null);
   useEffect(() => {
     const scroller = scrollRef.current;
     if (!enabled || scroller === null) return;
     const update = () => setPicked(readSelection(scroller));
+    // After the pages take their new size (a resize), then on every selection change.
+    const id = requestAnimationFrame(update);
     document.addEventListener("selectionchange", update);
     scroller.addEventListener("scroll", update, { passive: true });
     return () => {
+      cancelAnimationFrame(id);
       document.removeEventListener("selectionchange", update);
       scroller.removeEventListener("scroll", update);
     };
-  }, [scrollRef, enabled]);
+  }, [scrollRef, enabled, width]);
   return enabled ? picked : null;
 }
 
