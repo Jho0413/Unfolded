@@ -30,6 +30,37 @@ async function zoomByTap(page: Page) {
   await expect(pane(page)).toHaveAttribute("data-zoom", "1");
 }
 
+/** A one-finger drag, as touch events (start, moves, end) through the browser's input. */
+async function touchDrag(
+  page: Page,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+) {
+  const cdp = await page.context().newCDPSession(page);
+  const at = (t: number) => [
+    {
+      x: from.x + (to.x - from.x) * t,
+      y: from.y + (to.y - from.y) * t,
+      id: 1,
+    },
+  ];
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: at(0),
+  });
+  for (let i = 1; i <= 12; i++) {
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: at(i / 12),
+    });
+    await page.waitForTimeout(16);
+  }
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchEnd",
+    touchPoints: [],
+  });
+}
+
 /** The rendered height of a matrix cell's value: what the eye reads. */
 const cellTextPx = (page: Page) =>
   board(page)
@@ -68,18 +99,17 @@ for (const theme of ["light", "dark"] as const)
         ),
       ).toBe(true);
 
-      // A real touch drag to the left pans the board right.
-      const cdp = await page.context().newCDPSession(page);
-      await cdp.send("Input.synthesizeScrollGesture", {
-        x: 200,
-        y: 420,
-        xDistance: -250,
-        yDistance: 0,
-        gestureSourceType: "touch",
-      });
-      await expect
-        .poll(() => drawing(page).evaluate((el) => el.scrollLeft))
-        .toBeGreaterThan(100);
+      // It pans: wider than the screen, and a real touch drag to the left moves it right.
+      expect(
+        await drawing(page).evaluate((el) => el.scrollWidth - el.clientWidth),
+      ).toBeGreaterThan(300);
+      // Retried as a whole: a drag that lands before the layer settles can be dropped.
+      await expect(async () => {
+        await touchDrag(page, { x: 300, y: 420 }, { x: 60, y: 420 });
+        expect(
+          await drawing(page).evaluate((el) => el.scrollLeft),
+        ).toBeGreaterThan(100);
+      }).toPass({ timeout: 10_000 });
       await mkdir(EVIDENCE, { recursive: true });
       await page.screenshot({
         path: path.join(EVIDENCE, `zoomed-390-${theme}.png`),
