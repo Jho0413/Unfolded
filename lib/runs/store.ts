@@ -66,6 +66,11 @@ export const PAPER_FILE = "paper.json";
 export const PAPER_PDF_FILE = "paper.pdf";
 /** The learner's signals (shared/lesson.ts SignalsFile), appended by the signals route (section 5.4). */
 export const SIGNALS_FILE = "signals.json";
+/**
+ * paper.pdf's page text, extracted once for checking the step generator's quotes (#98,
+ * lib/pipeline/paperPages.ts).
+ */
+export const PAPER_TEXT_FILE = "paper-text.json";
 
 // ---------------------------------------------------------------- versioned step files
 
