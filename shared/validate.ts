@@ -134,7 +134,8 @@ export const ANSWER_TEMPLATE = {
   /** Objects other than arrows: texts, formulas and matrices, the title and takeaway included. */
   maxContent: 8,
   maxArrows: 6,
-  area: { x0: 120, y0: 60, x1: 1480, y1: 860 },
+  /** Starts 80 down, leaving the Answer view's tag and chip a strip above it. */
+  area: { x0: 120, y0: 80, x1: 1480, y1: 860 },
   title: TITLE,
   content: {
     x0: 200,
