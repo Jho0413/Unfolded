@@ -7,13 +7,17 @@ import {
   createDrawScene,
   type DrawSceneDeps,
   SKETCH_FETCH_TIMEOUT_MS,
+  SKETCH_SUPERSEDED,
+  sketchDrawnResult,
   sketchFailedUpdate,
   stillLatest,
 } from "@/qa/drawScene";
 
+/** The tool's result for the last `drawScene` call: what the agent hears back. */
+let lastResult: string | undefined;
 /** One request on a fresh handler. */
-const drawScene = (deps: DrawSceneDeps, description: string) =>
-  createDrawScene(deps)(description);
+const drawScene = async (deps: DrawSceneDeps, description: string) =>
+  (lastResult = await createDrawScene(deps)(description));
 
 /** Valid on a fresh board: its own objects only. */
 const fresh = {
@@ -45,7 +49,6 @@ function setup(
     askId: vi.fn(() => 1),
     drawSketch: vi.fn<DrawSceneDeps["drawSketch"]>(),
     showNotice: vi.fn<DrawSceneDeps["showNotice"]>(),
-    tellAgent: vi.fn<DrawSceneDeps["tellAgent"]>(),
     fetch: fetchMock as unknown as typeof fetch,
     timeoutMs: over.timeoutMs,
   };
@@ -60,21 +63,20 @@ function sentBody(fetchMock: ReturnType<typeof setup>["fetchMock"]) {
   return JSON.parse(String(init?.body));
 }
 
-/** A failure shows SKETCH_FAILED, tells the agent, and logs `reason`. */
+/** A failure shows SKETCH_FAILED, tells the agent through the tool's result, and logs `reason`. */
 function expectFailed(
   deps: ReturnType<typeof setup>["deps"],
   description: string,
   reason: unknown,
 ) {
   expect(deps.showNotice).toHaveBeenCalledWith(SKETCH_FAILED);
-  expect(deps.tellAgent).toHaveBeenCalledWith(sketchFailedUpdate(description));
+  expect(lastResult).toBe(sketchFailedUpdate(description));
   expect(warn).toHaveBeenLastCalledWith("[qa] draw_scene failed:", reason);
   expect(deps.drawSketch).not.toHaveBeenCalled();
 }
 
 function expectSilent(deps: ReturnType<typeof setup>["deps"]) {
   expect(deps.showNotice).not.toHaveBeenCalledWith(SKETCH_FAILED);
-  expect(deps.tellAgent).not.toHaveBeenCalled();
 }
 
 const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -95,6 +97,9 @@ describe("drawScene", () => {
     expect(sketch.actions[0].durationMs).toBe(400);
     expect(deps.showNotice).toHaveBeenCalledWith(null); // a success clears an earlier failure
     expectSilent(deps);
+    // The tool waits, and tells the agent what is actually drawn.
+    expect(lastResult).toBe(sketchDrawnResult(sketch));
+    expect(lastResult).toContain('text "row 1"');
   });
 
   it("a sketch naming a lesson object fails: the answer board is empty", async () => {
@@ -171,7 +176,7 @@ describe("drawScene", () => {
       )) as typeof fetch;
     await drawScene(deps, "x");
     expect(deps.showNotice).toHaveBeenCalledWith(SKETCH_FAILED);
-    expect(deps.tellAgent).toHaveBeenCalledOnce();
+    expect(lastResult).toBe(sketchFailedUpdate("x"));
   });
 
   it("drops a sketch, or a failure, that arrives after Ask closed", async () => {
@@ -185,6 +190,7 @@ describe("drawScene", () => {
       expect(d.drawSketch).not.toHaveBeenCalled();
       expectSilent(d);
     }
+    expect(lastResult).toBe(SKETCH_SUPERSEDED);
   });
 
   it("drops a sketch, or a failure, from an earlier Ask session after Ask reopened", async () => {
@@ -201,6 +207,7 @@ describe("drawScene", () => {
       await drawScene(deps, "x");
       expect(deps.drawSketch).not.toHaveBeenCalled();
       expectSilent(deps);
+      expect(lastResult).toBe(SKETCH_SUPERSEDED);
     }
   });
 
@@ -238,19 +245,19 @@ describe("latest request only", () => {
     gate.reply(1, json({ sketch: sketchNamed("b") }));
     await b;
     gate.reply(0, json({ sketch: sketchNamed("a") }));
-    await a;
+    expect(await a).toBe(SKETCH_SUPERSEDED);
     expect(deps.drawSketch).toHaveBeenCalledOnce();
     expect(deps.drawSketch.mock.calls[0][1]).toBe("B");
     expectSilent(deps);
   });
 
-  it("A fails late, after B was drawn: no notice, the agent isn't told, B stays", async () => {
+  it("A fails late, after B was drawn: no notice, A's result says it was superseded, B stays", async () => {
     const { gate, deps, a, b } = twoRequests();
     await vi.waitFor(() => expect(gate.fetchMock).toHaveBeenCalledTimes(2));
     gate.reply(1, json({ sketch: sketchNamed("b") }));
     await b;
     gate.reply(0, json({ error: SKETCH_FAILED }, 502));
-    await a;
+    expect(await a).toBe(SKETCH_SUPERSEDED);
     expect(deps.drawSketch).toHaveBeenCalledOnce();
     expectSilent(deps);
   });
@@ -259,7 +266,7 @@ describe("latest request only", () => {
     const { gate, deps, a } = twoRequests();
     await vi.waitFor(() => expect(gate.fetchMock).toHaveBeenCalledTimes(2));
     gate.reply(0, json({ sketch: sketchNamed("a") }));
-    await a;
+    expect(await a).toBe(SKETCH_SUPERSEDED);
     expect(deps.drawSketch).not.toHaveBeenCalled();
     expectSilent(deps);
   });

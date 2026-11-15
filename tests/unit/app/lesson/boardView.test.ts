@@ -110,7 +110,6 @@ describe("the Answer view table", () => {
       askId: session.askId,
       drawSketch: () => {},
       showNotice: () => {},
-      tellAgent: () => {},
       answerShowing: () =>
         boardView(session.isAsking(), session.layer()) === "answer",
     });
@@ -127,7 +126,6 @@ describe("the Answer view table", () => {
       if (drawnBefore) session.addSketch(sketch("first"), true);
       const before = boardView(session.isAsking(), session.layer());
       const showNotice = vi.fn();
-      const tellAgent = vi.fn();
       const tools = createClientTools({
         board: session.board,
         highlight: session.addAction,
@@ -136,15 +134,16 @@ describe("the Answer view table", () => {
         askId: session.askId,
         drawSketch: (s) => session.addSketch(s, true),
         showNotice,
-        tellAgent,
         fetch: async () =>
           Response.json({ error: SKETCH_FAILED }, { status: 502 }),
       });
-      tools.draw_scene?.({ description: "a follow-up", fresh: true });
-      await vi.waitFor(() =>
-        expect(showNotice).toHaveBeenCalledWith(SKETCH_FAILED),
-      );
-      expect(tellAgent).toHaveBeenCalledWith(sketchFailedUpdate("a follow-up"));
+      // The tool waits, so the agent hears the failure as its result.
+      const result = await tools.draw_scene?.({
+        description: "a follow-up",
+        fresh: true,
+      });
+      expect(showNotice).toHaveBeenCalledWith(SKETCH_FAILED);
+      expect(result).toBe(sketchFailedUpdate("a follow-up"));
       expect(boardView(session.isAsking(), session.layer())).toBe(before);
       expect(session.layer().objects.map((o) => o.id)).toEqual(
         drawnBefore ? ["first"] : [],

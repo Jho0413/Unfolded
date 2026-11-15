@@ -86,7 +86,6 @@ function harness(
     askId: () => 1,
     drawSketch: () => {},
     showNotice: () => {},
-    tellAgent: () => {},
     fetch: vi.fn(() => new Promise<Response>(() => {})),
     ...extra,
   });
@@ -257,12 +256,31 @@ describe("simplify_upcoming", () => {
 });
 
 describe("draw_scene", () => {
-  it("doesn't wait: returns nothing at once (qa/drawScene.ts does the rest)", () => {
-    const result = harness(asking).tools.draw_scene?.({
+  it("waits: resolves with what's drawn once the sketch is on the board (qa/drawScene.ts)", async () => {
+    const sketch = {
+      objects: [{ kind: "text", id: "t", x: 800, y: 400, text: "a box" }],
+      actions: [],
+    };
+    const drawSketch = vi.fn();
+    const { tools } = harness(asking, {
+      drawSketch,
+      fetch: vi.fn(async () => Response.json({ sketch })),
+    });
+    const result = await tools.draw_scene?.({
       description: "a box",
       fresh: false,
     });
-    expect(result).toBeUndefined();
+    expect(drawSketch).toHaveBeenCalledOnce();
+    expect(result).toMatch(/^Drawn: .*text "a box"/);
+  });
+
+  it(`after Ask closed: "${ASK_CLOSED}", nothing requested`, async () => {
+    const fetch = vi.fn();
+    const { tools } = harness({ kind: "playing", step: 0 }, { fetch });
+    expect(
+      await tools.draw_scene?.({ description: "a box", fresh: false }),
+    ).toBe(ASK_CLOSED);
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("asks for a fresh answer board even when the agent passed fresh: false", () => {
@@ -275,7 +293,6 @@ describe("draw_scene", () => {
       askId: () => 1,
       drawSketch: () => {},
       showNotice: () => {},
-      tellAgent: () => {},
       fetch,
     });
     tools.draw_scene?.({ description: "a box", fresh: false });

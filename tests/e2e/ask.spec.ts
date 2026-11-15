@@ -228,17 +228,19 @@ test.describe("draw_scene on /dev/ask (ROADMAP Q5)", () => {
     // The agent passed fresh: false; the browser always asks for a fresh answer board.
     expect(body.fresh).toBe(true);
     expect(body.board.objects).toEqual([]);
-    // The agent answers at once: draw_scene doesn't wait for the sketch.
+    // The agent says its short line first; draw_scene then waits for the sketch (#90).
     await expect(answer(page)).toContainText("Let me sketch that");
-    await expect(page.getByTestId("tool-log")).toContainText(
-      'draw_scene {"description":"Circle the first row of q","fresh":false} -> (no result)',
-    );
     const note = page
       .getByTestId("whiteboard")
       .locator('[data-object-id="note"]');
     await expect(note).toHaveCount(0);
+    await expect(page.getByTestId("tool-log")).not.toContainText("draw_scene");
     release();
     await expect(note).toHaveCount(1);
+    // Only now does the agent hear back, with what is actually drawn.
+    await expect(page.getByTestId("tool-log")).toContainText(
+      'draw_scene {"description":"Circle the first row of q","fresh":false} -> Drawn: the answer board now shows',
+    );
     // The sketch's highlight shows too.
     await expect
       .poll(async () => (await boardAttributes(page)).includes("accent"))
@@ -277,8 +279,13 @@ test.describe("draw_scene on /dev/ask (ROADMAP Q5)", () => {
       await expect(page.getByTestId("ask-tool-notice")).toHaveText(
         ASK.sketchFailed,
       );
+      // The agent hears it as draw_scene's result (it waits, #90).
       await expect
-        .poll(() => page.evaluate(() => window.__qaFake?.contextUpdates.at(-1)))
+        .poll(() =>
+          page.evaluate(() =>
+            String(window.__qaFake?.toolCalls.at(-1)?.result),
+          ),
+        )
         .toContain("couldn't be drawn");
       await expect(
         page.getByTestId("whiteboard").locator('[data-object-id="zz"]'),

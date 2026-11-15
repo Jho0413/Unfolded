@@ -6,7 +6,8 @@
 //                      (a no-op while the Answer view is up)
 //   go_to_step         goToStep(step - 1); "ok" or "no step n"
 //   simplify_upcoming  stub until A1 (returns nothing)
-//   draw_scene         no wait: returns nothing, the sketch is drawn when it arrives (qa/drawScene.ts)
+//   draw_scene         waits: resolves once the sketch is drawn (what's on the board), failed or
+//                      superseded, so the agent explains what is drawn (qa/drawScene.ts)
 //   resume_lesson, pause_lesson, next_step, previous_step, replay_step
 //                      no wait: the learner's spoken commands (issue #93), run by `control`
 //                      once the agent has finished speaking (`afterAgentSpeaks`)
@@ -50,7 +51,7 @@ export type ClientToolDeps = {
   answerShowing?: () => boolean;
 } & Pick<
   DrawSceneDeps,
-  "askId" | "drawSketch" | "showNotice" | "tellAgent" | "fetch" | "timeoutMs"
+  "askId" | "drawSketch" | "showNotice" | "fetch" | "timeoutMs"
 >;
 
 /** What a tool that changes the board or the step returns after Ask closed. */
@@ -85,11 +86,11 @@ export function createClientTools(deps: ClientToolDeps): QaTools {
       const result = deps.send({ type: "goToStep", n: step - 1 });
       return result.outcome === "rejected" ? result.message : "ok";
     },
-    // Doesn't wait: the agent keeps talking while the sketch is made.
+    // Waits until the sketch is drawn, so the agent explains what the learner sees.
     // Always a clean board of its own (the agent's `fresh` isn't taken), latest request only.
     draw_scene: ({ description }) => {
-      if (!deps.isAsking()) return;
-      void drawScene(description);
+      if (!deps.isAsking()) return ASK_CLOSED;
+      return drawScene(description);
     },
     resume_lesson: () => command(deps, "resume"),
     pause_lesson: () => command(deps, "pause"),
