@@ -21,7 +21,7 @@ export const BOARD_ACTIONS_PROMPT = `A target is an object id, optionally with r
 
 - show / hide: show or hide a whole object. show takes a part only on a heatmap (a row, column or cell, revealing it) or a plot (a series, drawing it on from left to right), never a single plot point.
 - highlight / unhighlight: color "accent" (the default) or "warn".
-- move: the target's centre slides to the anchor in to (an object, a matrix part or a point). Moving a row, column or cell slides a copy of it and leaves the matrix whole; later actions on that part use the copy, and hide on the part removes the copy. Arrows can't move, and neither can a part of a heatmap or a plot (move the whole object).
+- move: the target's centre slides to the anchor in to (an object, a part of a grid or a point). Moving a row, column or cell slides a copy of it and leaves the matrix whole; later actions on that part use the copy, and hide on the part removes the copy. Arrows can't move, and neither can a part of a heatmap or a plot (move the whole object).
 - write: replaces a text object's text, or a matrix cell's value (needs both row and col), with value. Not for latex, arrows, heatmaps or plots.
 
 Every action has the same fields: color is only for highlight and unhighlight, to only for move (which needs it), and value only for write (which needs it).`;

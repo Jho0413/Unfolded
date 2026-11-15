@@ -674,6 +674,17 @@ describe("objectsJson: one test per row", () => {
     ]);
   });
 
+  it("an id in objectsJson and in objects is a duplicate: ids are shared", () => {
+    const result = validateWireStep(
+      withJson(JSON.stringify([{ ...HEATMAP, id: "a" }])),
+      LIMITS,
+    );
+    expect(result).toStrictEqual({
+      ok: false,
+      errors: [errors.duplicateId("a")],
+    });
+  });
+
   it("JSON but not an array: rejected with objectsJson: must be a JSON array", () => {
     const { value, errors: errs } = wireToStep(
       withJson(JSON.stringify(HEATMAP)),
@@ -1012,8 +1023,8 @@ describe("validateWireStep / validateWireSketch", () => {
  * The API compiles each schema into a grammar and rejects one that is too large (#27). Its
  * limit isn't documented, so these are the measured sizes of the schemas a real request
  * accepted, with a little room: 3864 bytes for the step with paperRefs (#98, 2026-11-15),
- * and the step with objectsJson and paperRefs (#103, 2026-11-15). Size isn't the whole story:
- * one more object kind on top of the 2026-11-14 schemas (about 280 bytes, a member of the
+ * and 3341 bytes for the step with objectsJson and paperRefs (#103, 2026-11-15). Size isn't
+ * the whole story: one more object kind on top of the 2026-11-14 schemas (about 280 bytes, a member of the
  * object union) was rejected (S3), while paperRefs (about 420 bytes, no union) was accepted,
  * and the grammar takes only about 6 more string fields (ARCHITECTURE.md section 4). Probe a
  * bigger schema with a real request before raising the budget.
@@ -1119,8 +1130,9 @@ describe("output format size guard (#27)", () => {
 // ------------------------------------------------------------ recorded response
 
 describe("the recorded step response (lib/fakes)", () => {
-  // Its paperRefs were added by hand (#98): two real sentences from page 4 of the Attention
-  // paper, so FAKE_APIS=1 on the seeded m2-attention highlights them.
+  // Recorded with objectsJson and paperRefs on the wire and the paper's page text in the
+  // request (#103): a heatmap, a plot and one quote from page 4 of the Attention paper, all
+  // written by the model.
   it("is a real Sonnet 5.5 wire step that converts and passes validateStep", async () => {
     const message = await readFixture<Anthropic.Message>(config.step.fixture);
     expect(message.stop_reason).toBe("end_turn");
