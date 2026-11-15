@@ -107,8 +107,8 @@ describe("STEP_SYSTEM_PROMPT", () => {
     expect(STEP_SYSTEM_PROMPT).toContain("# Illustrations");
     expect(STEP_SYSTEM_PROMPT).toContain("A step may also draw one image");
     expect(STEP_SYSTEM_PROMPT).toContain("It goes in objectsJson");
-    // The grammar's objects still have no image (board.ts is shared with sketches).
-    expect(STEP_SYSTEM_PROMPT).toContain("there are no images");
+    // The board section (shared with sketches) no longer says there are no images.
+    expect(STEP_SYSTEM_PROMPT).not.toContain("no images");
     expect(STEP_SYSTEM_PROMPT).toContain(
       "no letters, words, numbers, labels, symbols or equations",
     );

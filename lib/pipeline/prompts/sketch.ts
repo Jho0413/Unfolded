@@ -48,6 +48,8 @@ ${NARRATION_RULES_PROMPT}
 
 ${BOARD_OBJECTS_PROMPT}
 
+A sketch has no images.
+
 The request lists the objects already on the board, if any, with their ids, whether they are visible and how they are highlighted, then any moved copies of matrix parts with their source and where their centre is now. Use them: a sketch can highlight a row of a matrix the learner is looking at, write in one of its cells, show a hidden object or point an arrow at one, by its id. Never give a new object the id of an object already on the board, and put new objects in free space so they don't cover the board. If the board is empty, draw from scratch on the answer board below.
 
 An object with hidden: true is not drawn until a show action. Use hidden objects for parts that appear one after another.

@@ -120,6 +120,10 @@ describe("buildSketchRequest", () => {
 });
 
 describe("the sketch prompt", () => {
+  it("says a sketch has no images (only a step's are made, E1)", () => {
+    expect(SKETCH_SYSTEM_PROMPT).toContain("A sketch has no images.");
+  });
+
   it("describes the board, and how a narration is spoken and cued, exactly as the step prompt does (one shared text)", () => {
     for (const part of [
       BOARD_OBJECTS_PROMPT,

@@ -189,7 +189,7 @@ export const IMAGE_EXAMPLE = {
 /** Illustrations (E1, #152): at most one per step, an image object in objectsJson. */
 const IMAGE_PROMPT = `# Illustrations
 
-A step may also draw one image: an illustration an image model paints from your prompt. Use it only where a picture explains better than boxes and text: a physical setup, an everyday analogy, or a scene the paper describes. Most steps need none. Never use one for a formula, a chart, a diagram of boxes and arrows, or anything the learner has to read.
+A step may also draw one image: an illustration an image model paints from your prompt. Use it where a picture explains better than boxes and text: a physical setup, an everyday analogy that makes an abstract idea concrete, or a scene the paper describes. A picture the learner can hold on to is often the clearest way into an abstract idea, so consider one for each step, and leave it out when no concrete picture fits. Never use one for a formula, a chart, a diagram of boxes and arrows, or anything the learner has to read.
 
 It goes in objectsJson, like a heatmap or plot: kind "image", id, x, y, w, h (the top-left corner and size, inside the canvas), prompt, and optionally hidden. Make the box 16:9, between 400 by 225 and 640 by 360. Give it its own region of the board, clear of every other object, label and arrow. Start it hidden and show it on the cue where the narration turns to the picture, then talk about what it shows.
 
