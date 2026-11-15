@@ -274,3 +274,50 @@
     gap: 6px;
   }
 }
+
+/* Zooming the board on a phone (player/zoom/useBoardZoom.ts): the drawing becomes a
+   full-screen layer, the board about 2.2x the screen's width, panned by dragging (native
+   scrolling). The board is the same element, zoomed in place. */
+.zoomOpen,
+.zoomClose {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 4;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  border: 1px solid var(--line-2);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  color: var(--ink);
+  font: 18px var(--ui-font);
+  cursor: pointer;
+}
+.board[data-zoom="1"] .drawing {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: safe center;
+  justify-content: safe center;
+  padding: 64px 16px 24px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-x pan-y pinch-zoom;
+  container-type: normal;
+  background: color-mix(in srgb, var(--bg) 97%, transparent);
+}
+.board[data-zoom="1"] .fit {
+  flex: none;
+  width: 220vw;
+  max-width: 1600px;
+  box-shadow: var(--shadow);
+}
+.zoomClose {
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top));
+  right: 12px;
+  z-index: 61;
+}
