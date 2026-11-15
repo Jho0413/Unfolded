@@ -164,7 +164,7 @@ export function AskPanel({
   // Set in an effect once both exist; the callbacks only fire later.
   const connectorRef = useRef<AskConnector | null>(null);
   const conversationRef = useRef<QaConversation | null>(null);
-  const inputFocused = useRef(false);
+  const [inputFocused, setInputFocused] = useState(false);
   const conversation = useQaConversation({
     tools: resolvedTools,
     onConnect: () => connectorRef.current?.connected(),
@@ -206,9 +206,9 @@ export function AskPanel({
       onState: setSession,
       onConnected: (state) => {
         agentTurn.setSpeaking(false);
-        // Typing already (focused while a voice session connected), or the learner muted the
-        // mic: mute, as on focus.
-        if (!state.textOnly && (inputFocused.current || mutedRef.current))
+        // Typing already (a draft while a voice session connected), or the learner muted the
+        // mic: mute at once.
+        if (!state.textOnly && micOffRef.current)
           conversationRef.current!.setMicMuted(true);
         const { context: c, questions: q } = contextRef.current;
         conversationRef.current!.sendContextualUpdate(
@@ -320,13 +320,16 @@ export function AskPanel({
     if (listening) bargeIn.arm();
     else bargeIn.disarm();
   }, [listening, bargeIn]);
-  // The mute switch reaches the session (typing mutes it too, section 8).
-  const mutedRef = useRef(muted);
+  // The mute switch reaches the session, and so does typing (section 8): the mic is off while
+  // the input holds a draft. Only then: once a typed question is sent (the draft clears, the
+  // input keeps focus) the mic is back, so a spoken "carry on" still works.
+  const micOff = muted || (inputFocused && draft !== "");
+  const micOffRef = useRef(micOff);
   useEffect(() => {
-    mutedRef.current = muted;
+    micOffRef.current = micOff;
     if (session.phase === "connected" && !session.textOnly)
-      conversation.setMicMuted(muted || inputFocused.current);
-  }, [muted, session.phase, session.textOnly, conversation]);
+      conversation.setMicMuted(micOff);
+  }, [micOff, session.phase, session.textOnly, conversation]);
 
   // `A` opens Ask (Space stays play/pause); Escape closes it.
   useEffect(() => {
@@ -454,14 +457,10 @@ export function AskPanel({
         }}
         onSubmit={submit}
         onFocus={() => {
-          inputFocused.current = true;
+          setInputFocused(true);
           connectorRef.current?.typing();
-          if (voice) conversation.setMicMuted(true);
         }}
-        onBlur={() => {
-          inputFocused.current = false;
-          if (voice && !muted) conversation.setMicMuted(false);
-        }}
+        onBlur={() => setInputFocused(false)}
         mic={mic}
         status={lessonMic ? (muted ? "Mic muted" : "Listening") : null}
       />
