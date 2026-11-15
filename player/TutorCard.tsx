@@ -1,7 +1,13 @@
 // The tutor card and the Ask box, floating at the bottom of the board (ARCHITECTURE.md
 // section 5.6). Presentation only: what they say comes from player/cardView.ts, and every
 // button hands its action back to the caller (the player, or the Ask panel while asking).
-import type { FormEvent, ReactNode } from "react";
+//
+// On a phone (TutorCard.module.css, under 760 px) the card can be compact: its head, two lines
+// of what's said and the primary action, so the board above it stays readable. It's compact
+// while the narration is captioned (explaining or holding on) and full otherwise (an answer,
+// the end of a step, a failure); the learner's tap on More / Less wins until the status changes.
+// On a desktop the compact state changes nothing.
+import { type FormEvent, type ReactNode, useState } from "react";
 import type { Caption } from "./captions";
 import { CARD_TEXT, type CardButton, type CardView } from "./cardView";
 import styles from "./TutorCard.module.css";
@@ -23,6 +29,14 @@ export function TutorCard<A>({
   notices?: ReactNode;
 }) {
   const { body } = view;
+  const [choice, setChoice] = useState<{
+    status: string;
+    compact: boolean;
+  } | null>(null);
+  const compact =
+    choice !== null && choice.status === view.status
+      ? choice.compact
+      : body?.kind === "caption";
   const button = (b: CardButton<A>, extra = "") => (
     <button
       key={b.label}
@@ -37,6 +51,7 @@ export function TutorCard<A>({
     <section
       className={styles.card}
       data-testid="tutor-card"
+      data-compact={compact ? "1" : "0"}
       aria-label="Tutor"
     >
       <div className={styles.head}>
@@ -77,6 +92,16 @@ export function TutorCard<A>({
             {view.hold.label}
           </button>
         )}
+        {/* Phones only (CSS): the card's compact / full switch. */}
+        <button
+          type="button"
+          className={`${styles.button} ${styles.more}`}
+          data-testid="card-more"
+          aria-expanded={!compact}
+          onClick={() => setChoice({ status: view.status, compact: !compact })}
+        >
+          {compact ? "More" : "Less"}
+        </button>
       </div>
       {notices}
       {body?.kind === "said" && (
