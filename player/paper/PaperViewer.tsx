@@ -11,11 +11,14 @@
 //   focus transition) only restyles, it never redraws.
 // - A resize moves everything on the pages, so the viewer keeps the highlighted passage in view
 //   through it (the pane widens as the passage is scrolled to), until the learner scrolls.
+// - Text selected in the pages offers an "Ask about this" chip beside it (issue #129): the
+//   chip hands the quote and its page to `onAskAbout` (./selection.ts).
 // - `data-*` attributes expose the highlight for tests.
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { TextLayer } from "pdfjs-dist";
 import type { PaperMatch } from "./locate";
 import { loadPdfjs } from "./pdf";
+import { type PaperSelection, selectionQuote } from "./selection";
 import type { PaperPage } from "./usePaperDoc";
 import styles from "./PaperViewer.module.css";
 
@@ -39,9 +42,12 @@ const PAGE_GAP_PX = 12;
 export const PaperViewer = memo(function PaperViewer({
   pages,
   highlight,
+  onAskAbout,
 }: {
   pages: readonly PaperPage[];
   highlight: PaperHighlight | null;
+  /** The learner pressed "Ask about this" on a selection (issue #129); none: no chip. */
+  onAskAbout?: (selection: PaperSelection) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // The same element, for writing the test attributes (the scroll ref is only read).
@@ -98,49 +104,145 @@ export const PaperViewer = memo(function PaperViewer({
     followRef.current = null;
   };
 
+  const picked = useSelectionChip(scrollRef, onAskAbout !== undefined);
+
   return (
-    <div
-      ref={(el) => {
-        scrollRef.current = el;
-        rootRef.current = el;
-      }}
-      className={styles.scroll}
-      // The learner scrolling takes over from the viewer.
-      onWheel={stopFollowing}
-      onTouchMove={stopFollowing}
-      data-testid="paper"
-      data-pages={pages.length}
-      // Filled in by the highlight effect (React never changes these after mount).
-      data-highlight-key=""
-      data-highlight-page=""
-      data-highlight-text=""
-    >
-      {width > 0 &&
-        pages.map((page, i) => (
-          <PdfPage
-            key={i}
-            page={page}
-            width={width}
-            root={scrollRef}
-            onLayer={(spans) =>
-              setLayers((prev) => {
-                const next = [...prev];
-                next[i] = spans;
-                return next;
-              })
-            }
-          />
-        ))}
-    </div>
+    <>
+      <div
+        ref={(el) => {
+          scrollRef.current = el;
+          rootRef.current = el;
+        }}
+        className={styles.scroll}
+        // The learner scrolling takes over from the viewer.
+        onWheel={stopFollowing}
+        onTouchMove={stopFollowing}
+        data-testid="paper"
+        data-pages={pages.length}
+        // Filled in by the highlight effect (React never changes these after mount).
+        data-highlight-key=""
+        data-highlight-page=""
+        data-highlight-text=""
+      >
+        {width > 0 &&
+          pages.map((page, i) => (
+            <PdfPage
+              key={i}
+              number={i + 1}
+              page={page}
+              width={width}
+              root={scrollRef}
+              onLayer={(spans) =>
+                setLayers((prev) => {
+                  const next = [...prev];
+                  next[i] = spans;
+                  return next;
+                })
+              }
+            />
+          ))}
+      </div>
+      {picked !== null && onAskAbout !== undefined && (
+        <button
+          type="button"
+          className={styles.chip}
+          data-testid="paper-ask-chip"
+          data-below={picked.below}
+          style={{ left: picked.x, top: picked.y }}
+          // Pressing it mustn't clear the selection before the click lands.
+          onPointerDown={(e) => e.preventDefault()}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            window.getSelection()?.removeAllRanges();
+            onAskAbout(picked.selection);
+          }}
+        >
+          Ask about this
+        </button>
+      )}
+    </>
   );
 });
 
+/** Where the chip goes (px from the pane's top left) and what it asks about. */
+type Picked = {
+  selection: PaperSelection;
+  x: number;
+  y: number;
+  /** Below the selection: no room above it. */
+  below: boolean;
+};
+
+/** The chip's room above a selection, and its half-width, kept inside the pane. */
+const CHIP_ROOM_PX = 52;
+const CHIP_HALF_WIDTH_PX = 64;
+
+/**
+ * The learner's selection in the pages, as a quote and a page, with the chip's place: centred
+ * above the selection (below it near the pane's top), kept inside the pane. Null with nothing
+ * (or too little) selected, or a selection outside the paper.
+ */
+function useSelectionChip(
+  scrollRef: React.RefObject<HTMLDivElement | null>,
+  enabled: boolean,
+): Picked | null {
+  const [picked, setPicked] = useState<Picked | null>(null);
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    if (!enabled || scroller === null) return;
+    const update = () => setPicked(readSelection(scroller));
+    document.addEventListener("selectionchange", update);
+    scroller.addEventListener("scroll", update, { passive: true });
+    return () => {
+      document.removeEventListener("selectionchange", update);
+      scroller.removeEventListener("scroll", update);
+    };
+  }, [scrollRef, enabled]);
+  return enabled ? picked : null;
+}
+
+function readSelection(scroller: HTMLElement): Picked | null {
+  const sel = window.getSelection();
+  if (sel === null || sel.isCollapsed || sel.rangeCount === 0) return null;
+  const range = sel.getRangeAt(0);
+  if (!scroller.contains(range.commonAncestorContainer)) return null;
+  const quote = selectionQuote(sel.toString());
+  const pageEl = closestPage(range.startContainer);
+  if (quote === null || pageEl === null) return null;
+  const rect = range.getBoundingClientRect();
+  const pane = scroller.getBoundingClientRect();
+  // Scrolled out of view: no chip.
+  if (rect.bottom < pane.top || rect.top > pane.bottom) return null;
+  const below = rect.top - pane.top < CHIP_ROOM_PX;
+  const centre = rect.left + rect.width / 2 - pane.left;
+  return {
+    selection: { quote, page: Number(pageEl.dataset.page) },
+    x: Math.min(
+      Math.max(centre, CHIP_HALF_WIDTH_PX + 8),
+      pane.width - CHIP_HALF_WIDTH_PX - 8,
+    ),
+    y: Math.min(
+      below ? rect.bottom - pane.top + 8 : rect.top - pane.top - 8,
+      pane.height - 8,
+    ),
+    below,
+  };
+}
+
+function closestPage(node: Node): HTMLElement | null {
+  const el = node instanceof HTMLElement ? node : node.parentElement;
+  return el?.closest<HTMLElement>("[data-page]") ?? null;
+}
+
 function PdfPage({
+  number,
   page,
   width,
   root,
   onLayer,
 }: {
+  /** 1-based, for a selection's page. */
+  number: number;
   page: PaperPage;
   width: number;
   root: React.RefObject<HTMLDivElement | null>;
@@ -210,6 +312,7 @@ function PdfPage({
     <div
       ref={boxRef}
       className={styles.page}
+      data-page={number}
       style={
         {
           width,

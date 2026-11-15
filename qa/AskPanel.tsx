@@ -12,7 +12,15 @@
 // and answer. The connection itself is qa/connector.ts, unchanged.
 import { stripVoiceTags } from "./voiceTags";
 import { AgentTurn, BargeIn, type BargeInSignal } from "./bargeIn";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type Ref,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { AgentSignedUrlResponse, AgentTokenResponse } from "@/shared/lesson";
 import {
   AskConnector,
@@ -25,6 +33,11 @@ import { buildContextUpdate, type QaContext } from "./context";
 import { useQaConversation } from "./conversation";
 import type { AskApi, QaConversation, QaMessage, QaTools } from "./types";
 import { askCard } from "@/player/cardView";
+import {
+  askAboutNote,
+  askAboutPrefill,
+  type PaperSelection,
+} from "@/player/paper/selection";
 import { type AskClose, isTextEntry } from "@/player/controls";
 import { AskBox, CardNotice, TutorCard } from "@/player/TutorCard";
 
@@ -78,7 +91,15 @@ export type AskPanelProps = {
    * narration with it (#105).
    */
   onLearnerSpeech?: (signal: BargeInSignal) => void;
+  /**
+   * The page's handle on the panel: `askAbout`, for "Ask about this" on a passage selected in
+   * the paper (issue #129). Ask opens with the box prefilled `About "…" (p.N): ` and focused,
+   * and the agent is told the passage, so a spoken question works as well as a typed one.
+   */
+  handle?: Ref<AskPanelHandle>;
 };
+
+export type AskPanelHandle = { askAbout: (selection: PaperSelection) => void };
 
 /** Which question's answer drew, or pointed at the board or the paper (by count asked). */
 const NO_DRAWING: {
@@ -122,6 +143,7 @@ export function AskPanel({
   live = false,
   onLearnerMessage,
   onLearnerSpeech,
+  handle,
 }: AskPanelProps) {
   const [session, setSession] = useState<ConnectorState>(
     () => INITIAL_CONNECTOR_STATE,
@@ -132,6 +154,12 @@ export function AskPanel({
   const [messages, setMessages] = useState<ShownMessage[]>([]);
   const [questions, setQuestions] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
+  // The box's "About …" prefill (issue #129): until the learner edits it, it isn't typing.
+  const [prefill, setPrefill] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const wantsFocus = useRef(false);
+  // The passage the agent hasn't been told yet: sent once the session connects.
+  const pendingNote = useRef<string | null>(null);
   const contextRef = useRef({ context, questions });
   useEffect(() => {
     contextRef.current = { context, questions };
@@ -271,6 +299,10 @@ export function AskPanel({
         conversationRef.current!.sendContextualUpdate(
           buildContextUpdate({ ...c, earlierQuestions: q }),
         );
+        if (pendingNote.current !== null) {
+          conversationRef.current!.sendContextualUpdate(pendingNote.current);
+          pendingNote.current = null;
+        }
       },
       onDropped: () => pageRef.current.onAgentDisconnected(),
       onAgentEnded: () => pageRef.current.onClose("dismiss"),
@@ -325,6 +357,8 @@ export function AskPanel({
       }
       setMessages([]);
       setDraft("");
+      setPrefill(null);
+      pendingNote.current = null;
       setToolNotice(null);
       setDrawn(NO_DRAWING);
       setSketching(false);
@@ -381,7 +415,8 @@ export function AskPanel({
   // The mute switch reaches the session, and so does typing (section 8): the mic is off while
   // the input holds a draft. Only then: once a typed question is sent (the draft clears, the
   // input keeps focus) the mic is back, so a spoken "carry on" still works.
-  const micOff = muted || (inputFocused && draft !== "");
+  // An untouched "About …" prefill isn't a draft: the learner can still just say the question.
+  const micOff = muted || (inputFocused && draft !== "" && draft !== prefill);
   // While Ask is open in a voice session with the mic on, the learner speaking is passed to
   // the page (a drawn answer's narration holds). It fires once per arming, so it re-arms.
   const hearing =
@@ -424,6 +459,37 @@ export function AskPanel({
 
   const usable = open && !replay && phase !== "failed" && phase !== "idle";
   const voice = phase === "connected" && !session.textOnly;
+
+  // "Ask about this" on a passage in the paper (issue #129), called from the chip's click:
+  // open Ask, prefill the box, and tell the agent the passage (now if connected, else once
+  // the session connects).
+  useImperativeHandle(
+    handle,
+    () => ({
+      askAbout(selection: PaperSelection) {
+        if (!open && !canAsk) return;
+        const text = askAboutPrefill(selection);
+        setDraft(text);
+        setPrefill(text);
+        wantsFocus.current = true;
+        if (!replay) {
+          const note = askAboutNote(selection);
+          if (phase === "connected") conversation.sendContextualUpdate(note);
+          else pendingNote.current = note;
+        }
+        if (!open) ask();
+      },
+    }),
+    [open, canAsk, replay, phase, conversation, ask],
+  );
+  // The prefilled box takes focus once it's usable (it's off while Ask connects).
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!wantsFocus.current || input === null || input.disabled) return;
+    wantsFocus.current = false;
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  });
 
   function submit() {
     const text = draft.trim();
@@ -526,6 +592,7 @@ export function AskPanel({
       )}
       <AskBox
         value={draft}
+        inputRef={inputRef}
         disabled={open ? !usable : !canAsk}
         onChange={(text) => {
           setDraft(text);

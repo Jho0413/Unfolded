@@ -9,18 +9,21 @@
 // `renderBoard`, sharing one AskSession; `replay` makes it say "Q&A needs a connection".
 //
 // The paper (issue #98, ./useLessonPaper.ts) sits beside the board when the lesson has one,
-// the pane in focus the larger.
+// the pane in focus the larger. Text selected in it offers "Ask about this" (issue #129): the
+// passage is highlighted for a moment and Ask opens about it.
 //
 // Learner signals (issue #102, ./useLessonSignals.ts): Ask's questions and simplify requests
 // are posted, and the prefetched next step is asked for again once Ask closes.
-import { useState, useSyncExternalStore } from "react";
+import { useCallback, useRef, useState, useSyncExternalStore } from "react";
 import { PlayerStage } from "@/player/Player";
 import { usePlayer } from "@/player/usePlayer";
 import type { LessonPlan } from "@/shared/lesson";
 import { ConversationProvider } from "@/qa/conversation";
 import { createAskSession } from "@/qa/askSession";
+import type { AskPanelHandle } from "@/qa/AskPanel";
 import { createPrefetcher } from "@/player/prefetch";
 import { PaperViewer } from "@/player/paper/PaperViewer";
+import type { PaperSelection } from "@/player/paper/selection";
 import { LessonAsk, LessonBoard } from "./LessonAsk";
 import { Outline } from "./Outline";
 import { stepRouteFetcher } from "./stepRoute";
@@ -58,6 +61,17 @@ export function LessonView({ lessonId, plan, replay, debug }: LessonViewProps) {
   );
   // The paper beside the board (issue #98): none until it loads, or with no paper.
   const paper = useLessonPaper(lessonId, player, askSession);
+  // "Ask about this" (issue #129): highlight the passage, and open Ask about it. Stable, so
+  // the memoised viewer doesn't re-render every frame.
+  const askRef = useRef<AskPanelHandle>(null);
+  const { askAbout } = paper;
+  const onAskAbout = useCallback(
+    (selection: PaperSelection) => {
+      askAbout(selection);
+      askRef.current?.askAbout(selection);
+    },
+    [askAbout],
+  );
   const titles = plan.steps.map((s) => s.title);
   return (
     <div
@@ -94,7 +108,11 @@ export function LessonView({ lessonId, plan, replay, debug }: LessonViewProps) {
             renderBoard={(p) => <LessonBoard player={p} session={askSession} />}
             paper={
               paper.pages && (
-                <PaperViewer pages={paper.pages} highlight={paper.highlight} />
+                <PaperViewer
+                  pages={paper.pages}
+                  highlight={paper.highlight}
+                  onAskAbout={onAskAbout}
+                />
               )
             }
             focus={paper.focus}
@@ -108,6 +126,7 @@ export function LessonView({ lessonId, plan, replay, debug }: LessonViewProps) {
                 captions={captions}
                 highlightPaper={paper.highlightPaper}
                 signals={signals}
+                askHandle={askRef}
               />
             )}
           />
