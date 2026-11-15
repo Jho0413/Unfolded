@@ -281,6 +281,9 @@ export function checkStep(step: Step, limits: StepLimits): string[] {
     if (!seenCues.has(action.cue)) out.push(errors.unknownCue(action.cue));
     out.push(...checkAction(action, objects));
   }
+  for (const ref of step.paperRefs ?? [])
+    if (ref.cue !== undefined && !seenCues.has(ref.cue))
+      out.push(errors.unknownCue(ref.cue));
   return unique(out);
 }
 

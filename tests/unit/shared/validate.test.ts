@@ -2,7 +2,13 @@
 // after the row, plus the M1 demo fixture as the contract's acceptance test.
 import { describe, expect, it } from "vitest";
 import demoM1 from "@/lib/fakes/fixtures/demo-m1.step.json";
-import type { BoardObject, BoardState, Sketch, Step } from "@/shared/scene";
+import {
+  type BoardObject,
+  type BoardState,
+  MAX_PAPER_QUOTE_CHARS,
+  type Sketch,
+  type Step,
+} from "@/shared/scene";
 import {
   validateSketch,
   validateStep,
@@ -123,6 +129,51 @@ describe("validate: ARCHITECTURE.md section 4 table", () => {
       ),
       'unknown cue "x"',
     );
+  });
+
+  it("A paper ref's cue doesn't appear in narration: rejected: unknown cue \"x\"", () => {
+    expectErrors(
+      validateStep(
+        stepWith((s) => (s.paperRefs = [{ page: 1, quote: "q", cue: "x" }])),
+        limits,
+      ),
+      'unknown cue "x"',
+    );
+  });
+
+  it("A paper ref on a narration cue, or with no cue (from the step's start): valid", () => {
+    expectValid(
+      validateStep(
+        stepWith(
+          (s) =>
+            (s.paperRefs = [
+              { page: 2, quote: "from the start" },
+              { page: 3, quote: "at one", cue: "one", label: "Eq. 1" },
+            ]),
+        ),
+        limits,
+      ),
+    );
+  });
+
+  it("A step with no paperRefs (older runs): valid, and none are added", () => {
+    const r = validateStep(baseStep(), limits);
+    expectValid(r);
+    if (r.ok) expect(r.value).not.toHaveProperty("paperRefs");
+  });
+
+  it("A paper ref with page 0, an empty quote or a quote over the cap: rejected: the schema error", () => {
+    for (const ref of [
+      { page: 0, quote: "q" },
+      { page: 1, quote: "" },
+      { page: 1, quote: "x".repeat(MAX_PAPER_QUOTE_CHARS + 1) },
+    ])
+      expect(
+        validateStep(
+          stepWith((s) => (s.paperRefs = [ref])),
+          limits,
+        ).ok,
+      ).toBe(false);
   });
 
   it('A marker appears twice in narration: rejected: duplicate cue "x"', () => {
