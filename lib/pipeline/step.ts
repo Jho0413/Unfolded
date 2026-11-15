@@ -72,12 +72,18 @@ export function buildStepRequest(
   };
 }
 
-/** Writes and validates step `req.n`. Throws GenerationError. */
+/**
+ * Writes and validates step `req.n`, titled as the plan titles it. Throws GenerationError.
+ *
+ * The plan's title wins over the one Claude writes: the outline, the Next button, the recap and
+ * the agent's go_to_step all name the step by its plan title, and Claude sometimes renamed it
+ * (QA pass 2: 2 steps of 10), so the top bar disagreed with the outline.
+ */
 export async function generateStep(
   req: StepRequest,
   messages: ClaudeMessages = claudeMessages(config.step.fixture),
 ): Promise<Step> {
-  return generateWithRetry(
+  const step = await generateWithRetry(
     {
       label: `step ${req.n}`,
       request: buildStepRequest(req),
@@ -93,4 +99,5 @@ export async function generateStep(
     },
     messages,
   );
+  return { ...step, title: req.plan.steps[req.n].title };
 }

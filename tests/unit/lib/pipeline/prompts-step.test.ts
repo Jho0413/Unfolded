@@ -111,6 +111,13 @@ describe("STEP_SYSTEM_PROMPT", () => {
     expect(STEP_SYSTEM_PROMPT).toContain("spell all maths out in words");
   });
 
+  it("asks for the plan's title, not a new one (the outline names steps by it, QA pass 2)", () => {
+    expect(STEP_SYSTEM_PROMPT).toContain(
+      "Title the step exactly as the lesson plan does.",
+    );
+    expect(STEP_SYSTEM_PROMPT).not.toContain("Give the step a short title");
+  });
+
   it("states the narration cap from lib/config.ts", () => {
     expect(STEP_SYSTEM_PROMPT).toContain(`${config.maxNarrationChars}`);
   });

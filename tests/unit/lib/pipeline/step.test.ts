@@ -39,7 +39,11 @@ let valid: Step;
 /** Valid JSON that fails validate.ts: an action cued on a marker the narration doesn't have. */
 let invalid: Step;
 beforeAll(async () => {
-  valid = Step.parse(await readFixture("demo-m1.step.json"));
+  // Titled as REQ's plan step: generateStep gives every step its plan title.
+  valid = {
+    ...Step.parse(await readFixture("demo-m1.step.json")),
+    title: PLAN.steps[1].title,
+  };
   invalid = {
     ...valid,
     actions: [{ ...valid.actions[0], cue: "nowhere" }, ...valid.actions],
@@ -69,6 +73,16 @@ describe("generateStep (G1)", () => {
     const claude = fakeClaude([fakeMessage(asWire(valid))]);
     await expect(generateStep(REQ, claude)).resolves.toEqual(valid);
     expect(claude.calls).toHaveLength(1);
+  });
+
+  it("a step Claude titles differently keeps the plan's title (QA pass 2)", async () => {
+    const claude = fakeClaude([
+      fakeMessage(asWire({ ...valid, title: "Multiplying two matrices" })),
+    ]);
+    await expect(generateStep(REQ, claude)).resolves.toEqual(valid);
+    // The fixture as recorded has its own title, so the plan's really replaced it.
+    const recorded = Step.parse(await readFixture("demo-m1.step.json"));
+    expect(recorded.title).not.toBe(PLAN.steps[1].title);
   });
 
   it("invalid then valid: retries once with the errors, then returns the step", async () => {
@@ -256,7 +270,10 @@ describe("generateStep (G1)", () => {
     resetEnvForTests();
     const fixture = await readFixture<Anthropic.Message>(config.step.fixture);
     const text = fixture.content.find((b) => b.type === "text");
-    const expected = wireToStep(JSON.parse(text!.text)).value;
+    const expected = {
+      ...wireToStep(JSON.parse(text!.text)).value,
+      title: PLAN.steps[1].title,
+    };
     // The fixture quotes the Attention paper's page 4 (m2-attention): a paper with that text.
     const refs = expected.paperRefs ?? [];
     expect(refs.length).toBeGreaterThan(0);
