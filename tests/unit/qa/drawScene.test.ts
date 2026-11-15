@@ -121,6 +121,24 @@ describe("drawScene", () => {
     );
   });
 
+  it("a sketch whose only problems are spacing is drawn (spacing is soft)", async () => {
+    const cramped = {
+      objects: [
+        { kind: "latex", id: "f", x: 700, y: 450, tex: "x" },
+        { kind: "latex", id: "g", x: 760, y: 450, tex: "y" },
+      ],
+      actions: [],
+    };
+    const { deps } = setup(async () => json({ sketch: cramped }));
+    await drawScene(deps, "x and y");
+    expect(deps.drawSketch).toHaveBeenCalledOnce();
+    expect(deps.drawSketch.mock.calls[0][0].objects.map((o) => o.id)).toEqual([
+      "f",
+      "g",
+    ]);
+    expectSilent(deps);
+  });
+
   it("an { error } response fails: Couldn't draw that", async () => {
     const { deps } = setup(async () => json({ error: SKETCH_FAILED }, 502));
     await drawScene(deps, "x");
