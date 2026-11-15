@@ -12,6 +12,13 @@
 // `subscribe` for useSyncExternalStore): not started, generating (a request in flight),
 // ready (the latest request answered with the step) or failed. Only the latest request for a
 // step sets its status.
+//
+// `refresh(n)` (issue #102, section 5.4): a learner signal made the prefetched step n out of
+// date, so it is asked for again in the background, once the first request has answered (the
+// server then regenerates the saved step with the new signals). The first reply is kept: the
+// next request for n gets the new reply if it has arrived, and otherwise the first one, so it
+// never waits for a regeneration. A refresh that fails is dropped and n's status is left as is.
+import type { StepResponse } from "@/shared/lesson";
 import type { FetchStep } from "./stepLoader";
 
 type Reply = Awaited<ReturnType<FetchStep>>;
@@ -23,6 +30,8 @@ export interface Prefetcher {
   fetchStep: FetchStep;
   /** Requests step n ahead; nothing past the plan's last step, or already prefetched. */
   prefetch: (n: number) => void;
+  /** Asks again for a prefetched step n not yet handed over; nothing otherwise. */
+  refresh: (n: number) => void;
   /** Each step's request status; the same array until one changes. */
   statuses: () => readonly StepFetchStatus[];
   /** Called after any status changes; returns the unsubscribe. */
@@ -36,6 +45,8 @@ export function createPrefetcher(
 ): Prefetcher {
   const ahead = new Map<number, Promise<Reply>>();
   const latest = new Map<number, Promise<Reply>>();
+  /** Refreshes in flight or answered, by step; `step` is set once the new reply arrives. */
+  const fresh = new Map<number, { step?: StepResponse }>();
   let statuses: readonly StepFetchStatus[] = Array.from(
     { length: stepCount },
     () => "notStarted" as const,
@@ -71,10 +82,16 @@ export function createPrefetcher(
 
   return {
     fetchStep: (n) => {
+      const refreshed = fresh.get(n)?.step;
+      fresh.delete(n);
       const reply = ahead.get(n);
       if (reply === undefined) return request(n);
       ahead.delete(n);
-      return reply;
+      if (refreshed === undefined) return reply;
+      log.info(
+        `[player] step ${n}: the refreshed version ${refreshed.version}`,
+      );
+      return Promise.resolve(refreshed);
     },
     prefetch: (n) => {
       if (n < 0 || n >= stepCount || ahead.has(n)) return;
@@ -87,6 +104,27 @@ export function createPrefetcher(
         },
         () => forget(n, reply),
       );
+    },
+    refresh: (n) => {
+      const first = ahead.get(n);
+      if (first === undefined) return;
+      log.info(`[player] refreshing step ${n}`);
+      const entry: { step?: StepResponse } = {};
+      fresh.set(n, entry);
+      void first
+        .catch(() => undefined)
+        .then(() => (fresh.get(n) === entry ? fetchStep(n) : undefined))
+        .then(
+          (r) => {
+            if (r === undefined || "error" in r || fresh.get(n) !== entry)
+              return;
+            entry.step = r;
+            log.info(`[player] step ${n}: version ${r.version} refreshed`);
+          },
+          () => {
+            if (fresh.get(n) === entry) fresh.delete(n);
+          },
+        );
     },
     statuses: () => statuses,
     subscribe: (listener) => {

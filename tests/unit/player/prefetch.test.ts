@@ -218,3 +218,81 @@ describe("createPrefetcher statuses", () => {
     expect(steps.statuses()[1]).toBe("ready");
   });
 });
+
+describe("createPrefetcher refresh (issue #102, section 5.4)", () => {
+  const v2 = (n: number): StepResponse => ({
+    ...stepAt(n),
+    version: 2,
+    audioUrl: `/api/runs/m1/step-${n}.v2.mp3`,
+    adaptedFrom: { kind: "question", text: "why?", atStep: n - 1 },
+  });
+
+  it("asks again once the first request has answered, and Next gets the new version", async () => {
+    const route = fakeRoute();
+    const steps = createPrefetcher(route.fetchStep, 3, log);
+    steps.prefetch(1);
+    steps.refresh(1);
+    // Not before the first answers: the server must see a saved step to regenerate.
+    expect(route.requested()).toEqual([1]);
+    await route.settle(1, stepAt(1));
+    expect(route.requested()).toEqual([1, 1]);
+    await route.settle(1, v2(1));
+    expect(await steps.fetchStep(1)).toEqual(v2(1));
+    expect(route.requested()).toEqual([1, 1]);
+  });
+
+  it("Next before the new version arrives plays the first copy: it never waits", async () => {
+    const route = fakeRoute();
+    const steps = createPrefetcher(route.fetchStep, 3, log);
+    steps.prefetch(1);
+    await route.settle(1, stepAt(1));
+    steps.refresh(1);
+    await tick();
+    expect(await steps.fetchStep(1)).toEqual(stepAt(1));
+    // The late reply changes nothing: a later request asks the route again.
+    await route.settle(1, v2(1));
+    const again = steps.fetchStep(1);
+    expect(route.requested()).toEqual([1, 1, 1]);
+    await route.settle(1, v2(1));
+    expect(await again).toEqual(v2(1));
+  });
+
+  it("a refresh answered with an error or a rejection keeps the first copy", async () => {
+    for (const failure of [
+      { error: "Couldn't make this step." },
+      new Error("down"),
+    ]) {
+      const route = fakeRoute();
+      const steps = createPrefetcher(route.fetchStep, 3, log);
+      steps.prefetch(1);
+      await route.settle(1, stepAt(1));
+      steps.refresh(1);
+      await tick();
+      await route.settle(1, failure);
+      expect(await steps.fetchStep(1)).toEqual(stepAt(1));
+      expect(steps.statuses()[1]).toBe("ready");
+    }
+  });
+
+  it("does nothing for a step not prefetched, or already handed over", async () => {
+    const route = fakeRoute();
+    const steps = createPrefetcher(route.fetchStep, 3, log);
+    steps.refresh(2);
+    steps.prefetch(1);
+    await route.settle(1, stepAt(1));
+    await steps.fetchStep(1);
+    steps.refresh(1);
+    await tick();
+    expect(route.requested()).toEqual([1]);
+  });
+
+  it("leaves the outline's status alone while it refreshes", async () => {
+    const route = fakeRoute();
+    const steps = createPrefetcher(route.fetchStep, 3, log);
+    steps.prefetch(1);
+    await route.settle(1, stepAt(1));
+    steps.refresh(1);
+    await tick();
+    expect(steps.statuses()[1]).toBe("ready");
+  });
+});

@@ -20,10 +20,11 @@ import {
   useState,
 } from "react";
 import { captionFrom, prepareNarration } from "./captions";
+import { adaptedMarker } from "./adapted";
 import { shortcutEvent } from "./controls";
 import { lessonCard } from "./cardView";
 import type { Pane } from "./paper/focus";
-import { TutorCard } from "./TutorCard";
+import { AdaptedNote, TutorCard } from "./TutorCard";
 import type { FetchStep } from "./stepLoader";
 import { type Player as PlayerApi, usePlayer } from "./usePlayer";
 import { Whiteboard } from "./Whiteboard";
@@ -121,6 +122,8 @@ export function PlayerStage({
       ? null
       : captionFrom(prepared, cueTimes, durationMs, tMs);
   const title = loaded?.step.title ?? titles[player.step] ?? "";
+  // A version regenerated after a learner's question says so (issue #102).
+  const marker = adaptedMarker(loaded?.adaptedFrom);
   return (
     <section
       data-testid="player"
@@ -170,6 +173,7 @@ export function PlayerStage({
                 caption={caption}
                 onAction={send}
                 holdShortcut="Space"
+                notices={marker && <AdaptedNote {...marker} />}
               />
             )}
             {renderAsk?.(player)}

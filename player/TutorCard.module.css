@@ -153,6 +153,14 @@
   border: 1px solid var(--line-2);
 }
 
+/* A step regenerated after the learner's question (issue #102). */
+.adapted {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  font-style: italic;
+}
+
 .chips {
   display: flex;
   flex-wrap: wrap;

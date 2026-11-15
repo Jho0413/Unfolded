@@ -292,13 +292,23 @@ describe("agent config tool names", () => {
   );
 });
 
-describe("simplify_upcoming", () => {
-  it("is a stub that returns nothing", async () => {
+describe("simplify_upcoming (issue #102)", () => {
+  it("records the reason and returns nothing (no wait)", async () => {
+    const simplifyUpcoming = vi.fn();
+    const h = harness(asking, { simplifyUpcoming });
+    expect(
+      await h.tools.simplify_upcoming?.({ reason: "too fast" }),
+    ).toBeUndefined();
+    expect(simplifyUpcoming).toHaveBeenCalledWith("too fast");
+  });
+
+  it("without a recorder (/dev/ask) only logs", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const h = harness(asking);
     expect(
       await h.tools.simplify_upcoming?.({ reason: "too fast" }),
     ).toBeUndefined();
+    expect(info).toHaveBeenCalled();
     info.mockRestore();
   });
 });

@@ -10,6 +10,9 @@
 //
 // The paper (issue #98, ./useLessonPaper.ts) sits beside the board when the lesson has one,
 // the pane in focus the larger.
+//
+// Learner signals (issue #102, ./useLessonSignals.ts): Ask's questions and simplify requests
+// are posted, and the prefetched next step is asked for again once Ask closes.
 import { useState, useSyncExternalStore } from "react";
 import { PlayerStage } from "@/player/Player";
 import { usePlayer } from "@/player/usePlayer";
@@ -23,6 +26,7 @@ import { Outline } from "./Outline";
 import { stepRouteFetcher } from "./stepRoute";
 import { CaptionsToggle, ThemeToggle } from "./Toggles";
 import { useLessonPaper } from "./useLessonPaper";
+import { useLessonSignals } from "./useLessonSignals";
 import styles from "./lesson.module.css";
 
 export interface LessonViewProps {
@@ -46,6 +50,7 @@ export function LessonView({ lessonId, plan, replay, debug }: LessonViewProps) {
     fetchStep: steps.fetchStep,
     onStepReady: (n) => steps.prefetch(n + 1),
   });
+  const signals = useLessonSignals({ lessonId, player, steps });
   const statuses = useSyncExternalStore(
     steps.subscribe,
     steps.statuses,
@@ -102,6 +107,7 @@ export function LessonView({ lessonId, plan, replay, debug }: LessonViewProps) {
                 replay={replay}
                 captions={captions}
                 highlightPaper={paper.highlightPaper}
+                signals={signals}
               />
             )}
           />

@@ -164,6 +164,22 @@ export function CardNotice({
   );
 }
 
+/** The step was regenerated after the learner's question (issue #102, player/adapted.ts). */
+export function AdaptedNote({
+  lead,
+  quote,
+}: {
+  lead: string;
+  quote: string | null;
+}) {
+  return (
+    <p className={styles.adapted} data-testid="adapted-marker">
+      {lead}
+      {quote !== null && <> “{quote}”</>}
+    </p>
+  );
+}
+
 /** The always-visible Ask box: type and press Enter, or press the mic (or A). */
 export function AskBox({
   value,

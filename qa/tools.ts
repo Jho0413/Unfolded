@@ -6,7 +6,7 @@
 //                      (a no-op while the Answer view is up)
 //   go_to_step         goToStep(step - 1); "ok" or "no step n". The step the lesson stopped on
 //                      means back to where it stopped (the "Back to step N" chip), not a restart
-//   simplify_upcoming  stub until A1 (returns nothing)
+//   simplify_upcoming  records a simplify signal for the next step (section 5.4); no wait
 //   highlight_paper    highlights a passage in the paper beside the board; "ok: …" or why not
 //   draw_scene         waits: resolves once the sketch is drawn (what's on the board), failed or
 //                      superseded, so the agent explains what is drawn (qa/drawScene.ts)
@@ -63,6 +63,11 @@ export type ClientToolDeps = {
    */
   stoppedStep?: () => number;
   backToLesson?: () => void;
+  /**
+   * Records simplify_upcoming's request for the next step (qa/askSignals.ts, section 5.4).
+   * Without it (e.g. /dev/ask) the call is only logged.
+   */
+  simplifyUpcoming?: (reason: string) => void;
 } & Pick<
   DrawSceneDeps,
   "askId" | "drawSketch" | "showNotice" | "fetch" | "timeoutMs"
@@ -127,9 +132,9 @@ export function createClientTools(deps: ClientToolDeps): QaTools {
     next_step: () => command(deps, "next"),
     previous_step: () => command(deps, "previous"),
     replay_step: () => command(deps, "replay"),
-    // A1 replaces this with a signal to the server (section 5.4).
     simplify_upcoming: ({ reason }) => {
-      console.info("[qa] simplify_upcoming (not built yet):", reason);
+      if (deps.simplifyUpcoming) deps.simplifyUpcoming(reason);
+      else console.info("[qa] simplify_upcoming (nothing records it):", reason);
     },
   };
 }

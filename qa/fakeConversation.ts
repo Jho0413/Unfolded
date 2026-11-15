@@ -89,6 +89,17 @@ export const DEFAULT_SCRIPT: readonly FakeTurn[] = [
     reply: "Let me sketch that while I explain.",
     speakFirst: true,
   },
+  // Asking for it simpler (issue #102): the agent's simplify_upcoming.
+  {
+    match: /\bsimpler\b/i,
+    tool: {
+      name: "simplify_upcoming",
+      params: {
+        reason: "The learner wants the next idea explained more simply",
+      },
+    },
+    reply: "Sure, I'll keep the next idea simpler.",
+  },
   {
     match: /.*/,
     reply: "Good question. Each output cell is a row times a column.",

@@ -4,7 +4,8 @@
 //
 // - LessonAsk: the panel, wired to the machine (ask, closeAsk,
 //   agentDisconnected), the client tools of qa/tools.ts (draw_scene included)
-//   and the context of qa/context.ts.
+//   and the context of qa/context.ts. What the learner asks goes to `signals`
+//   (qa/askSignals.ts, issue #102); a control tool marks it a command.
 // - LessonBoard: while asking, the frozen board with Ask's highlights on top,
 //   or once a draw_scene answer arrives, the Answer view (./AnswerView.tsx)
 //   instead of the lesson, redrawn every frame; otherwise the player's board.
@@ -25,6 +26,7 @@ import { tellAnswerContext } from "@/qa/answerContext";
 import { AskPanel } from "@/qa/AskPanel";
 import { type AskSession, frozenBoard } from "@/qa/askSession";
 import { narrationUpTo } from "@/qa/context";
+import { type AskSignals, noteCommands } from "@/qa/askSignals";
 import { createClientTools } from "@/qa/tools";
 import type { AskApi } from "@/qa/types";
 import type { LessonPlan } from "@/shared/lesson";
@@ -57,6 +59,7 @@ export function LessonAsk({
   replay,
   captions,
   highlightPaper,
+  signals,
 }: {
   player: Player;
   session: AskSession;
@@ -65,6 +68,8 @@ export function LessonAsk({
   captions: boolean;
   /** highlight_paper (issue #98): the paper beside the board. */
   highlightPaper?: (quote: string, page?: number) => string;
+  /** Records the learner's questions and simplify requests (issue #102). */
+  signals?: AskSignals;
 }) {
   useSessionSync(player, session);
   const { send, state, loaded, step, tMs } = player;
@@ -83,7 +88,7 @@ export function LessonAsk({
   const tools = useCallback(
     (ask: AskApi) => {
       tellRef.current = ask.tellAgent;
-      return createClientTools({
+      const tools = createClientTools({
         ...ask,
         board: session.board,
         highlight: session.addAction,
@@ -107,9 +112,11 @@ export function LessonAsk({
         },
         backToLesson: () => leaveAsk(send, session, "back", stateRef.current),
         highlightPaper,
+        simplifyUpcoming: signals?.simplify,
       });
+      return signals ? noteCommands(tools, signals.command) : tools;
     },
-    [session, send, voice.control, highlightPaper],
+    [session, send, voice.control, highlightPaper, signals],
   );
   useBackOnLesson(session, tellRef);
 
@@ -156,6 +163,7 @@ export function LessonAsk({
       canAsk={player.can({ type: "ask" })}
       captions={captions}
       live={voice.live}
+      onLearnerMessage={signals?.heard}
     />
   );
 }
