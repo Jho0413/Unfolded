@@ -650,7 +650,8 @@ It's built in the browser only, from the plan, the signals the page posts and th
 
 | Row | Shows | Click |
 |---|---|---|
-| before the step on screen | ✓, "Done" | `goToStep` |
+| played to its end this session (`stepEnded` or `finished` reached), not on screen | ✓, "Done" | `goToStep` |
+| skipped past (left mid-step by Next or a jump, or never played) | as an upcoming row: no ✓ | `goToStep` |
 | the step on screen | highlighted (`aria-current`); "Preparing" while it loads (the player is `loading`, even once its reply is in and the audio downloads) | none |
 | generating | a spinner, "Preparing" | `goToStep` |
 | its request failed | "Couldn't prepare" | `goToStep` (asks again) |
