@@ -7,6 +7,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { PRODUCT_NAME } from "@/app/brand";
 import { CARD_STATUS, CARD_TEXT } from "@/player/cardView";
 import { savedRun, savedStepTitle } from "./support/savedRun";
 import {
@@ -647,4 +648,15 @@ test("preparing, then autoplay blocked: the intro names the lesson, and Start wi
   await screenshot(page, "dark-0-start");
   await cardButton(page, CARD_TEXT.start(savedStepTitle(0))).click();
   await expectState(page, "playing", 0);
+});
+
+test("the lesson carries the product name in its outline and its tab", async ({
+  page,
+}) => {
+  await using run = await savedRun("e2e-tutor-brand");
+  await page.goto(`/lesson/${run.lessonId}`);
+  await expect(
+    page.getByRole("navigation", { name: "Lesson outline" }),
+  ).toContainText(PRODUCT_NAME);
+  await expect(page).toHaveTitle(`Lesson · ${PRODUCT_NAME}`);
 });

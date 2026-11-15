@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, STIX_Two_Text } from "next/font/google";
+import { PRODUCT_DESCRIPTION, PRODUCT_NAME } from "@/app/brand";
 import { THEME_SCRIPT } from "@/player/theme";
 import "@/player/theme.css";
 
 export const metadata: Metadata = {
-  title: "Whiteboard",
-  description: "An AI tutor that teaches by drawing.",
+  // A page that sets its own title (e.g. "Lesson") reads "Lesson · Unfolded" in the tab.
+  title: { default: PRODUCT_NAME, template: `%s · ${PRODUCT_NAME}` },
+  description: PRODUCT_DESCRIPTION,
 };
 
 // Self-hosted by next/font. The CSS variables are read by player/theme.css:
