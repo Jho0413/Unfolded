@@ -6,7 +6,7 @@
   height: 100%;
   display: grid;
   grid-template-rows: auto 1fr;
-  /* Never wider than the stage: the paper's pages take the pane's width (#98 real check). */
+  /* Never wider than the page: an implicit column would grow to the title's width on a phone. */
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }

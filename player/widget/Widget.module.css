@@ -1,0 +1,144 @@
+/* The "try it yourself" panel (player/widget/WidgetPanel.tsx), in the tutor card's look. */
+.panel {
+  background: var(--card);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--line-2);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 10px 14px 12px;
+  color: var(--ink);
+  font-family: var(--ui-font);
+  container-type: inline-size;
+  /* Never taller than most of the board: the rest scrolls. */
+  max-height: min(56vh, 460px);
+  overflow: auto;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.title {
+  margin: 0;
+  font: 500 10.5px var(--mono-font);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.button {
+  font: 500 12.5px var(--ui-font);
+  color: var(--body);
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.button:hover {
+  color: var(--ink);
+  border-color: var(--muted);
+}
+.button:focus-visible,
+.cell:focus-visible,
+.slider input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* The drawing beside its controls; stacked when the panel is narrow (a phone). */
+.body {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 14px;
+  align-items: center;
+  margin-top: 8px;
+}
+@container (max-width: 520px) {
+  .body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.drawing {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 260px;
+  background: var(--board);
+  border-radius: 8px;
+}
+
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.expr,
+.caption {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.expr code {
+  font: 13px var(--mono-font);
+  color: var(--body);
+}
+
+.slider {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "label value"
+    "input input";
+  gap: 2px 8px;
+  align-items: center;
+}
+.label {
+  grid-area: label;
+  font-size: 13px;
+  color: var(--body);
+}
+.value {
+  grid-area: value;
+  font: 13px var(--mono-font);
+  color: var(--ink);
+}
+.slider input {
+  grid-area: input;
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.grid {
+  display: grid;
+  gap: 4px;
+}
+.cell {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 4px 2px;
+  font: 13px var(--mono-font);
+  text-align: center;
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+}
+
+/* The tutor card's line while the widget shows. */
+.prompt {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--body);
+}

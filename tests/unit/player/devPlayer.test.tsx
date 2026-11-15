@@ -45,6 +45,7 @@ afterEach(() => {
 
 const DEFAULTS: FakeOptions = {
   fail: "none",
+  widget: "none",
   audio: "ok",
   delayMs: 0,
   debug: false,

@@ -370,7 +370,8 @@ describe("field coverage: the wire has every contract action field and kind", ()
     // paperRefs (#98) isn't on the wire yet: Jason removes this exception once WireStep has it.
     expect(Object.keys(WireStep.shape).sort()).toEqual(
       Object.keys(Step.shape)
-        .filter((k) => k !== "paperRefs")
+        // widget (#110) isn't on the wire yet either (S3: no grammar headroom); same for Jason.
+        .filter((k) => k !== "paperRefs" && k !== "widget")
         .sort(),
     );
     expect(Object.keys(WireSketch.shape).sort()).toEqual(

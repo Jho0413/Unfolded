@@ -13,6 +13,7 @@ import {
 } from "./boxes";
 import { KATEX_OPTIONS } from "./latex";
 import { heatmapLayout, plotLayout, VIZ_MIN } from "./viz";
+import { checkWidget } from "./widget";
 import {
   type Action,
   type Anchor,
@@ -417,6 +418,7 @@ export function checkStep(step: Step, limits: StepLimits): string[] {
     if (!seenCues.has(action.cue)) out.push(errors.unknownCue(action.cue));
     out.push(...checkAction(action, objects));
   }
+  if (step.widget) out.push(...checkWidget(step.widget));
   for (const ref of step.paperRefs ?? [])
     if (ref.cue !== undefined && !seenCues.has(ref.cue))
       out.push(errors.unknownCue(ref.cue));
