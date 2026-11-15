@@ -9,6 +9,8 @@
 //   highlight can land anywhere.
 // - The pane's width sets `--total-scale-factor` (the text layer's CSS scale); a resize (the
 //   focus transition) only restyles, it never redraws.
+// - A resize moves everything on the pages, so the viewer keeps the highlighted passage in view
+//   through it (the pane widens as the passage is scrolled to), until the learner scrolls.
 // - `data-*` attributes expose the highlight for tests.
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { TextLayer } from "pdfjs-dist";
@@ -46,6 +48,8 @@ export const PaperViewer = memo(function PaperViewer({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
   const [layers, setLayers] = useState<Layers>([]);
+  // The highlighted passage the viewer keeps in view, until the learner scrolls.
+  const followRef = useRef<HTMLElement | null>(null);
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
@@ -64,12 +68,8 @@ export const PaperViewer = memo(function PaperViewer({
     const first = marks[0];
     const scroller = scrollRef.current;
     if (first !== undefined && scroller !== null) {
-      const box = scroller.getBoundingClientRect();
-      const top = first.getBoundingClientRect().top - box.top;
-      scroller.scrollTo({
-        top: scroller.scrollTop + top - box.height / 3,
-        behavior: prefersReducedMotion() ? "auto" : "smooth",
-      });
+      followRef.current = first;
+      scrollToMark(scroller, first, prefersReducedMotion() ? "auto" : "smooth");
     }
     // For tests: what is highlighted now (set here, where the marks are made).
     const data = rootRef.current?.dataset;
@@ -79,11 +79,24 @@ export const PaperViewer = memo(function PaperViewer({
       data.highlightText = marks.map((m) => m.textContent).join("");
     }
     return () => {
+      if (followRef.current === first) followRef.current = null;
       unmark(marks);
       if (data !== undefined)
         data.highlightKey = data.highlightPage = data.highlightText = "";
     };
   }, [highlight, pageLayers]);
+
+  // Each resize step (every frame of the focus transition) moves the passage: put it back at
+  // once, after the pages have taken their new size and before the frame is painted.
+  useLayoutEffect(() => {
+    const mark = followRef.current;
+    const scroller = scrollRef.current;
+    if (mark !== null && mark.isConnected && scroller !== null)
+      scrollToMark(scroller, mark, "auto");
+  }, [width]);
+  const stopFollowing = () => {
+    followRef.current = null;
+  };
 
   return (
     <div
@@ -92,6 +105,9 @@ export const PaperViewer = memo(function PaperViewer({
         rootRef.current = el;
       }}
       className={styles.scroll}
+      // The learner scrolling takes over from the viewer.
+      onWheel={stopFollowing}
+      onTouchMove={stopFollowing}
       data-testid="paper"
       data-pages={pages.length}
       // Filled in by the highlight effect (React never changes these after mount).
@@ -240,6 +256,20 @@ function unmark(marks: readonly HTMLElement[]): void {
     const span = mark.parentElement;
     if (span !== null) span.textContent = span.textContent;
   }
+}
+
+/** Scrolls the pane so the mark sits a third of the way down it. */
+function scrollToMark(
+  scroller: HTMLElement,
+  mark: HTMLElement,
+  behavior: ScrollBehavior,
+): void {
+  const box = scroller.getBoundingClientRect();
+  const top = mark.getBoundingClientRect().top - box.top;
+  scroller.scrollTo({
+    top: scroller.scrollTop + top - box.height / 3,
+    behavior,
+  });
 }
 
 function prefersReducedMotion(): boolean {

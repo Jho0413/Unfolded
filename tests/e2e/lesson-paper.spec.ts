@@ -6,7 +6,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
-import { paperPdf } from "./support/paperPdf";
+import { PAPER_PAGES, paperPdf } from "./support/paperPdf";
 import { savedRun } from "./support/savedRun";
 import { askQuestion } from "./support/tutor";
 
@@ -87,7 +87,10 @@ test("a narration cue highlights its passage and grows the paper; a click on the
   await servePaper(page, run.lessonId);
   await page.emulateMedia({ colorScheme: "dark" });
   await page.goto(`/lesson/${run.lessonId}`);
-  await expect(paper(page)).toHaveAttribute("data-pages", "2");
+  await expect(paper(page)).toHaveAttribute(
+    "data-pages",
+    String(PAPER_PAGES.length),
+  );
   // The keyboard holds on: a click would focus the whiteboard.
   await expect(player(page)).toHaveAttribute("data-state", "playing");
   await page.keyboard.press("Space");
@@ -128,13 +131,83 @@ test("a narration cue highlights its passage and grows the paper; a click on the
   await screenshot(page, "paper-focus-light");
 });
 
+test("a passage far down the paper stays in view while the pane widens, and after", async ({
+  page,
+}) => {
+  await using run = await savedRun("e2e-paper-deep", {
+    paperRefs: [
+      {
+        page: 5,
+        quote:
+          "Deep down the paper, the scaled scores are what the softmax sees.",
+        cue: "add",
+      },
+    ],
+  });
+  await servePaper(page, run.lessonId);
+  await page.goto(`/lesson/${run.lessonId}`);
+  await expect(paper(page)).toHaveAttribute(
+    "data-pages",
+    String(PAPER_PAGES.length),
+  );
+  await expect(player(page)).toHaveAttribute("data-state", "playing");
+  await page.keyboard.press("Space");
+  await expect(split(page)).toHaveAttribute("data-focus", "board");
+  // The cue fires while playing, so the pane starts to widen as the passage is scrolled to.
+  await seek(page, 5.3);
+  await page.keyboard.press("Space");
+  await expect(paper(page)).toHaveAttribute("data-highlight-page", "5");
+  await expect(split(page)).toHaveAttribute("data-focus", "paper");
+  await expectLarger(page, "paper-pane", "board-pane");
+  const mark = paper(page).locator("mark").first();
+  await expect(mark).toBeInViewport();
+  await page.waitForTimeout(800); // well after the 0.45 s transition
+  await expect(mark).toBeInViewport();
+  await screenshot(page, "deep-passage-grown");
+  // The pane shrinks back once the hold ends; the passage stays in view.
+  await page.keyboard.press("Space");
+  await expect(split(page)).toHaveAttribute("data-focus", "board", {
+    timeout: 10_000,
+  });
+  await page.waitForTimeout(800);
+  await expect(mark).toBeInViewport();
+});
+
+test("a phone (390 px): the stage and both panes fit the screen, stacked", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await using run = await savedRun("e2e-paper-phone");
+  await servePaper(page, run.lessonId);
+  await page.goto(`/lesson/${run.lessonId}`);
+  await expect(paper(page)).toHaveAttribute(
+    "data-pages",
+    String(PAPER_PAGES.length),
+  );
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(390);
+  for (const pane of ["board-pane", "paper-pane"]) {
+    const box = (await page.getByTestId(pane).boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(390);
+  }
+  const board = (await boardPane(page).boundingBox())!;
+  const paperBox = (await paperPane(page).boundingBox())!;
+  expect(paperBox.y).toBeGreaterThan(board.y + board.height - 1);
+  await screenshot(page, "phone-stacked");
+});
+
 test("highlight_paper from the conversation highlights its quote in the answer blue", async ({
   page,
 }) => {
   await using run = await savedRun("e2e-paper-ask");
   await servePaper(page, run.lessonId);
   await page.goto(`/lesson/${run.lessonId}`);
-  await expect(paper(page)).toHaveAttribute("data-pages", "2");
+  await expect(paper(page)).toHaveAttribute(
+    "data-pages",
+    String(PAPER_PAGES.length),
+  );
   await expect(paper(page)).toHaveAttribute("data-highlight-key", "");
 
   await askQuestion(page, "Where does it say that in the paper?");
