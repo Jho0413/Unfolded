@@ -209,8 +209,12 @@
   .split[data-tab="paper"] > .board .dock > [data-kind] {
     display: none;
   }
+  /* As far as the floating card and Ask box reach (--dock-height, Player.tsx trackDockHeight):
+     the last lines can scroll up above them, and a highlighted passage is scrolled into the
+     part they leave uncovered (PaperViewer scrollToMark reads scroll-padding-bottom, QA A10). */
   .split[data-tab="paper"] > .paperPane > :first-child {
-    padding-bottom: 180px;
+    padding-bottom: calc(var(--dock-height, 172px) + 8px);
+    scroll-padding-bottom: calc(var(--dock-height, 172px) + 8px);
   }
   .tabs {
     display: flex;

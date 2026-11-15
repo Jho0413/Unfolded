@@ -269,15 +269,17 @@ export function PlayerStage({
 }
 
 /**
- * Keeps `--dock-height` on the board at the dock's height, so a board that must stay clear of
- * the dock (`data-clear-of-dock`, the Answer view) sits above the card however tall it grows
+ * Keeps `--dock-height` on the split (the board and the paper) at the dock's height, so a board
+ * that must stay clear of the dock (`data-clear-of-dock`, the Answer view) sits above the card
+ * however tall it grows, and on a phone the paper under the floating card scrolls clear of it
  * (Player.module.css). A style property, not state: a resize doesn't re-render the stage.
  */
 function trackDockHeight(dock: HTMLDivElement | null) {
   const board = dock?.parentElement;
-  if (!dock || !board) return;
+  const split = board?.parentElement ?? board;
+  if (!dock || !split) return;
   const observer = new ResizeObserver(() =>
-    board.style.setProperty("--dock-height", `${dock.offsetHeight}px`),
+    split.style.setProperty("--dock-height", `${dock.offsetHeight}px`),
   );
   observer.observe(dock);
   return () => observer.disconnect();
