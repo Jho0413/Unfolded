@@ -26,6 +26,27 @@ async function playing(page: Page, lessonId: string) {
   await expect(listening(page)).toHaveText("Listening");
 }
 
+/** Plays the step on screen to its end, once its audio is really running (see lesson-tutor). */
+async function endStep(page: Page, step: number) {
+  const audio = page.getByTestId("player-audio");
+  await expect
+    .poll(() =>
+      audio.evaluate(
+        (a: HTMLAudioElement) =>
+          Number.isFinite(a.duration) &&
+          !a.paused &&
+          a.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA &&
+          a.currentTime > 0,
+      ),
+    )
+    .toBe(true);
+  await audio.evaluate((a: HTMLAudioElement) => {
+    a.currentTime = Math.max(0, a.duration - 0.1);
+  });
+  await expect(player(page)).toHaveAttribute("data-state", "stepEnded");
+  await expect(player(page)).toHaveAttribute("data-step", String(step));
+}
+
 test("the lesson's first play opens a voice session (mic on), with Ask closed", async ({
   page,
 }) => {
@@ -289,3 +310,22 @@ test("'hold on' while asking with a sketch in flight (no Answer view): Ask, the 
   await expect(note).toHaveCount(1);
   await expect(player(page)).toHaveAttribute("data-state", "asking");
 });
+
+for (const how of ["typed", "spoken"] as const)
+  test(`'carry on' ${how} at a step's end starts the next step (QA A9)`, async ({
+    page,
+  }) => {
+    await using run = await savedRun(`e2e-voice-carry-end-${how}`);
+    await playing(page, run.lessonId);
+    await endStep(page, 0);
+    // Typed or spoken, Ask opens first (barge-in for the voice), so the command is handled
+    // while asking: closing Ask alone would leave the step ended.
+    if (how === "typed") await askQuestion(page, "carry on");
+    else await say(page, "carry on");
+    await expect(player(page)).toHaveAttribute("data-step", "1");
+    await expect(player(page)).toHaveAttribute("data-state", "playing");
+    await expect(panel(page)).toHaveAttribute("data-open", "false");
+    expect(
+      await page.evaluate(() => window.__qaFake?.toolCalls.map((c) => c.name)),
+    ).toContain("resume_lesson");
+  });

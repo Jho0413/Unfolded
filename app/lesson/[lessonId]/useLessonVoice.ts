@@ -8,7 +8,9 @@
 // - `control`: carries out a spoken command (the agent's control tools, qa/tools.ts) with
 //   `controlLesson`: an existing machine event (player/controls.ts commandEvent), after closing
 //   Ask if it's open. "Carry on" closes Ask like the card's "Got it, carry on" (closeAsk, then
-//   afterAskEvent); after a go_to_step jump, the step it loads (paused) starts once it arrives.
+//   afterAskEvent); where that leaves nothing to do (a step's end), it is the spoken command
+//   there (commandEvent: the next step, QA A9). After a go_to_step jump, the step it loads
+//   (paused) starts once it arrives.
 //   "Hold on" while asking closes Ask only from the Answer view (see controlLesson).
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -83,7 +85,11 @@ export function controlLesson(
     // As the card's "Got it, carry on" (section 5.6). After a go_to_step jump, closeAsk
     // loads that step paused: start it once it's here.
     if (now.goTo !== undefined) deps.playWhenReady(now.goTo);
-    const next = afterAskEvent("carryOn", now.from, closed.state);
+    // At a step's end the card's carry on leaves the step ended (its Next is on the card), but
+    // a spoken or typed "carry on" means the next step, as with Ask closed (QA A9, #123).
+    const next =
+      afterAskEvent("carryOn", now.from, closed.state) ??
+      commandEvent("resume", closed.state, ctx);
     if (next !== null) send(next);
     return;
   }
