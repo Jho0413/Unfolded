@@ -18,7 +18,17 @@ export interface ClaudeMessages {
   stream(
     body: Anthropic.MessageStreamParams,
     options?: Anthropic.RequestOptions,
-  ): { finalMessage(): Promise<Anthropic.Message> };
+  ): {
+    finalMessage(): Promise<Anthropic.Message>;
+    /**
+     * The SDK stream's "text" event: each piece of the answer as it streams, with the text so
+     * far. A sketch uses it to voice its narration early (sketch.ts); a fake may leave it out.
+     */
+    on?(
+      event: "text",
+      listener: (delta: string, snapshot: string) => void,
+    ): unknown;
+  };
 }
 
 /**

@@ -1,11 +1,15 @@
 // lib/pipeline/sketch.ts and its prompt (ROADMAP SK1, ARCHITECTURE.md section 8): what a sketch
 // request sends. The route tests cover the validation and failure cases.
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { config } from "@/lib/config";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { SKETCH_OUTPUT_FORMAT, WireSketch } from "@/lib/pipeline/outputFormat";
 import {
+  MAX_MATRIX_LABEL_CHARS,
   SKETCH_SYSTEM_PROMPT,
+  charsInSlot,
+  rowSlots,
   sketchRetryPrompt,
 } from "@/lib/pipeline/prompts/sketch";
 import { STEP_SYSTEM_PROMPT } from "@/lib/pipeline/prompts/step";
@@ -16,9 +20,10 @@ import {
 } from "@/lib/pipeline/prompts/board";
 import {
   buildSketchRequest,
+  streamedNarration,
   type SketchRequestBody,
 } from "@/lib/pipeline/sketch";
-import { TEXT_CHAR_EM, TEXT_SIZE } from "@/shared/boxes";
+import { MATRIX_FRAME, TEXT_CHAR_EM, TEXT_SIZE, textBox } from "@/shared/boxes";
 import { ANSWER_TEMPLATE } from "@/shared/validate";
 
 const REQ: SketchRequestBody = {
@@ -186,5 +191,110 @@ describe("the sketch prompt", () => {
   it("the retry prompt lists every error", () => {
     const text = sketchRetryPrompt(['unknown object "a"', 'duplicate id "b"']);
     expect(text).toContain('- unknown object "a"\n- duplicate id "b"');
+  });
+});
+
+describe("the answer board's slots (rejected sketches placed items by eye near an edge)", () => {
+  const { content, gap } = ANSWER_TEMPLATE;
+
+  it.each([2, 3, 4])(
+    "a row of %i items splits the content area into equal slots, edge to edge",
+    (n) => {
+      const slots = rowSlots(n);
+      expect(slots).toHaveLength(n);
+      expect(slots[0].x0).toBe(content.x0);
+      expect(slots.at(-1)!.x1).toBe(content.x1);
+      for (let i = 1; i < n; i++) expect(slots[i].x0).toBe(slots[i - 1].x1);
+      const widths = slots.map((s) => s.x1 - s.x0);
+      expect(Math.max(...widths) - Math.min(...widths)).toBeLessThanOrEqual(1);
+    },
+  );
+
+  it("the prompt gives the slots of a row of two, three and four, with their centres", () => {
+    for (const n of [2, 3, 4])
+      for (const { x0, x1 } of rowSlots(n))
+        expect(SKETCH_SYSTEM_PROMPT).toContain(
+          `x ${x0} to ${x1} (centre ${(x0 + x1) / 2})`,
+        );
+  });
+
+  it("a matrix label of MAX_MATRIX_LABEL_CHARS fits a slot of three with the gap to spare, one more doesn't", () => {
+    const slot = rowSlots(3)[0];
+    const width = (chars: number) =>
+      textBox("x".repeat(chars), MATRIX_FRAME.labelFont).w;
+    expect(width(MAX_MATRIX_LABEL_CHARS) + gap).toBeLessThanOrEqual(
+      slot.x1 - slot.x0,
+    );
+    expect(width(MAX_MATRIX_LABEL_CHARS + 1) + gap).toBeGreaterThan(
+      slot.x1 - slot.x0,
+    );
+    expect(SKETCH_SYSTEM_PROMPT).toContain(
+      `at most ${MAX_MATRIX_LABEL_CHARS} characters (two or three words)`,
+    );
+  });
+
+  it.each([2, 3])(
+    "a size-s note of charsInSlot(%i) characters fits its slot, one more doesn't",
+    (n) => {
+      const slot = rowSlots(n)[0];
+      const chars = charsInSlot(n, TEXT_SIZE.s);
+      const width = (c: number) => textBox("x".repeat(c), TEXT_SIZE.s).w;
+      expect(width(chars) + gap).toBeLessThanOrEqual(slot.x1 - slot.x0);
+      expect(width(chars + 1) + gap).toBeGreaterThan(slot.x1 - slot.x0);
+      expect(SKETCH_SYSTEM_PROMPT).toMatch(
+        new RegExp(
+          `\\b${chars}( characters)? in a slot of ${n === 2 ? "two" : "three"}`,
+        ),
+      );
+    },
+  );
+});
+
+describe("streamedNarration: the narration of a sketch still streaming", () => {
+  it.each([
+    ["nothing yet", "", undefined],
+    ["the key, not its value", '{"narration":', undefined],
+    ["a string still open", '{"narration":"Here it', undefined],
+    ["an escape still open", '{"narration":"Here \\', undefined],
+    [
+      "a closed string",
+      '{"narration":"Here it is.","objects":[',
+      "Here it is.",
+    ],
+    [
+      "the whole answer",
+      '{"narration":"[[c]]Hi.","objects":[],"actions":[]}',
+      "[[c]]Hi.",
+    ],
+    ["spaces and newlines around", '\n{ \n "narration" : "Hi." ,', "Hi."],
+    [
+      "escaped quotes and a backslash",
+      '{"narration":"say \\"hi\\" \\\\ ok","objects"',
+      'say "hi" \\ ok',
+    ],
+    ["a Unicode escape", '{"narration":"caf\\u00e9","', "café"],
+    ["the empty narration", '{"narration":"",', ""],
+    [
+      "narration not the first field",
+      '{"objects":[],"narration":"Hi."',
+      undefined,
+    ],
+    ["text before the object", 'Sure: {"narration":"Hi."', undefined],
+    ["a bad escape", '{"narration":"\\x41",', undefined],
+  ])("%s", (_name, text, expected) => {
+    expect(streamedNarration(text)).toBe(expected);
+  });
+
+  it("property: every prefix of a wire sketch gives nothing, or exactly its narration", () => {
+    fc.assert(
+      fc.property(fc.string({ unit: "grapheme" }), (narration) => {
+        const text = JSON.stringify({ narration, objects: [], actions: [] });
+        for (let i = 0; i <= text.length; i++) {
+          const got = streamedNarration(text.slice(0, i));
+          if (got !== undefined) expect(got).toBe(narration);
+        }
+        expect(streamedNarration(text)).toBe(narration);
+      }),
+    );
   });
 });
