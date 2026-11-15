@@ -3,7 +3,13 @@
 // so the page's conversation is qa/fakeConversation.ts, exposed as
 // window.__qaFake for these tests.
 import { expect, type Page, test } from "@playwright/test";
-import { answer, askByVoice, askInput, carryOn } from "./support/tutor";
+import {
+  answer,
+  askByVoice,
+  askInput,
+  cardButton,
+  carryOn,
+} from "./support/tutor";
 import { lessonOf, narratedReply } from "./support/answer";
 
 const ASK = {
@@ -309,9 +315,13 @@ test.describe("Ask messages (ARCHITECTURE.md section 7)", () => {
     await askAndConnect(page);
     await page.evaluate(() => window.__qaFake?.drop());
     await expect(notice(page)).toHaveText(ASK.ended);
-    await expect(state(page)).toHaveAttribute("data-state", "paused");
-    // Ask again clears it.
-    await askAndConnect(page);
+    // Ask stays open with Retry, not closed (rehearsal finding 2); Retry clears it.
+    await expect(state(page)).toHaveAttribute("data-state", "asking");
+    await cardButton(page, "Retry").click();
+    await expect(page.getByTestId("ask-panel")).toHaveAttribute(
+      "data-phase",
+      "connected",
+    );
     await expect(notice(page)).toHaveCount(0);
   });
 
@@ -485,7 +495,10 @@ test.describe("Ask robustness (issue #84)", () => {
     await askInput(page).fill("Why?");
     await askInput(page).press("Enter");
     await expect(notice(page)).toHaveText(ASK.ended);
-    await expect(state(page)).toHaveAttribute("data-state", "paused");
+    await expect(state(page)).toHaveAttribute("data-state", "asking");
+    // Retry sends the question again on a fresh session.
+    await cardButton(page, "Retry").click();
+    await expect(answer(page)).toBeVisible();
   });
 
   test(`WebRTC can't connect, and the websocket can't either: "${ASK.unavailable}"`, async ({

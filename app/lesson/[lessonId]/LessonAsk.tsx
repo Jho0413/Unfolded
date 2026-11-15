@@ -2,8 +2,7 @@
 // The Ask panel on the lesson page (ROADMAP Q3-Q5, ARCHITECTURE.md section 8),
 // mounted through the Player's `renderAsk` and `renderBoard`:
 //
-// - LessonAsk: the panel, wired to the machine (ask, closeAsk,
-//   agentDisconnected), the client tools of qa/tools.ts (draw_scene included)
+// - LessonAsk: the panel, wired to the machine (ask and closeAsk), the client tools of qa/tools.ts (draw_scene included)
 //   and the context of qa/context.ts. What the learner asks goes to `signals`
 //   (qa/askSignals.ts, issue #102); a control tool marks it a command.
 // - LessonBoard: while asking, the frozen board with Ask's highlights on top,
@@ -165,10 +164,6 @@ export function LessonAsk({
     (how: AskClose) => leaveAsk(send, session, how, stateRef.current),
     [send, session],
   );
-  const onDropped = useCallback(() => {
-    session.close();
-    send({ type: "agentDisconnected" });
-  }, [send, session]);
   const asking = state.kind === "asking";
 
   const goTo = state.kind === "asking" ? state.goTo : undefined;
@@ -194,7 +189,6 @@ export function LessonAsk({
       tools={tools}
       onAsk={onAsk}
       onClose={onClose}
-      onAgentDisconnected={onDropped}
       canAsk={player.can({ type: "ask" })}
       captions={captions}
       live={voice.live}

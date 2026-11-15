@@ -1,6 +1,6 @@
 "use client";
 // The /dev/ask page's client side: the player machine, event buttons, and the
-// Ask panel wired to ask / closeAsk / agentDisconnected and the client tools
+// Ask panel wired to ask / closeAsk and the client tools
 // (qa/tools.ts), as P6 will wire them. The board is a list of objects here;
 // highlights are listed, and thrown away when Ask closes (section 8).
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
@@ -225,10 +225,6 @@ export function AskDemo({ replay }: { replay: boolean }) {
     (state.kind === "asking" && state.from.kind === "loading");
   const onAsk = useCallback(() => send({ type: "ask" }), [send]);
   const onClose = useCallback(() => send({ type: "closeAsk" }), [send]);
-  const onDropped = useCallback(
-    () => send({ type: "agentDisconnected" }),
-    [send],
-  );
 
   const events: [string, PlayerEvent][] = [
     ["stepReady", { type: "stepReady", i: step }],
@@ -274,7 +270,6 @@ export function AskDemo({ replay }: { replay: boolean }) {
           tools={tools}
           onAsk={onAsk}
           onClose={onClose}
-          onAgentDisconnected={onDropped}
         />
         <div style={{ maxWidth: 960, border: "1px solid #e2e8f0" }}>
           <AskBoardView machine={machine} asking={state.kind === "asking"} />

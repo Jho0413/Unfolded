@@ -199,11 +199,14 @@ describe("askCard", () => {
     expect(v.buttons).toEqual(carryOn);
   });
 
-  it("failed (no session): Stopped to listen, Carry on", () => {
+  it("failed (no session, or it dropped): Stopped to listen, Retry (retry), Carry on", () => {
     const v = askCard(ask({ phase: "failed", question: typed }));
     expect(v.status).toBe(CARD_STATUS.stopped);
     expect(v.body).toMatchObject({ question: typed, wait: null });
-    expect(v.buttons).toEqual(carryOn);
+    expect(v.buttons).toEqual([
+      { label: "Retry", action: "retry", primary: true },
+      ...carryOn,
+    ]);
   });
 
   it("dropped (phase idle while open, not replay): Stopped to listen, nothing waiting, Carry on", () => {
