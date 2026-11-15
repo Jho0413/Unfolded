@@ -113,6 +113,30 @@ test("Got it, carry on: back to the lesson, narrating again; the agent hears Bac
   await expect.poll(() => contextUpdates(page)).toContain(ANSWER_CONTEXT.back);
 });
 
+test("Got it, carry on: the narration resumes where it stopped, not from the start of the step", async ({
+  page,
+}) => {
+  await using run = await savedRun("e2e-answer-resume-point");
+  await fakeSketches(page);
+  await page.goto(`/lesson/${run.lessonId}`);
+  await expect(player(page)).toHaveAttribute("data-state", "playing");
+  const audio = page.getByTestId("player-audio");
+  const now = () => audio.evaluate((a: HTMLAudioElement) => a.currentTime);
+  // Let the step play a little way in, then ask.
+  await expect.poll(now).toBeGreaterThan(1);
+  await askQuestion(page, "can you draw it?");
+  await expect(answerView(page)).toBeVisible();
+  const stoppedAt = await now();
+  expect(stoppedAt).toBeGreaterThan(1);
+  await carryOn(page).click();
+  await expect(player(page)).toHaveAttribute("data-state", "playing");
+  await expect(player(page)).toHaveAttribute("data-step", "0");
+  // Resumed from where it stopped (give or take a moment of playback), never from 0.
+  const resumedAt = await now();
+  expect(resumedAt).toBeGreaterThanOrEqual(stoppedAt - 0.1);
+  expect(resumedAt).toBeLessThan(stoppedAt + 1);
+});
+
 test("the Back to step N chip: back to the lesson, paused where they were", async ({
   page,
 }) => {
