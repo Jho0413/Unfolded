@@ -125,6 +125,16 @@ describe("the sketch prompt", () => {
     }
   });
 
+  it("never draws empty matrices as placeholders, and keeps arrows and their labels clear of other objects", () => {
+    for (const text of [
+      "never draw an empty matrix or empty brackets as a placeholder",
+      "draw it as a latex symbol instead, with its size in the formula",
+      "place objects so that line passes through no other object and no label",
+      "Its label sits beside the middle of the line, so leave free space there",
+    ])
+      expect(SKETCH_SYSTEM_PROMPT).toContain(text);
+  });
+
   it("lays a fresh answer out from the validator's template: title, content area, takeaway, count, area and gaps", () => {
     const { title, content, takeaway, area, maxContent, maxArrows, gap } =
       ANSWER_TEMPLATE;
