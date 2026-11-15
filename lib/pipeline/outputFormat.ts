@@ -72,6 +72,19 @@ const wireOptional = {
   value: z.string().optional(),
 };
 
+/**
+ * A paper passage on the wire: the contract's CuedPaperRef without its bounds, which
+ * structured output doesn't enforce. A ref that breaks them (an empty or over-long quote, page
+ * 0) is dropped in wireToStep with a warning instead of failing the step: a step is still
+ * worth showing without a quote (#98).
+ */
+const WirePaperRef = z.object({
+  page: z.number().int(),
+  quote: z.string(),
+  label: z.string().optional(),
+  cue: z.string().optional(),
+});
+
 export const WireStep = z.object({
   title: z.string(),
   narration: z.string(),
@@ -84,7 +97,7 @@ export const WireStep = z.object({
     }),
   ),
   /** Last, after everything the board needs (#98). An empty list isn't saved. */
-  paperRefs: z.array(CuedPaperRef).optional(),
+  paperRefs: z.array(WirePaperRef).optional(),
 });
 export type WireStep = z.infer<typeof WireStep>;
 
@@ -114,12 +127,17 @@ export const SKETCH_OUTPUT_FORMAT: Anthropic.JSONOutputFormat = {
 export const wireErrors = {
   moveNeedsTo: (id: string) => `move needs to "${id}"`,
   writeNeedsValue: (id: string) => `write needs value "${id}"`,
+  /** Not a rejection: the ref is dropped and this is logged (#98). */
+  badPaperRef: (i: number, problems: readonly string[]) =>
+    `paperRefs.${i} dropped: ${problems.join("; ")}`,
 } as const;
 
 /** A converted step or sketch, without the actions that couldn't convert, and why. */
 export interface Converted<T> {
   value: T;
   errors: string[];
+  /** What was dropped without rejecting the value (a malformed paper ref), for the log. */
+  warnings?: string[];
 }
 
 type WireAction = WireStep["actions"][number] | WireSketch["actions"][number];
@@ -168,16 +186,24 @@ function toActions<W extends WireAction, A>(
 /** The wire step as a shared Step (pure). The inverse of reading a Step as a WireStep. */
 export function wireToStep(wire: WireStep): Converted<Step> {
   const actions = toActions(wire.actions, (w) => ({ cue: w.cue }));
+  const paperRefs: CuedPaperRef[] = [];
+  const warnings: string[] = [];
+  (wire.paperRefs ?? []).forEach((ref, i) => {
+    const parsed = CuedPaperRef.safeParse(ref);
+    if (parsed.success) paperRefs.push(parsed.data);
+    else warnings.push(wireErrors.badPaperRef(i, schemaErrors(parsed.error)));
+  });
   return {
     value: {
       title: wire.title,
       narration: wire.narration,
       objects: wire.objects,
       actions: actions.value satisfies CuedAction[],
-      ...(wire.paperRefs !== undefined &&
-        wire.paperRefs.length > 0 && { paperRefs: wire.paperRefs }),
+      // An empty list isn't saved: a step with no passages has no paperRefs.
+      ...(paperRefs.length > 0 && { paperRefs }),
     },
     errors: actions.errors,
+    ...(warnings.length > 0 && { warnings }),
   };
 }
 
@@ -215,7 +241,13 @@ function check<W, T>(
   if (!parsed.success) return { ok: false, errors: schemaErrors(parsed.error) };
   const converted = convert(parsed.data);
   const result = validate(converted.value);
-  if (converted.errors.length === 0) return result;
+  if (converted.errors.length === 0)
+    return result.ok && converted.warnings !== undefined
+      ? {
+          ...result,
+          warnings: [...converted.warnings, ...(result.warnings ?? [])],
+        }
+      : result;
   return {
     ok: false,
     errors: [

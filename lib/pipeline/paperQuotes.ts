@@ -34,7 +34,10 @@ export function checkPaperQuotes(
     return {
       ok: true,
       value: rest,
-      warnings: [quoteErrors.noPaper(paperRefs.length)],
+      warnings: [
+        ...(result.warnings ?? []),
+        quoteErrors.noPaper(paperRefs.length),
+      ],
     };
 
   const errors: string[] = [];
