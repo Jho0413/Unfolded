@@ -1,0 +1,484 @@
+/*
+ * The upload page (ARCHITECTURE.md section 5.1): the pitch and the picker on the left, a
+ * miniature of the lesson page on the right (hidden on phones). Colours are player/theme.css's.
+ */
+.home {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(380px, 40%) 1fr;
+}
+.home * {
+  box-sizing: border-box;
+}
+
+/* ---------------------------------------------------------------- left */
+
+.left {
+  display: flex;
+  flex-direction: column;
+  padding: 26px 44px 40px;
+  border-right: 1px solid var(--line);
+}
+.top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: auto;
+}
+/* The brand's own padding lines it up in the lesson outline; here it sits on the edge. */
+.top > div {
+  padding: 0;
+}
+.pitch {
+  margin: 60px 0 auto;
+  max-width: 440px;
+}
+.kicker {
+  font: 11px var(--mono-font);
+  color: var(--accent);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0;
+}
+.ok {
+  color: var(--ok);
+}
+.headline {
+  font-family: var(--wb-font);
+  font-weight: 400;
+  font-size: clamp(32px, 3.4vw, 46px);
+  line-height: 1.1;
+  margin: 12px 0 14px;
+}
+.lede {
+  color: var(--muted);
+  font-size: 15px;
+  margin: 0 0 30px;
+}
+
+.pick {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  border-radius: 14px;
+  padding: 14px 16px;
+  cursor: pointer;
+  position: relative;
+  transition:
+    border-color 0.2s,
+    background 0.2s;
+}
+.pick:hover,
+.over {
+  border-color: var(--accent);
+}
+.over {
+  background: var(--accent-fill);
+}
+.pick:focus-within {
+  outline: 2px solid var(--answer);
+  outline-offset: 2px;
+}
+.pick b {
+  display: block;
+  font-weight: 500;
+}
+.pick small {
+  color: var(--muted);
+  font-size: 12px;
+}
+/* Visually hidden, still focusable and labelled by the picker around it. */
+.fileInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+}
+.plus {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: var(--bg);
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  flex: none;
+}
+
+.error {
+  color: var(--error);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 12px 0 0;
+}
+
+.samples {
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.samples > span {
+  width: 100%;
+}
+.chip {
+  color: var(--body);
+  text-decoration: none;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  padding: 4px 12px;
+  background: var(--surface);
+  transition: border-color 0.2s;
+}
+.chip:hover {
+  border-color: var(--faint);
+  color: var(--ink);
+}
+
+/* Uploading */
+.fileName {
+  font-family: var(--wb-font);
+  font-weight: 400;
+  font-size: 32px;
+  line-height: 1.15;
+  margin: 12px 0 20px;
+  overflow-wrap: anywhere;
+}
+.stages {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+.stages li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--faint);
+  transition: color 0.3s;
+}
+.dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-2);
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  flex: none;
+}
+.stages li[data-status="on"] {
+  color: var(--ink);
+}
+.stages li[data-status="on"] .dot {
+  border-color: var(--accent);
+  border-top-color: transparent;
+  animation: spin 0.8s linear infinite;
+}
+.stages li[data-status="done"] {
+  color: var(--body);
+}
+.stages li[data-status="done"] .dot {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.stages li[data-status="done"] .dot::before {
+  content: "✓";
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.eta {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 16px 0 0;
+}
+
+/* Planned */
+.cover {
+  display: block;
+  width: 100%;
+  max-width: 320px;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  margin-bottom: 22px;
+}
+.planTitle {
+  font-family: var(--wb-font);
+  font-weight: 400;
+  font-size: 30px;
+  line-height: 1.15;
+  margin: 10px 0 8px;
+}
+.ready .lede {
+  margin-bottom: 22px;
+}
+.actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--ink);
+  border-radius: 10px;
+  padding: 11px 18px;
+  background: var(--ink);
+  color: var(--bg);
+  font: 500 15px var(--ui-font);
+  cursor: pointer;
+  text-decoration: none;
+}
+.btn:hover {
+  opacity: 0.9;
+}
+.ghost {
+  background: transparent;
+  color: var(--body);
+  border-color: var(--line-2);
+}
+
+.keys {
+  color: var(--faint);
+  font-size: 12px;
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 40px;
+}
+.keys kbd {
+  font: 11px var(--mono-font);
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  padding: 1px 6px;
+  color: var(--muted);
+}
+
+/* ---------------------------------------------------------------- right: the miniature lesson */
+
+.right {
+  padding: 34px;
+  display: grid;
+  place-items: center;
+  position: relative;
+  overflow: hidden;
+}
+.caption {
+  position: absolute;
+  top: 18px;
+  right: 26px;
+  margin: 0;
+  font: 11px var(--mono-font);
+  color: var(--faint);
+}
+.frame {
+  width: min(900px, 100%);
+  aspect-ratio: 16 / 10;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--bg);
+  box-shadow: var(--shadow);
+  display: grid;
+  grid-template-columns: 26% 1fr 30%;
+  gap: 10px;
+  padding: 12px;
+  font-size: 11px;
+  transform: perspective(1600px) rotateY(-6deg) rotateX(2deg);
+  transition: transform 0.6s;
+}
+.straight {
+  transform: none;
+}
+
+.outline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  min-height: 0;
+  overflow: hidden;
+}
+.outlineKind {
+  font: 9px var(--mono-font);
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0;
+}
+.outlineTitle {
+  font-weight: 600;
+  font-size: 12px;
+  line-height: 1.35;
+  margin: 0 0 8px;
+  min-height: 16px;
+  display: flex;
+  align-items: center;
+}
+.rows {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  counter-reset: row;
+}
+.rows li {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 6px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  color: var(--body);
+  line-height: 1.35;
+  counter-increment: row;
+  animation: rowIn 0.3s ease both;
+  animation-delay: calc(60ms + var(--i) * 90ms);
+}
+/* The number is CSS, so a row's text is just its title. */
+.rows li::before {
+  content: counter(row, decimal-leading-zero);
+  font: 9px var(--mono-font);
+  color: var(--faint);
+}
+.rows li:first-child {
+  background: var(--surface);
+  border-color: var(--line-2);
+}
+@keyframes rowIn {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+}
+.skel {
+  display: block;
+  flex: 1;
+  height: 9px;
+  border-radius: 4px;
+  background: var(--surface-2);
+}
+.outlineTitle .skel {
+  flex: 0 0 70%;
+}
+
+.board {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  position: relative;
+  overflow: hidden;
+  background: var(--board) radial-gradient(var(--dots) 1.1px, transparent 1.1px)
+    0 0 / 14px 14px;
+}
+.drawing {
+  position: absolute;
+  inset: 0 0 34% 0;
+  display: grid;
+  align-items: center;
+}
+.tutor {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  bottom: 8%;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 11px;
+  font-size: 11px;
+  line-height: 1.45;
+  box-shadow: var(--shadow);
+}
+.tutor em {
+  font-style: normal;
+  color: var(--muted);
+  font-size: 9px;
+  display: block;
+  margin-bottom: 3px;
+}
+.tutor b {
+  font-weight: 600;
+}
+
+.pdf {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.line {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-2);
+}
+.line[data-line="title"] {
+  width: 60%;
+  margin: 0 auto 6px;
+}
+.line[data-line="short"] {
+  width: 80%;
+}
+.line[data-line="quoteEnd"] {
+  width: 70%;
+}
+.line[data-line="long"] {
+  width: 90%;
+}
+.line[data-line="half"] {
+  width: 50%;
+}
+.line[data-lit] {
+  background: var(--accent);
+  opacity: 0.55;
+}
+
+/* ---------------------------------------------------------------- phones and reduced motion */
+
+@media (max-width: 900px) {
+  .home {
+    grid-template-columns: 1fr;
+  }
+  .left {
+    border-right: 0;
+  }
+  .right {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .frame,
+  .pick,
+  .chip,
+  .stages li {
+    transition: none;
+  }
+  .rows li {
+    animation: none;
+  }
+  /* A still dot in place of the spinner. */
+  .stages li[data-status="on"] .dot {
+    animation: none;
+    border-top-color: var(--accent);
+    background: var(--accent-fill);
+  }
+}

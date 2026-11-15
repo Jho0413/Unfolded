@@ -78,6 +78,11 @@ export const config = {
      */
     fixture: "claude-sketch.message.json",
   },
+  /**
+   * Ready-made lessons the upload page offers as samples, by run folder. A sample shows only
+   * when its run's plan.json is on this server (app/samples.ts), labelled with the plan's title.
+   */
+  samples: ["m2-attention", "calibrating-modern-neural-netw-647864c1"],
   /** Upload cap: our own choice, not Claude's limit (ARCHITECTURE.md section 5.1). */
   maxPdfMb: 32,
   /** Claude's page limit for a PDF document (a 1M-context model), checked before uploading. */
