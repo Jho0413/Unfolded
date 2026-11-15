@@ -22,7 +22,7 @@ import {
 } from "@/lib/pipeline/prompts/board";
 import { retryPromptFor } from "@/lib/pipeline/prompts/retry";
 
-const { area, arrowGap, content, gap, maxObjects, takeaway, title } =
+const { area, arrowGap, content, gap, maxArrows, maxContent, takeaway, title } =
   ANSWER_TEMPLATE;
 /** The sizes the validator estimates boxes with (shared/boxes.ts), in whole pixels. */
 const LATEX_GLYPH_PX = Math.round(LATEX_FONT * KATEX_EM * GLYPH_EM);
@@ -52,10 +52,10 @@ Draw only what the description asks for, small and readable: a few objects, shor
 
 When the board is empty, the sketch is the whole answer, on its own clean board drawn in the lesson's style. Lay it out from this template:
 
-- Title: one text object of size "m", a few words naming the idea, at x ${title.x}, y ${title.y}.
-- Content: centred in the area from x ${content.x0} to ${content.x1} and y ${content.y0} to ${content.y1}. Lay it out in one row read left to right (or one column read top to bottom), the group centred across the area: two or three matrices or formulas joined by arrows reads best.
-- Takeaway (optional): one short line, a text object of size "s", at x ${takeaway.x}, y ${takeaway.y}.
-- At most ${maxObjects} objects in all, the title, takeaway and arrows included. Every object's whole box stays inside x ${area.x0} to ${area.x1} and y ${area.y0} to ${area.y1}, a matrix's label included.
+- Title: one text object of size "${title.size}", a few words naming the idea, at x ${title.x}, y ${title.y}.
+- Content: every other object's whole box, a matrix's label included, inside the content area from x ${content.x0} to ${content.x1} and y ${content.y0} to ${content.y1}. Lay it out in one row read left to right (or one column read top to bottom), the group centred in the area: two or three matrices or formulas joined by arrows reads best.
+- Takeaway (optional): one short line, a text object of size "${takeaway.size}", at x ${takeaway.x}, y ${takeaway.y}.
+- At most ${maxContent} objects besides arrows (the title and takeaway included), and at most ${maxArrows} arrows. Every object's whole box stays inside x ${area.x0} to ${area.x1} and y ${area.y0} to ${area.y1}.
 - Sizes: text size "m" for content and "s" for notes and the takeaway; "l" only for a single symbol. A text is about ${TEXT_CHAR_EM} of its size wide per character, plus one size (sizes s ${TEXT_SIZE.s}, m ${TEXT_SIZE.m}, l ${TEXT_SIZE.l}); a formula about ${LATEX_GLYPH_PX} wide per symbol and ${LATEX_LINE_PX} high per line; a matrix's label reaches ${MATRIX_LABEL_PX} above its top. Keep every two objects at least ${gap} apart, and two that an arrow joins at least ${arrowGap} apart, so the arrow shows.
 - Maths: anything with a subscript, superscript, fraction, root or Greek letter is a latex object (d_k is the latex "d_k"). Never write "_" or "^" in a text, a label or a matrix cell: plain text is for words and plain numbers.
 - Highlight at most one or two key objects or cells.

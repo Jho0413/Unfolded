@@ -3,7 +3,14 @@
 // draws, so it must stay free of node-only imports.
 import katex from "katex";
 import type { z } from "zod";
-import { type Box, boxGap, boxInside, objectBox } from "./boxes";
+import {
+  type Box,
+  boxGap,
+  boxInside,
+  objectBox,
+  TEXT_SIZE,
+  textBox,
+} from "./boxes";
 import { KATEX_OPTIONS } from "./latex";
 import {
   type Action,
@@ -82,7 +89,9 @@ export const errors = {
   narrationEmpty: () => "narration empty",
   cantAnchorToArrow: (id: string) => `can't anchor to "${id}"`,
   tooManyObjects: (n: number) =>
-    `too many objects (${n}; an answer board takes at most ${ANSWER_TEMPLATE.maxObjects})`,
+    `too many objects (${n}; an answer board takes at most ${ANSWER_TEMPLATE.maxContent} besides its arrows)`,
+  tooManyArrows: (n: number) =>
+    `too many arrows (${n}; an answer board takes at most ${ANSWER_TEMPLATE.maxArrows})`,
   outsideAnswerArea: (id: string) => `outside the answer area "${id}"`,
   tooClose: (a: string, b: string, gap: number) =>
     `"${a}" and "${b}" are too close (leave ${gap} between them)`,
@@ -90,31 +99,51 @@ export const errors = {
     `"_" or "^" in plain text "${id}" (write maths as a latex object)`,
 } as const;
 
+/** One line of text, a title or a takeaway, centred at x, y in a text size. */
+type TemplateLine = { x: number; y: number; size: keyof typeof TEXT_SIZE };
+
+const TITLE: TemplateLine = { x: 800, y: 110, size: "m" };
+const TAKEAWAY: TemplateLine = { x: 800, y: 810, size: "s" };
+const GAP = 40;
+/** Half a line of text in `size`: how far a line's box reaches above and below its y. */
+const halfLine = (line: TemplateLine) =>
+  textBox("", TEXT_SIZE[line.size]).h / 2;
+
 /**
  * A fresh sketch is a drawn answer on its own clean board, the Answer view (ARCHITECTURE.md
  * sections 5.6 and 8), laid out from one template: a short title at the top centre, the
- * content centred in the content area, an optional one-line takeaway under it. The prompt
- * describes it from these numbers, and checkSketch holds a fresh sketch to `maxObjects`,
- * `area` and the gaps (every object's estimated box, shared/boxes.ts): `gap` between any two
- * objects, `arrowGap` between two an arrow joins, so the arrow shows. The area keeps clear of
- * the Answer view's tag and chip in the board's top corners.
+ * content in one row or column inside the content area, an optional one-line takeaway under
+ * it. The content area is the space the title and takeaway leave with `gap` around them, so
+ * a layout that follows the template always passes. The prompt describes it from these
+ * numbers, and checkSketch holds a fresh sketch to the counts, `area` and the gaps (every
+ * object's estimated box, shared/boxes.ts): `gap` between any two objects, `arrowGap` between
+ * two an arrow joins, so the arrow shows. The area keeps clear of the Answer view's tag and
+ * chip above it (app/lesson/[lessonId]/AnswerView.module.css).
  */
 export const ANSWER_TEMPLATE = {
-  maxObjects: 8,
+  /** Objects other than arrows: texts, formulas and matrices, the title and takeaway included. */
+  maxContent: 8,
+  maxArrows: 6,
   area: { x0: 120, y0: 60, x1: 1480, y1: 860 },
-  title: { x: 800, y: 110 },
-  content: { x0: 200, y0: 200, x1: 1400, y1: 760 },
-  takeaway: { x: 800, y: 810 },
-  gap: 40,
+  title: TITLE,
+  content: {
+    x0: 200,
+    y0: Math.ceil(TITLE.y + halfLine(TITLE) + GAP),
+    x1: 1400,
+    y1: Math.floor(TAKEAWAY.y - halfLine(TAKEAWAY) - GAP),
+  },
+  takeaway: TAKEAWAY,
+  gap: GAP,
   arrowGap: 80,
 } as const satisfies {
-  maxObjects: number;
+  maxContent: number;
+  maxArrows: number;
   gap: number;
   arrowGap: number;
   area: Box;
   content: Box;
-  title: { x: number; y: number };
-  takeaway: { x: number; y: number };
+  title: TemplateLine;
+  takeaway: TemplateLine;
 };
 
 function schemaErrors(error: z.ZodError): string[] {
@@ -360,15 +389,18 @@ export function checkSketch(sketch: Sketch, ctx: SketchContext): string[] {
 const PLAIN_MATHS_RE = /[_^]/;
 
 /**
- * The answer template's rules for a fresh sketch: at most `maxObjects` objects, each one's
+ * The answer template's rules for a fresh sketch: at most `maxContent` objects besides at
+ * most `maxArrows` arrows, each one's
  * estimated box (and an arrow's point ends) inside `area` with room around it, and no maths
  * in plain text (text, labels, matrix cells, and the values written into them).
  */
 function checkAnswerLayout(sketch: Sketch): string[] {
   const out: string[] = [];
-  const { maxObjects, area } = ANSWER_TEMPLATE;
-  if (sketch.objects.length > maxObjects)
-    out.push(errors.tooManyObjects(sketch.objects.length));
+  const { maxContent, maxArrows, area } = ANSWER_TEMPLATE;
+  const arrows = sketch.objects.filter((o) => o.kind === "arrow").length;
+  const content = sketch.objects.length - arrows;
+  if (content > maxContent) out.push(errors.tooManyObjects(content));
+  if (arrows > maxArrows) out.push(errors.tooManyArrows(arrows));
   const inArea = (p: { x: number; y: number }) =>
     boxInside({ x0: p.x, y0: p.y, x1: p.x, y1: p.y }, area);
   out.push(...checkGaps(sketch.objects));
@@ -410,7 +442,8 @@ function checkGaps(objects: readonly BoardObject[]): string[] {
   boxed.forEach((a, i) => {
     for (const b of boxed.slice(0, i)) {
       const need = joined.has(pair(a.id, b.id)) ? arrowGap : gap;
-      if (boxGap(a.box, b.box) < need)
+      // Estimated boxes are fractional: a gap a rounding error short still counts.
+      if (boxGap(a.box, b.box) < need - 1e-6)
         out.push(errors.tooClose(b.id, a.id, need));
     }
   });

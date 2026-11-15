@@ -126,13 +126,23 @@ describe("the sketch prompt", () => {
   });
 
   it("lays a fresh answer out from the validator's template: title, content area, takeaway, count, area and gaps", () => {
-    const { title, content, takeaway, area, maxObjects, gap, arrowGap } =
-      ANSWER_TEMPLATE;
+    const {
+      title,
+      content,
+      takeaway,
+      area,
+      maxContent,
+      maxArrows,
+      gap,
+      arrowGap,
+    } = ANSWER_TEMPLATE;
     for (const text of [
-      `at x ${title.x}, y ${title.y}`,
+      `of size "${title.size}", a few words naming the idea, at x ${title.x}, y ${title.y}`,
+      `a text object of size "${takeaway.size}", at x ${takeaway.x}, y ${takeaway.y}`,
       `from x ${content.x0} to ${content.x1} and y ${content.y0} to ${content.y1}`,
       `at x ${takeaway.x}, y ${takeaway.y}`,
-      `At most ${maxObjects} objects`,
+      `At most ${maxContent} objects besides arrows`,
+      `at most ${maxArrows} arrows`,
       `inside x ${area.x0} to ${area.x1} and y ${area.y0} to ${area.y1}`,
       `at least ${gap} apart`,
       `at least ${arrowGap} apart`,

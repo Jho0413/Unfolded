@@ -3,6 +3,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import demoM1 from "@/lib/fakes/fixtures/demo-m1.step.json";
+import { type Box, boxGap, objectBox } from "@/shared/boxes";
 import {
   type BoardObject,
   type BoardState,
@@ -691,23 +692,49 @@ describe("validate: a fresh sketch's answer template (#90)", () => {
     expectValid(validateSketch(answer(title, a, f, join), FRESH));
   });
 
-  it("More than 8 objects: rejected: too many objects", () => {
-    const many = Array.from(
-      { length: ANSWER_TEMPLATE.maxObjects + 1 },
-      (_, i): BoardObject => ({
+  describe("counts: at most 8 objects besides arrows, and at most 6 arrows", () => {
+    /** Small texts on a 3 x 3 grid, well apart. */
+    const texts = (n: number) =>
+      Array.from({ length: n }, (_, i): BoardObject => ({
         kind: "text",
         id: `t${i}`,
         x: 200 + (i % 3) * 500,
         y: 200 + Math.floor(i / 3) * 200,
         text: "x",
         size: "s",
-      }),
-    );
-    expectErrors(
-      validateSketch(answer(...many), FRESH),
-      errors.tooManyObjects(ANSWER_TEMPLATE.maxObjects + 1),
-    );
-    expectValid(validateSketch(answer(...many.slice(1)), FRESH));
+      }));
+    const arrow = (from: number, to: number): BoardObject => ({
+      kind: "arrow",
+      id: `r${from}_${to}`,
+      from: { id: `t${from}` },
+      to: { id: `t${to}` },
+    });
+    const sixArrows = [
+      arrow(0, 1),
+      arrow(1, 2),
+      arrow(3, 4),
+      arrow(4, 5),
+      arrow(6, 7),
+      arrow(0, 3),
+    ];
+
+    it("8 objects and 6 arrows: valid", () => {
+      expectValid(validateSketch(answer(...texts(8), ...sixArrows), FRESH));
+    });
+
+    it("9 objects besides arrows: rejected: too many objects", () => {
+      expectErrors(
+        validateSketch(answer(...texts(9)), FRESH),
+        errors.tooManyObjects(ANSWER_TEMPLATE.maxContent + 1),
+      );
+    });
+
+    it("7 arrows: rejected: too many arrows", () => {
+      expectErrors(
+        validateSketch(answer(...texts(8), ...sixArrows, arrow(1, 4)), FRESH),
+        errors.tooManyArrows(ANSWER_TEMPLATE.maxArrows + 1),
+      );
+    });
   });
 
   it('An object whose estimated box leaves the answer area: rejected: outside the answer area "x"', () => {
@@ -825,66 +852,213 @@ describe("validate: a fresh sketch's answer template (#90)", () => {
 
 describe("validate: the answer template (property, #90)", () => {
   const FRESH = { board: lessonBoard, fresh: true };
+  const { area, content, title, takeaway, gap, arrowGap } = ANSWER_TEMPLATE;
   /** A plain word or number, never "_" or "^". */
   const word = fc.stringMatching(/^[a-z0-9 .]{1,12}$/);
-  /** Up to 8 small texts in a grid of slots, each inside the content area. */
-  const laidOut = fc
-    .uniqueArray(fc.integer({ min: 0, max: 11 }), {
-      minLength: 1,
-      maxLength: ANSWER_TEMPLATE.maxObjects,
-    })
-    .chain((slots) =>
-      fc.tuple(
-        fc.constant(slots),
-        fc.array(word, { minLength: slots.length, maxLength: slots.length }),
-      ),
-    )
-    .map(([slots, words]): Sketch => ({
-      objects: slots.map((slot, i) => ({
-        kind: "text",
-        id: `t${i}`,
-        x: 350 + (slot % 4) * 300,
-        y: 250 + Math.floor(slot / 4) * 200,
-        text: words[i],
-        size: "s",
-      })),
-      actions: [],
-    }));
+  const cellValue = fc.stringMatching(/^[0-9.]{1,3}$/);
+  const FORMULAS = [
+    "x",
+    "\\frac{a}{b}",
+    "q\\cdot k=\\sum q_i k_i",
+    "\\sqrt{d_k}",
+    "e^{s_i}",
+    "\\begin{bmatrix}1&2\\\\3&4\\end{bmatrix}",
+  ];
+  type Placed = Exclude<BoardObject, { kind: "arrow" | "image" }>;
 
-  it("any answer laid out in the template's grid with plain words is valid", () => {
+  /** A text, formula or matrix of any size, at the origin (`id` is set when placed). */
+  const contentObject: fc.Arbitrary<Placed> = fc.oneof(
+    fc.record({
+      kind: fc.constant("text" as const),
+      id: fc.constant(""),
+      x: fc.constant(0),
+      y: fc.constant(0),
+      text: word,
+      size: fc.constantFrom("s" as const, "m" as const),
+    }),
+    fc.record({
+      kind: fc.constant("latex" as const),
+      id: fc.constant(""),
+      x: fc.constant(0),
+      y: fc.constant(0),
+      tex: fc.constantFrom(...FORMULAS),
+    }),
+    fc
+      .tuple(fc.integer({ min: 1, max: 3 }), fc.integer({ min: 1, max: 4 }))
+      .chain(([r, c]) =>
+        fc.record({
+          kind: fc.constant("matrix" as const),
+          id: fc.constant(""),
+          x: fc.constant(0),
+          y: fc.constant(0),
+          rows: fc.array(fc.array(cellValue, { minLength: c, maxLength: c }), {
+            minLength: r,
+            maxLength: r,
+          }),
+          label: fc.option(word, { nil: undefined }),
+        }),
+      ),
+  );
+
+  /** Moves an object so its estimated box's top-left corner is at (x0, y0). */
+  function placeAt<T extends Placed>(obj: T, x0: number, y0: number): T {
+    const box = objectBox(obj)!;
+    return { ...obj, x: obj.x + x0 - box.x0, y: obj.y + y0 - box.y0 };
+  }
+  const size = (obj: Placed) => {
+    const b = objectBox(obj)!;
+    return { w: b.x1 - b.x0, h: b.y1 - b.y0 };
+  };
+
+  /**
+   * What the prompt asks for: the title and takeaway at their spots, and the content in one
+   * row or column inside the content area, `arrowGap` apart, pushed to its edges. Null when
+   * the content doesn't fit in one row or column.
+   */
+  const layout = fc
+    .record({
+      items: fc.array(contentObject, { minLength: 1, maxLength: 4 }),
+      titleText: word,
+      takeawayText: fc.option(word, { nil: undefined }),
+      direction: fc.constantFrom("row" as const, "column" as const),
+      start: fc.boolean(),
+      edge: fc.boolean(),
+      arrows: fc.boolean(),
+    })
+    .map((spec): Sketch | null => {
+      const sizes = spec.items.map(size);
+      const along = (s: { w: number; h: number }) =>
+        spec.direction === "row" ? s.w : s.h;
+      const total =
+        sizes.reduce((sum, s) => sum + along(s), 0) +
+        arrowGap * (sizes.length - 1);
+      const room =
+        spec.direction === "row"
+          ? content.x1 - content.x0
+          : content.y1 - content.y0;
+      const across =
+        spec.direction === "row"
+          ? content.y1 - content.y0
+          : content.x1 - content.x0;
+      if (
+        total > room ||
+        sizes.some((s) => (spec.direction === "row" ? s.h : s.w) > across)
+      )
+        return null;
+      // From the content area's start edge, or ending on its far edge.
+      let at =
+        (spec.direction === "row" ? content.x0 : content.y0) +
+        (spec.start ? 0 : room - total);
+      const items = spec.items.map((item, i) => {
+        const s = sizes[i];
+        // Each pushed to one side of the area, across the row or column.
+        const side =
+          spec.direction === "row"
+            ? spec.edge
+              ? content.y0
+              : content.y1 - s.h
+            : spec.edge
+              ? content.x0
+              : content.x1 - s.w;
+        const placed =
+          spec.direction === "row"
+            ? placeAt(item, at, side)
+            : placeAt(item, side, at);
+        at += along(s) + arrowGap;
+        return { ...placed, id: `c${i}` };
+      });
+      const lines: BoardObject[] = [
+        { kind: "text", id: "title", ...title, text: spec.titleText },
+        ...(spec.takeawayText === undefined
+          ? []
+          : [
+              {
+                kind: "text" as const,
+                id: "takeaway",
+                ...takeaway,
+                text: spec.takeawayText,
+              },
+            ]),
+      ];
+      const arrows: BoardObject[] = spec.arrows
+        ? items.slice(1).map((item, i) => ({
+            kind: "arrow",
+            id: `r${i}`,
+            from: { id: items[i].id },
+            to: { id: item.id },
+          }))
+        : [];
+      return { objects: [...lines, ...items, ...arrows], actions: [] };
+    });
+
+  it("a layout that follows the template, any kinds and sizes pushed to the content area's edges, is valid", () => {
     fc.assert(
-      fc.property(laidOut, (sketch) => {
-        expectValid(validateSketch(sketch, FRESH));
+      fc.property(layout, (sketch) => {
+        fc.pre(sketch !== null);
+        expectValid(validateSketch(sketch!, FRESH));
       }),
     );
   });
 
-  it("moving any one object's centre off the area is always rejected, naming it", () => {
+  it("pushing any content object past the answer area is rejected, naming it", () => {
     fc.assert(
       fc.property(
-        laidOut,
+        layout,
         fc.nat(),
         fc.constantFrom("left", "right", "up", "down"),
-        (sketch, pick, side) => {
-          const i = pick % sketch.objects.length;
-          const { area } = ANSWER_TEMPLATE;
-          const objects = sketch.objects.map((o, j) =>
-            j !== i || o.kind !== "text"
-              ? o
-              : {
-                  ...o,
-                  x:
-                    side === "left"
-                      ? area.x0
-                      : side === "right"
-                        ? area.x1
-                        : o.x,
-                  y: side === "up" ? area.y0 : side === "down" ? area.y1 : o.y,
-                },
+        fc.integer({ min: 1, max: 300 }),
+        (sketch, pick, side, by) => {
+          fc.pre(sketch !== null);
+          const items = sketch!.objects.filter((o): o is Placed =>
+            o.id.startsWith("c"),
+          );
+          const moved = items[pick % items.length];
+          const s = size(moved);
+          const x0 =
+            side === "left"
+              ? area.x0 - by
+              : side === "right"
+                ? area.x1 + by - s.w
+                : objectBox(moved)!.x0;
+          const y0 =
+            side === "up"
+              ? area.y0 - by
+              : side === "down"
+                ? area.y1 + by - s.h
+                : objectBox(moved)!.y0;
+          const objects = sketch!.objects.map((o) =>
+            o.id === moved.id ? placeAt(moved, x0, y0) : o,
           );
           expectErrors(
-            validateSketch({ ...sketch, objects }, FRESH),
-            errors.outsideAnswerArea(`t${i}`),
+            validateSketch({ ...sketch!, objects }, FRESH),
+            errors.outsideAnswerArea(moved.id),
+          );
+        },
+      ),
+    );
+  });
+
+  it("two objects whose estimated boxes overlap are always too close", () => {
+    fc.assert(
+      fc.property(
+        contentObject,
+        contentObject,
+        fc.double({ min: 0, max: 0.99, noNaN: true }),
+        fc.double({ min: 0, max: 0.99, noNaN: true }),
+        (p, q, fx, fy) => {
+          const first = { ...placeAt(p, 500, 400), id: "p" };
+          const box = objectBox(first)!;
+          const second = {
+            ...placeAt(
+              q,
+              box.x0 + fx * (box.x1 - box.x0),
+              box.y0 + fy * (box.y1 - box.y0),
+            ),
+            id: "q",
+          };
+          expectErrors(
+            validateSketch({ objects: [first, second], actions: [] }, FRESH),
+            errors.tooClose("p", "q", gap),
           );
         },
       ),
@@ -912,6 +1086,44 @@ describe("validate: the answer template (property, #90)", () => {
         actions: [],
       };
     }
+  });
+});
+
+describe("boxGap (property)", () => {
+  const box = fc
+    .record({
+      x0: fc.integer({ min: -500, max: 2000 }),
+      y0: fc.integer({ min: -500, max: 2000 }),
+      w: fc.integer({ min: 1, max: 800 }),
+      h: fc.integer({ min: 1, max: 800 }),
+    })
+    .map(({ x0, y0, w, h }) => ({ x0, y0, x1: x0 + w, y1: y0 + h }));
+  const overlap = (a: Box, b: Box) =>
+    a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+
+  it("is symmetric", () => {
+    fc.assert(
+      fc.property(box, box, (a, b) => {
+        expect(boxGap(a, b)).toBe(boxGap(b, a));
+      }),
+    );
+  });
+
+  it("is at least 0 exactly when the boxes don't overlap", () => {
+    fc.assert(
+      fc.property(box, box, (a, b) => {
+        expect(boxGap(a, b) >= 0).toBe(!overlap(a, b));
+      }),
+    );
+  });
+
+  it("is the distance between two boxes side by side", () => {
+    fc.assert(
+      fc.property(box, fc.integer({ min: 0, max: 500 }), (a, d) => {
+        const b = { ...a, x0: a.x1 + d, x1: a.x1 + d + (a.x1 - a.x0) };
+        expect(boxGap(a, b)).toBe(d);
+      }),
+    );
   });
 });
 
