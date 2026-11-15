@@ -425,6 +425,24 @@ describe("commandEvent (spoken commands, issue #93: existing events only)", () =
       null,
     ],
     [
+      "resume at the end of a step: the next step",
+      "resume",
+      { kind: "stepEnded", step: 0 },
+      { type: "next" },
+    ],
+    [
+      "resume at the end of the last step: finished",
+      "resume",
+      { kind: "stepEnded", step: 2 },
+      { type: "next" },
+    ],
+    [
+      "resume after the lesson: nothing",
+      "resume",
+      { kind: "finished", step: 2 },
+      null,
+    ],
+    [
       "pause while explaining",
       "pause",
       { kind: "playing", step: 1 },
