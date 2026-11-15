@@ -1,7 +1,7 @@
 {
   "type": "client",
   "name": "highlight_paper",
-  "description": "Scroll the paper beside the board to a passage and highlight it. Returns ok, or why it couldn't.",
+  "description": "Scroll the document beside the board to a passage and highlight it. Returns ok, or why it couldn't.",
   "expects_response": true,
   "response_timeout_secs": 10,
   "parameters": {
@@ -11,11 +11,11 @@
     "properties": {
       "quote": {
         "type": "string",
-        "description": "A short verbatim quote from the paper, a sentence or less"
+        "description": "A short verbatim quote from the document, a sentence or less"
       },
       "page": {
         "type": "integer",
-        "description": "1-based page of the paper the quote is on, if known"
+        "description": "1-based page of the document the quote is on, if known"
       }
     }
   },
