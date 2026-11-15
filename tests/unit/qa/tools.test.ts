@@ -249,6 +249,44 @@ describe("highlight_paper (issue #98)", () => {
   });
 });
 
+describe("pointed: a highlight that lands tags the answer (issue #91)", () => {
+  it("a highlight on the board that lands: pointed at the board", async () => {
+    const pointed = vi.fn();
+    const h = harness(asking, { pointed });
+    await h.tools.highlight?.({ target_id: "label" });
+    expect(pointed).toHaveBeenCalledWith("board");
+  });
+
+  it("a rejected highlight, or one while the Answer view is up: not pointed", async () => {
+    const pointed = vi.fn();
+    await harness(asking, { pointed }).tools.highlight?.({ target_id: "x" });
+    await harness(asking, {
+      pointed,
+      answerShowing: () => true,
+    }).tools.highlight?.({ target_id: "label" });
+    await harness({ kind: "paused", step: 0 }, { pointed }).tools.highlight?.({
+      target_id: "label",
+    });
+    expect(pointed).not.toHaveBeenCalled();
+  });
+
+  it("a passage found in the paper: pointed at the paper; not found or no paper: not", async () => {
+    const pointed = vi.fn();
+    await harness(asking, {
+      pointed,
+      highlightPaper: () => "ok: highlighted on page 2",
+    }).tools.highlight_paper?.({ quote: "q" });
+    expect(pointed).toHaveBeenCalledWith("paper");
+    pointed.mockClear();
+    await harness(asking, {
+      pointed,
+      highlightPaper: () => "That passage isn't in the paper.",
+    }).tools.highlight_paper?.({ quote: "q" });
+    await harness(asking, { pointed }).tools.highlight_paper?.({ quote: "q" });
+    expect(pointed).not.toHaveBeenCalled();
+  });
+});
+
 describe("agent config tool names", () => {
   // ROADMAP Q4: the agent's client tools in agent/tool_configs (area B) must
   // match shared/tools.ts. Each config present is checked here; that every

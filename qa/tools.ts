@@ -68,6 +68,8 @@ export type ClientToolDeps = {
    * Without it (e.g. /dev/ask) the call is only logged.
    */
   simplifyUpcoming?: (reason: string) => void;
+  /** A highlight landed on the board or the paper (AskApi.pointed, #91). Absent: not told. */
+  pointed?: (at: "board" | "paper") => void;
 } & Pick<
   DrawSceneDeps,
   | "askId"
@@ -109,6 +111,7 @@ export function createClientTools(deps: ClientToolDeps): QaTools {
       const errors = checkAction(action, visibleObjects(deps.board()));
       if (errors.length > 0) return errors.join("; ");
       deps.highlight(action);
+      deps.pointed?.("board");
       return "ok";
     },
     // 1-based, as spoken. While asking, the machine remembers the step and
@@ -126,7 +129,9 @@ export function createClientTools(deps: ClientToolDeps): QaTools {
     },
     highlight_paper: ({ quote, page }) => {
       if (!deps.isAsking()) return ASK_CLOSED;
-      return deps.highlightPaper?.(quote, page) ?? NO_PAPER_VIEWER;
+      const result = deps.highlightPaper?.(quote, page) ?? NO_PAPER_VIEWER;
+      if (result.startsWith("ok")) deps.pointed?.("paper");
+      return result;
     },
     // Waits until the sketch is drawn, so the agent explains what the learner sees.
     // Always a clean board of its own (the agent's `fresh` isn't taken), latest request only.

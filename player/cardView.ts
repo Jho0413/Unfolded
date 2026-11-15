@@ -44,8 +44,37 @@ export const CARD_TEXT = {
   askedTyped: "You asked",
   askedVoice: "You said",
   tagDrawing: "Drawing on the board",
+  /** The answer highlighted the board (the `highlight` tool) and drew nothing (#91). */
+  tagPointingBoard: "Pointing at the board",
+  /** The answer highlighted a passage in the paper (`highlight_paper`, #106) (#91). */
+  tagPointingPaper: "Pointing at the paper",
   tagSpoken: "Spoken answer",
 } as const;
+
+/** How an answer showed itself: drew, pointed at the board or the paper, or only spoke. */
+export type AnswerTag = "drawing" | "board" | "paper" | "spoken";
+
+export const TAG_TEXT: Record<AnswerTag, string> = {
+  drawing: CARD_TEXT.tagDrawing,
+  board: CARD_TEXT.tagPointingBoard,
+  paper: CARD_TEXT.tagPointingPaper,
+  spoken: CARD_TEXT.tagSpoken,
+};
+
+/**
+ * The latest answer's tag (#91): a drawing wins, then pointing at the board, then at the
+ * paper; an answer that did none of these is spoken.
+ */
+export function answerTag(answer: {
+  drew: boolean;
+  pointedAtBoard?: boolean;
+  pointedAtPaper?: boolean;
+}): AnswerTag {
+  if (answer.drew) return "drawing";
+  if (answer.pointedAtBoard) return "board";
+  if (answer.pointedAtPaper) return "paper";
+  return "spoken";
+}
 
 /** A step's title from the plan; "Idea n" where there's none (the dev player). */
 export function ideaTitle(titles: readonly string[], n: number): string {
@@ -92,8 +121,8 @@ export type CardView<A> = {
   status: string;
   /** The tutor is talking: the lesson (accent) or an answer (answer blue). */
   speaking: "lesson" | "answer" | null;
-  /** Ask only: whether the latest answer drew on the board. */
-  tag: "drawing" | "spoken" | null;
+  /** Ask only: how the latest answer showed itself (answerTag). */
+  tag: AnswerTag | null;
   /** The button in the card's head (Hold on / Go on; Space). */
   hold: CardButton<A> | null;
   /** Null: nothing under the head (captions off). */
@@ -225,6 +254,10 @@ export type AskCardInput = {
   answer: string | null;
   /** The agent called draw_scene while answering the latest question. */
   drew: boolean;
+  /** A `highlight` on the board succeeded while answering the latest question (#91). */
+  pointedAtBoard?: boolean;
+  /** A `highlight_paper` succeeded while answering the latest question (#91). */
+  pointedAtPaper?: boolean;
   /** A draw_scene answer is being made (#105): the card says "Sketching…" until it plays. */
   sketching?: boolean;
   captions: boolean;
@@ -267,7 +300,7 @@ export function askCard(input: AskCardInput): CardView<AskAction> {
       ...base,
       status: CARD_STATUS.answering,
       speaking: "answer",
-      tag: input.drew ? "drawing" : "spoken",
+      tag: answerTag(input),
       body: ask(null, showText ? answer : null),
       buttons: [{ label: CARD_TEXT.gotIt, action: "carryOn", primary: true }],
     };

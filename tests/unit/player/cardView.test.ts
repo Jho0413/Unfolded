@@ -4,11 +4,13 @@ import { describe, expect, it } from "vitest";
 import { MESSAGES, type PlayerState } from "@/player/machine";
 import {
   type AskCardInput,
+  answerTag,
   askCard,
   CARD_STATUS,
   CARD_TEXT,
   type LessonCardInput,
   lessonCard,
+  TAG_TEXT,
 } from "@/player/cardView";
 
 const TITLES = ["Rows", "Columns", "Products"];
@@ -299,6 +301,49 @@ describe("askCard", () => {
     expect(
       askCard(ask({ question: typed, answer: "Look.", drew: true })).tag,
     ).toBe("drawing");
+  });
+
+  describe("the answer's tag (issue #91): one row per case", () => {
+    const tagOf = (more: Partial<AskCardInput>) =>
+      askCard(ask({ question: typed, answer: "So.", ...more })).tag;
+    it.each([
+      ["drew", { drew: true }, "drawing"],
+      [
+        "drew and pointed at the board",
+        { drew: true, pointedAtBoard: true },
+        "drawing",
+      ],
+      [
+        "drew and pointed at the paper",
+        { drew: true, pointedAtPaper: true },
+        "drawing",
+      ],
+      ["pointed at the board only", { pointedAtBoard: true }, "board"],
+      [
+        "pointed at the board and the paper",
+        { pointedAtBoard: true, pointedAtPaper: true },
+        "board",
+      ],
+      ["pointed at the paper only", { pointedAtPaper: true }, "paper"],
+      ["neither drew nor pointed", {}, "spoken"],
+    ] as const)("%s: %s", (_, more, tag) => {
+      expect(tagOf(more)).toBe(tag);
+      expect(answerTag({ drew: false, ...more })).toBe(tag);
+    });
+
+    it("each tag has its words", () => {
+      expect(TAG_TEXT).toEqual({
+        drawing: "Drawing on the board",
+        board: "Pointing at the board",
+        paper: "Pointing at the paper",
+        spoken: "Spoken answer",
+      });
+    });
+
+    it("no tag before the answer, or while it is being sketched", () => {
+      expect(tagOf({ answer: null, pointedAtBoard: true })).toBeNull();
+      expect(tagOf({ sketching: true, pointedAtBoard: true })).toBeNull();
+    });
   });
 
   it("a spoken question keeps its via (You said)", () => {

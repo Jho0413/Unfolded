@@ -80,9 +80,17 @@ export type AskPanelProps = {
   onLearnerSpeech?: (signal: BargeInSignal) => void;
 };
 
-const NO_DRAWING: { asked: number; drewFor: number | null } = {
+/** Which question's answer drew, or pointed at the board or the paper (by count asked). */
+const NO_DRAWING: {
+  asked: number;
+  drewFor: number | null;
+  boardFor: number | null;
+  paperFor: number | null;
+} = {
   asked: 0,
   drewFor: null,
+  boardFor: null,
+  paperFor: null,
 };
 
 /** A transcript line, and whether it was typed (the card says "You asked" or "You said"). */
@@ -146,8 +154,8 @@ export function AskPanel({
 
   // Typed questions sent but not yet echoed back by the conversation.
   const typedEcho = useRef<string[]>([]);
-  // Questions asked in this Ask, and which one's answer drew a sketch: the card tags that
-  // answer "Drawing on the board".
+  // Questions asked in this Ask, and which one's answer drew a sketch or pointed at the board
+  // or the paper: the card tags that answer (player/cardView.ts answerTag).
   const [drawn, setDrawn] = useState(NO_DRAWING);
   const addMessage = useCallback((m: ShownMessage) => {
     setMessages((ms) => [...ms, m]);
@@ -159,6 +167,11 @@ export function AskPanel({
   }, []);
   const sketchDrawn = useCallback(
     () => setDrawn((d) => ({ ...d, drewFor: d.asked })),
+    [],
+  );
+  const pointed = useCallback(
+    (at: "board" | "paper") =>
+      setDrawn((d) => ({ ...d, [`${at}For`]: d.asked })),
     [],
   );
   // A draw_scene answer is being made: the card says "Sketching…" (#105).
@@ -182,11 +195,12 @@ export function AskPanel({
             showNotice: setToolNotice,
             tellAgent: (t) => link.tell(t),
             sketchDrawn,
+            pointed,
             sketching: setSketching,
             afterAgentSpeaks: (fn) => agentTurn.after(fn),
           })
         : tools,
-    [tools, link, sketchDrawn, agentTurn],
+    [tools, link, sketchDrawn, pointed, agentTurn],
   );
   // A question typed in the box before Ask was open: sent once Ask opens (text-first).
   const pending = useRef<string | null>(null);
@@ -436,6 +450,8 @@ export function AskPanel({
     question,
     answer,
     drew: drawn.drewFor === drawn.asked,
+    pointedAtBoard: drawn.boardFor === drawn.asked,
+    pointedAtPaper: drawn.paperFor === drawn.asked,
     sketching,
     captions,
   });

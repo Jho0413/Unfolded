@@ -6,6 +6,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { CARD_TEXT } from "@/player/cardView";
 import { PAPER_PAGES, paperPdf } from "./support/paperPdf";
 import { savedRun } from "./support/savedRun";
 import { askQuestion } from "./support/tutor";
@@ -221,6 +222,10 @@ test("highlight_paper from the conversation highlights its quote in the answer b
   await expect(paper(page)).toHaveAttribute("data-highlight-page", "2");
   await expect(paper(page).locator('mark[data-tone="answer"]')).toHaveCount(1);
   await expect(split(page)).toHaveAttribute("data-focus", "paper");
+  // The card tags the answer as pointing at the paper (#91).
+  await expect(page.getByTestId("answer-tag")).toHaveText(
+    CARD_TEXT.tagPointingPaper,
+  );
 
   // Closing Ask throws the answer's highlight away.
   await page.keyboard.press("Escape");
