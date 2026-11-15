@@ -70,7 +70,8 @@ export const CLIENT_TOOLS = [
   },
   {
     name: "pause_lesson",
-    description: "Hold the lesson where it is until the learner says to carry on.",
+    description:
+      "Hold the lesson where it is until the learner says to carry on.",
     expectsResponse: false,
     parameters: NoParams,
   },
