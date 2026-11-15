@@ -74,6 +74,8 @@ export type PlayerStageProps = {
   focus?: Pane;
   /** The learner clicked a pane, or rested the mouse on it. */
   onFocusPane?: (pane: Pane) => void;
+  /** At the top of the dock, over the tutor card (the lesson page's recap, issue #130). */
+  dockTop?: ReactNode;
 };
 
 const NO_TITLES: readonly string[] = [];
@@ -90,6 +92,7 @@ export function PlayerStage({
   paper,
   focus = "board",
   onFocusPane,
+  dockTop,
 }: PlayerStageProps) {
   const { state, send, loaded, tMs } = player;
   useShortcuts(send);
@@ -217,6 +220,7 @@ export function PlayerStage({
           )}
           {debug && <DebugOverlay tMs={tMs} lastCue={player.lastCue} />}
           <div className={styles.dock} ref={trackDockHeight}>
+            {dockTop}
             {widget && (
               <WidgetPanel
                 key={`${player.step}:${loaded?.version ?? 0}`}

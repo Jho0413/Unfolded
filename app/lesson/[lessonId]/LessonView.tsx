@@ -14,6 +14,9 @@
 //
 // Learner signals (issue #102, ./useLessonSignals.ts): Ask's questions and simplify requests
 // are posted, and the prefetched next step is asked for again once Ask closes.
+//
+// The recap (issue #130, ./useLessonRecap.ts): once the last step ends, the ideas covered, the
+// questions asked and the steps adapted, each with a replay link, over the tutor card.
 import { useCallback, useRef, useState, useSyncExternalStore } from "react";
 import { PlayerStage } from "@/player/Player";
 import { usePlayer } from "@/player/usePlayer";
@@ -25,10 +28,12 @@ import { createPrefetcher } from "@/player/prefetch";
 import { PaperViewer } from "@/player/paper/PaperViewer";
 import type { PaperSelection } from "@/player/paper/selection";
 import { LessonAsk, LessonBoard } from "./LessonAsk";
+import { LessonRecap } from "./LessonRecap";
 import { Outline } from "./Outline";
 import { stepRouteFetcher } from "./stepRoute";
 import { CaptionsToggle, ThemeToggle } from "./Toggles";
 import { useLessonPaper } from "./useLessonPaper";
+import { useLessonRecap } from "./useLessonRecap";
 import { useLessonSignals } from "./useLessonSignals";
 import styles from "./lesson.module.css";
 
@@ -53,7 +58,14 @@ export function LessonView({ lessonId, plan, replay, debug }: LessonViewProps) {
     fetchStep: steps.fetchStep,
     onStepReady: (n) => steps.prefetch(n + 1),
   });
-  const signals = useLessonSignals({ lessonId, player, steps });
+  const titles = plan.steps.map((s) => s.title);
+  const recap = useLessonRecap({ lessonId, player, titles });
+  const signals = useLessonSignals({
+    lessonId,
+    player,
+    steps,
+    post: recap.post,
+  });
   const statuses = useSyncExternalStore(
     steps.subscribe,
     steps.statuses,
@@ -72,7 +84,6 @@ export function LessonView({ lessonId, plan, replay, debug }: LessonViewProps) {
     },
     [askAbout],
   );
-  const titles = plan.steps.map((s) => s.title);
   return (
     <div
       data-testid="lesson"
@@ -117,6 +128,16 @@ export function LessonView({ lessonId, plan, replay, debug }: LessonViewProps) {
             }
             focus={paper.focus}
             onFocusPane={paper.onFocusPane}
+            dockTop={
+              recap.view && (
+                <LessonRecap
+                  view={recap.view}
+                  state={player.state}
+                  send={player.send}
+                  onClose={recap.close}
+                />
+              )
+            }
             renderAsk={(p) => (
               <LessonAsk
                 player={p}
