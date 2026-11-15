@@ -54,9 +54,45 @@ async function seek(page: Page, seconds: number) {
   );
 }
 
+/**
+ * Waits until the step's audio is really playing: a finite duration (before the metadata loads
+ * it is NaN), data buffered, and the clock moving. The machine says "playing" as soon as play()
+ * is called, before the element starts; seeking before then can leave the element short of its
+ * end, never "ended" (the flaky "keys" test).
+ */
+async function audioRunning(page: Page) {
+  await expect
+    .poll(() =>
+      page
+        .getByTestId("player-audio")
+        .evaluate(
+          (a: HTMLAudioElement) =>
+            Number.isFinite(a.duration) &&
+            !a.paused &&
+            a.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA &&
+            a.currentTime > 0,
+        ),
+    )
+    .toBe(true);
+}
+
+/** Waits until the audio element itself has paused (its "pause" event follows the machine's). */
+async function audioPaused(page: Page) {
+  await expect
+    .poll(() =>
+      page
+        .getByTestId("player-audio")
+        .evaluate((a: HTMLAudioElement) => a.paused),
+    )
+    .toBe(true);
+}
+
+/** Plays the step on screen to its end: once its audio runs, seek just before the end. */
 async function endStep(page: Page, step: number) {
-  await page.getByTestId("player-audio").evaluate((audio: HTMLAudioElement) => {
-    audio.currentTime = Math.max(0, audio.duration - 0.1);
+  const audio = page.getByTestId("player-audio");
+  await audioRunning(page);
+  await audio.evaluate((a: HTMLAudioElement) => {
+    a.currentTime = Math.max(0, a.duration - 0.1);
   });
   await expectState(page, "stepEnded", step);
 }
@@ -153,8 +189,12 @@ test("keys: Space holds on and goes on, → next idea, ← back, R again", async
   await using run = await savedRun("e2e-tutor-keys");
   await page.goto(`/lesson/${run.lessonId}`);
   await expectState(page, "playing", 0);
+  await audioRunning(page);
   await page.keyboard.press("Space");
   await expectState(page, "paused", 0);
+  // Go on only once the element has paused too: a second Space before its "pause" event fires
+  // lets that late event pause the machine again, and play and pause then chase each other.
+  await audioPaused(page);
   await page.keyboard.press("Space");
   await expectState(page, "playing", 0);
   await endStep(page, 0);
