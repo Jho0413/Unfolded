@@ -2,11 +2,16 @@
 import { describe, expect, it } from "vitest";
 import { config } from "@/lib/config";
 import {
+  PAPER_REFS_PROMPT,
+  paperContextPrompt,
+} from "@/lib/pipeline/prompts/paper";
+import {
   retryPrompt,
   STEP_SYSTEM_PROMPT,
   stepContextPrompt,
 } from "@/lib/pipeline/prompts/step";
 import type { LessonPlanOutput } from "@/shared/lesson";
+import { MAX_PAPER_QUOTE_CHARS } from "@/shared/scene";
 
 const PLAN: LessonPlanOutput = {
   title: "A lesson",
@@ -72,6 +77,23 @@ describe("stepContextPrompt", () => {
     });
     expect(text).not.toContain("learner_messages");
   });
+
+  it("a paper with text (#98): gives its page count and asks for quotes", () => {
+    const text = stepContextPrompt({
+      plan: PLAN,
+      n: 1,
+      signals: [],
+      paperPageCount: 15,
+    });
+    expect(text).toContain(paperContextPrompt(15));
+    expect(text).toContain("The paper has 15 pages");
+  });
+
+  it("no paper to quote (#98): says paperRefs is empty", () => {
+    const text = stepContextPrompt({ plan: PLAN, n: 1, signals: [] });
+    expect(text).toContain(paperContextPrompt(undefined));
+    expect(text).toContain("paperRefs is empty");
+  });
 });
 
 describe("STEP_SYSTEM_PROMPT", () => {
@@ -86,6 +108,15 @@ describe("STEP_SYSTEM_PROMPT", () => {
 
   it("states the narration cap from lib/config.ts", () => {
     expect(STEP_SYSTEM_PROMPT).toContain(`${config.maxNarrationChars}`);
+  });
+
+  it("has the paper section (#98): verbatim quotes up to the contract's cap, on the PDF's 1-based page, optionally cued", () => {
+    expect(STEP_SYSTEM_PROMPT).toContain(PAPER_REFS_PROMPT);
+    expect(PAPER_REFS_PROMPT).toContain(
+      `at most ${MAX_PAPER_QUOTE_CHARS} characters`,
+    );
+    expect(PAPER_REFS_PROMPT).toContain("counting the PDF's first page as 1");
+    expect(PAPER_REFS_PROMPT).toContain("cue: optional");
   });
 });
 

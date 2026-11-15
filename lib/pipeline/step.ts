@@ -1,7 +1,8 @@
 // Step generation (ARCHITECTURE.md sections 4, 5.1 and 6.2): Claude writes a step in the wire
 // format with structured output, it is converted to a Step and validate.ts checks it, and
 // lib/pipeline/generate.ts retries a rejection once; a second rejection, a refusal, a cut-off
-// or a provider error fails the step.
+// or a provider error fails the step. Its paper quotes are checked against the page text
+// (./paperQuotes.ts): a miss is retried too, and one still missing after the retry is dropped.
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { LessonPlanOutput, Signal } from "@/shared/lesson";
@@ -16,6 +17,7 @@ import {
   STEP_OUTPUT_FORMAT,
   validateWireStep,
 } from "@/lib/pipeline/outputFormat";
+import { checkPaperQuotes } from "@/lib/pipeline/paperQuotes";
 import {
   retryPrompt,
   STEP_SYSTEM_PROMPT,
@@ -32,6 +34,11 @@ export interface StepRequest {
   previousNarration?: string;
   /** The learner's signals so far (section 5.4). */
   signals: readonly Signal[];
+  /**
+   * The paper's page text (lib/pipeline/paperPages.ts) to check quotes against (#98), or
+   * undefined when there's none: then no quotes are asked for, and any written are dropped.
+   */
+  paperPages?: readonly string[];
 }
 
 /** The first attempt's request (pure). The document block is cached for an hour (section 5.1). */
@@ -52,7 +59,13 @@ export function buildStepRequest(
             source: { type: "file", file_id: req.paperFileId },
             cache_control: { type: "ephemeral", ttl: "1h" },
           },
-          { type: "text", text: stepContextPrompt(req) },
+          {
+            type: "text",
+            text: stepContextPrompt({
+              ...req,
+              paperPageCount: req.paperPages?.length,
+            }),
+          },
         ],
       },
     ],
@@ -69,9 +82,12 @@ export async function generateStep(
       label: `step ${req.n}`,
       request: buildStepRequest(req),
       validate: (json) =>
-        validateWireStep(json, {
-          maxNarrationChars: config.maxNarrationChars,
-        }),
+        checkPaperQuotes(
+          validateWireStep(json, {
+            maxNarrationChars: config.maxNarrationChars,
+          }),
+          req.paperPages,
+        ),
       retryPrompt,
       timeoutMs: config.step.timeoutMs,
     },

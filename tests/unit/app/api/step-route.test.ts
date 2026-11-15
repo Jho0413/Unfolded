@@ -24,10 +24,14 @@ import {
 } from "@/lib/fakes/claude";
 import { NoAlignmentError, stripMarkers } from "@/lib/narration/cues";
 import { TtsError } from "@/lib/narration/tts";
+import { PaperText } from "@/lib/pipeline/paperPages";
 import type { SavedPaper } from "@/lib/pipeline/plan";
+import { paperContextPrompt } from "@/lib/pipeline/prompts/paper";
 import {
   appendSignal,
   PAPER_FILE,
+  PAPER_PDF_FILE,
+  PAPER_TEXT_FILE,
   PLAN_FILE,
   readRunJson,
   saveStepVersion,
@@ -42,7 +46,8 @@ import {
   SavedStep,
   StepResponse,
 } from "@/shared/lesson";
-import { Step } from "@/shared/scene";
+import { type CuedPaperRef, Step } from "@/shared/scene";
+import { PAPER_PAGES, paperPdf } from "../../../e2e/support/paperPdf";
 
 // The Claude the step generator gets, the TTS failure a test forces, and a temp runs dir.
 const state = vi.hoisted(() => ({
@@ -416,6 +421,65 @@ describe("section 6.2: failed", () => {
     state.ttsError = undefined;
     expect((await post(LESSON, "0")).status).toBe(200);
     expect(claude.calls).toHaveLength(2);
+  });
+});
+
+describe("paper quotes (#98), through the route", () => {
+  /** The recorded step with quotes from the e2e paper fixture (./paperPdf), cued on its [[k]]. */
+  async function replyQuoting(...paperRefs: CuedPaperRef[]) {
+    const text = validReply.content.find((b) => b.type === "text");
+    const step = { ...JSON.parse(text!.text), paperRefs };
+    return fakeMessage(JSON.stringify(step));
+  }
+  const FOUND: CuedPaperRef = {
+    page: 2,
+    quote: "The products of the paired entries are added together",
+    cue: "k",
+  };
+
+  it("a run with paper.pdf: the quotes are checked against its text, and the step is saved with them", async () => {
+    await writeRunFile(LESSON, PAPER_PDF_FILE, new Uint8Array(paperPdf()));
+    const claude = script(await replyQuoting(FOUND));
+    const res = await post(LESSON, "0");
+    expect(res.status).toBe(200);
+    expect(claude.calls).toHaveLength(1);
+    expect(JSON.stringify(claude.calls[0].body.messages[0].content)).toContain(
+      paperContextPrompt(PAPER_PAGES.length),
+    );
+    const saved = await readRunJson(LESSON, "step-0.v1.json", SavedStep);
+    expect(saved?.step.paperRefs).toEqual([FOUND]);
+    // The page text is kept for the next step.
+    const cached = await readRunJson(LESSON, PAPER_TEXT_FILE, PaperText);
+    expect(cached?.pages).toHaveLength(PAPER_PAGES.length);
+  });
+
+  it("no paper.pdf: no quotes asked for, and the step is saved without any", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const claude = script(await replyQuoting(FOUND));
+    expect((await post(LESSON, "0")).status).toBe(200);
+    expect(claude.calls).toHaveLength(1);
+    expect(JSON.stringify(claude.calls[0].body.messages[0].content)).toContain(
+      paperContextPrompt(undefined),
+    );
+    const saved = await readRunJson(LESSON, "step-0.v1.json", SavedStep);
+    expect(saved?.step).not.toHaveProperty("paperRefs");
+  });
+
+  it("PDF text extraction fails: the step is saved without paperRefs, with a log line", async () => {
+    const logs = quietLogs();
+    await writeRunFile(
+      LESSON,
+      PAPER_PDF_FILE,
+      new TextEncoder().encode("%PDF-1.7 not really"),
+    );
+    const claude = script(await replyQuoting(FOUND));
+    expect((await post(LESSON, "0")).status).toBe(200);
+    expect(claude.calls).toHaveLength(1);
+    const saved = await readRunJson(LESSON, "step-0.v1.json", SavedStep);
+    expect(saved?.step).not.toHaveProperty("paperRefs");
+    expect(logs.logged()).toContain(
+      `${LESSON}: couldn't extract the text of ${PAPER_PDF_FILE}`,
+    );
   });
 });
 

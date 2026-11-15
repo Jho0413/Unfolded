@@ -9,13 +9,15 @@ import { fakeClaude, fakeMessage } from "@/lib/fakes/claude";
 import { STEP_OUTPUT_FORMAT, wireToStep } from "@/lib/pipeline/outputFormat";
 import { STEP_SYSTEM_PROMPT } from "@/lib/pipeline/prompts/step";
 import { GenerationError } from "@/lib/pipeline/generate";
+import { quoteErrors } from "@/lib/pipeline/paperQuotes";
+import { paperContextPrompt } from "@/lib/pipeline/prompts/paper";
 import {
   buildStepRequest,
   generateStep,
   type StepRequest,
 } from "@/lib/pipeline/step";
 import type { LessonPlanOutput } from "@/shared/lesson";
-import { Step } from "@/shared/scene";
+import { type CuedPaperRef, Step } from "@/shared/scene";
 
 const PLAN: LessonPlanOutput = {
   title: "A lesson",
@@ -245,15 +247,135 @@ describe("generateStep (G1)", () => {
     await expect(generateStep(REQ, claude)).rejects.toBe(bug);
   });
 
-  it("FAKE_APIS=1 with no client: serves the recorded step response, which is valid", async () => {
+  it("FAKE_APIS=1 with no client: serves the recorded step response, which is valid, with its paper quotes", async () => {
     vi.stubEnv("FAKE_APIS", "1");
     vi.stubEnv("REPLAY_RUN", undefined);
-    vi.spyOn(console, "warn").mockImplementation(() => {});
     resetEnvForTests();
-    const step = await generateStep(REQ);
     const fixture = await readFixture<Anthropic.Message>(config.step.fixture);
     const text = fixture.content.find((b) => b.type === "text");
-    expect(step).toEqual(wireToStep(JSON.parse(text!.text)).value);
+    const expected = wireToStep(JSON.parse(text!.text)).value;
+    // The fixture quotes the Attention paper's page 4 (m2-attention): a paper with that text.
+    const refs = expected.paperRefs ?? [];
+    expect(refs.length).toBeGreaterThan(0);
+    const pages = ["", "", "", refs.map((r) => r.quote).join(" ")];
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const step = await generateStep({ ...REQ, paperPages: pages });
+    expect(step).toEqual(expected);
+    // Nothing rejected or dropped (the env's own fake-mode notice aside).
+    expect(warn).not.toHaveBeenCalledWith(
+      expect.stringContaining("[pipeline]"),
+    );
+  });
+});
+
+describe("paper quotes (#98): one test per row", () => {
+  const PAGES = [
+    "Matrix Multiplication by Hand. We show how to multiply two matrices.",
+    "1 MethodPair their entries and multiply each pair. The products of the pairedentries are add-ed together.",
+  ];
+  const FOUND: CuedPaperRef = {
+    page: 2,
+    quote: "The products of the paired entries are added together",
+    label: "Section 1",
+    cue: "add",
+  };
+  const ALSO_FOUND: CuedPaperRef = { page: 1, quote: "multiply two matrices" };
+  const MISSING: CuedPaperRef = { page: 2, quote: "A sentence never written" };
+  const WRONG_PAGE: CuedPaperRef = { page: 1, quote: "Pair their entries" };
+  const REQ_PAPER: StepRequest = { ...REQ, paperPages: PAGES };
+  const withRefs = (...paperRefs: CuedPaperRef[]): Step => ({
+    ...valid,
+    paperRefs,
+  });
+  const reply = (step: Step) => fakeMessage(JSON.stringify(step));
+  const context = (claude: ReturnType<typeof fakeClaude>) =>
+    JSON.stringify(claude.calls[0].body.messages[0].content);
+  const warnings = (warn: { mock: { calls: unknown[][] } }) =>
+    warn.mock.calls.flat().join(" ");
+
+  it("all quotes found: the step comes back with its paperRefs, after one request that asked for them", async () => {
+    const claude = fakeClaude([reply(withRefs(ALSO_FOUND, FOUND))]);
+    await expect(generateStep(REQ_PAPER, claude)).resolves.toEqual(
+      withRefs(ALSO_FOUND, FOUND),
+    );
+    expect(claude.calls).toHaveLength(1);
+    expect(context(claude)).toContain(paperContextPrompt(PAGES.length));
+  });
+
+  it("some missing, the retry fixes them: the step with paperRefs; the retry named the missing quote and its page", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const claude = fakeClaude([
+      reply(withRefs(FOUND, MISSING)),
+      reply(withRefs(FOUND, ALSO_FOUND)),
+    ]);
+    await expect(generateStep(REQ_PAPER, claude)).resolves.toEqual(
+      withRefs(FOUND, ALSO_FOUND),
+    );
+    expect(claude.calls).toHaveLength(2);
+    expect(claude.calls[1].body.messages[2].content).toContain(
+      quoteErrors.notOnPage(1, 2, MISSING.quote),
+    );
+  });
+
+  it("still missing after the retry: those refs dropped and logged; the step is kept", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const claude = fakeClaude([
+      reply(withRefs(FOUND, MISSING)),
+      reply(withRefs(FOUND, MISSING)),
+    ]);
+    await expect(generateStep(REQ_PAPER, claude)).resolves.toEqual(
+      withRefs(FOUND),
+    );
+    expect(claude.calls).toHaveLength(2);
+    expect(warnings(warn)).toContain(
+      quoteErrors.notOnPage(1, 2, MISSING.quote),
+    );
+  });
+
+  it("still missing and the retry fails (a provider error): the first attempt is kept without them", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const claude = fakeClaude([
+      reply(withRefs(MISSING)),
+      new Anthropic.InternalServerError(500, undefined, "down", new Headers()),
+    ]);
+    const step = await generateStep(REQ_PAPER, claude);
+    expect(step).toEqual(valid);
+    expect(step).not.toHaveProperty("paperRefs");
+  });
+
+  it("quote on the wrong page: treated as missing (retried with where it is, then dropped)", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const claude = fakeClaude([
+      reply(withRefs(WRONG_PAGE)),
+      reply(withRefs(WRONG_PAGE)),
+    ]);
+    await expect(generateStep(REQ_PAPER, claude)).resolves.toEqual(valid);
+    expect(claude.calls[1].body.messages[2].content).toContain(
+      quoteErrors.notOnPage(0, 1, WRONG_PAGE.quote, 2),
+    );
+  });
+
+  it("no paper.pdf (or its text couldn't be extracted): no quotes asked for, none verified, any written dropped without a retry", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const claude = fakeClaude([reply(withRefs(MISSING))]);
+    await expect(generateStep(REQ, claude)).resolves.toEqual(valid);
+    expect(claude.calls).toHaveLength(1);
+    expect(context(claude)).toContain(paperContextPrompt(undefined));
+    expect(warnings(warn)).toContain(quoteErrors.noPaper(1));
+  });
+
+  it("a paperRefs cue not in the narration: the validator rejects it, so the retry runs", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const claude = fakeClaude([
+      reply(withRefs({ ...FOUND, cue: "nowhere" })),
+      reply(withRefs(FOUND)),
+    ]);
+    await expect(generateStep(REQ_PAPER, claude)).resolves.toEqual(
+      withRefs(FOUND),
+    );
+    expect(claude.calls[1].body.messages[2].content).toContain(
+      'unknown cue "nowhere"',
+    );
   });
 });
 

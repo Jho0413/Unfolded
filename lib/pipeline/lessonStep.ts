@@ -34,6 +34,7 @@ import {
   playedVersion,
   signalsSince,
 } from "@/lib/pipeline/adaptation";
+import { readPaperPages } from "@/lib/pipeline/paperPages";
 import { SavedPaper } from "@/lib/pipeline/plan";
 import { generateStep } from "@/lib/pipeline/step";
 import {
@@ -228,6 +229,7 @@ async function generate(
     n,
     previousNarration: previous?.step.narration,
     signals: newer,
+    paperPages: await readPaperPages(lessonId),
   });
   const narrated = await narrate(step.narration);
   // Only a regeneration says what it adapted to: a first version has nothing it replaces.
