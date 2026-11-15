@@ -157,6 +157,9 @@ test("a passage far down the paper stays in view while the pane widens, and afte
   await seek(page, 5.3);
   await page.keyboard.press("Space");
   await expect(paper(page)).toHaveAttribute("data-highlight-page", "5");
+  // Hold on at once: the step's audio would otherwise end, and Space there replays it.
+  await page.keyboard.press("Space");
+  await expect(player(page)).toHaveAttribute("data-state", "paused");
   await expect(split(page)).toHaveAttribute("data-focus", "paper");
   await expectLarger(page, "paper-pane", "board-pane");
   const mark = paper(page).locator("mark").first();
@@ -165,7 +168,6 @@ test("a passage far down the paper stays in view while the pane widens, and afte
   await expect(mark).toBeInViewport();
   await screenshot(page, "deep-passage-grown");
   // The pane shrinks back once the hold ends; the passage stays in view.
-  await page.keyboard.press("Space");
   await expect(split(page)).toHaveAttribute("data-focus", "board", {
     timeout: 10_000,
   });
