@@ -36,11 +36,12 @@ import {
 } from "@/shared/validate";
 
 /**
- * Every action kind's fields in one object. Each field has the contract's own constraints, so
- * an error in it is reported here, under the action's index on the wire: once an action that
- * can't convert is dropped, the contract would number the later ones differently.
+ * Every action kind's fields in one object: these every kind has, then `wireOptional`. Each
+ * field has the contract's own constraints, so an error in it is reported here, under the
+ * action's index on the wire: once an action that can't convert is dropped, the contract
+ * would number the later ones differently.
  */
-const wireAction = {
+const wireRequired = {
   do: z.enum([
     "show",
     "hide",
@@ -51,6 +52,16 @@ const wireAction = {
   ] satisfies Action["do"][]),
   target: Target,
   durationMs: z.number().int().min(0).max(MAX_DURATION_MS),
+};
+
+/**
+ * The fields only some kinds take. Structured output writes an object's properties in the
+ * schema's order and skips an optional one only by moving past it, so these come after every
+ * required field: once Claude wrote a required field listed after them (a sketch's atMs), it
+ * could no longer add a write's value, and the sketch failed twice with `write needs value`
+ * (#90).
+ */
+const wireOptional = {
   /** highlight and unhighlight only. */
   color: HighlightColor.optional(),
   /** move only, and required there. */
@@ -64,14 +75,24 @@ export const WireStep = z.object({
   narration: z.string(),
   objects: z.array(BoardObject),
   actions: z.array(
-    z.object({ ...wireAction, cue: z.string().regex(OBJECT_ID_RE) }),
+    z.object({
+      ...wireRequired,
+      cue: z.string().regex(OBJECT_ID_RE),
+      ...wireOptional,
+    }),
   ),
 });
 export type WireStep = z.infer<typeof WireStep>;
 
 export const WireSketch = z.object({
   objects: z.array(BoardObject),
-  actions: z.array(z.object({ ...wireAction, atMs: z.number().int().min(0) })),
+  actions: z.array(
+    z.object({
+      ...wireRequired,
+      atMs: z.number().int().min(0),
+      ...wireOptional,
+    }),
+  ),
 });
 export type WireSketch = z.infer<typeof WireSketch>;
 

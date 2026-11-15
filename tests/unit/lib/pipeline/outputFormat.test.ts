@@ -672,6 +672,24 @@ describe("output format size guard (#27)", () => {
     );
   });
 
+  // Structured output writes properties in the schema's order (s3-mix, #90: a write's value
+  // listed before the sketch's required atMs was skipped twice). Every required action field
+  // comes first, so Claude can always still add an optional one.
+  it("every wire action lists its required fields before its optional ones", () => {
+    for (const format of [STEP_OUTPUT_FORMAT, SKETCH_OUTPUT_FORMAT]) {
+      const actions = (format.schema.properties as Record<string, unknown>)
+        .actions as { items: { properties: object; required: string[] } };
+      const keys = Object.keys(actions.items.properties);
+      const required = new Set(actions.items.required);
+      const firstOptional = keys.findIndex((k) => !required.has(k));
+      expect(firstOptional).toBeGreaterThan(0);
+      expect(keys.slice(firstOptional).every((k) => !required.has(k))).toBe(
+        true,
+      );
+      expect(keys.slice(firstOptional)).toEqual(["color", "to", "value"]);
+    }
+  });
+
   it("the wire schemas stay under the documented optional-property cap", () => {
     for (const format of [STEP_OUTPUT_FORMAT, SKETCH_OUTPUT_FORMAT])
       expect(optionalPerUse(format.schema)).toBeLessThanOrEqual(

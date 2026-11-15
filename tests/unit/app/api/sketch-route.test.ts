@@ -14,6 +14,7 @@ import {
   type FakeReply,
 } from "@/lib/fakes/claude";
 import { ApiError, SKETCH_FAILED, SketchResponse } from "@/shared/lesson";
+import { errors } from "@/shared/validate";
 import {
   type BoardState,
   type ObjectState,
@@ -121,6 +122,80 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   resetEnvForTests();
+});
+
+describe("POST /api/sketch: a fresh answer and its template (#90)", () => {
+  /** A valid answer board: a title and a formula. */
+  const ANSWER: Sketch = {
+    objects: [
+      { kind: "text", id: "title", x: 800, y: 110, text: "Why scale?" },
+      { kind: "latex", id: "f", x: 800, y: 450, tex: "\\frac{40}{8}=5" },
+    ],
+    actions: [{ do: "show", target: { id: "f" }, durationMs: 400, atMs: 0 }],
+  };
+  /** The research run's failure: d_k in plain text, and an object off the area. */
+  const SCATTERED: Sketch = {
+    objects: [
+      { kind: "text", id: "title", x: 800, y: 110, text: "Why divide by d_k?" },
+      { kind: "latex", id: "f", x: 1560, y: 450, tex: "\\frac{40}{8}=5" },
+    ],
+    actions: [],
+  };
+
+  it("a sketch breaking the template: retried once with the template's errors, 200 with the fixed one", async () => {
+    const logs = quietLogs();
+    const fake = script(reply(SCATTERED), reply(ANSWER));
+    const res = await post({
+      description: "why scale",
+      fresh: true,
+      board: EMPTY,
+    });
+    expect(res.status).toBe(200);
+    expect(SketchResponse.parse(await res.json()).sketch).toEqual(ANSWER);
+    const retry = fake.calls[1].body.messages.at(-1)?.content;
+    expect(retry).toContain(errors.mathsInPlainText("title"));
+    expect(retry).toContain(errors.outsideAnswerArea("f"));
+    expect(logs.warned()).toContain(errors.mathsInPlainText("title"));
+  });
+
+  it('the research request s3-mix, whose two answers wrote to "mix" with no value: Couldn\'t draw that (502), as before the fix', async () => {
+    // /tmp/sketch-research/req-s3-mix.json and resp-s3-mix.json (2026-11-14): the same
+    // rejection twice. The wire schema now lists every required field (atMs) before the
+    // optional ones (outputFormat.test.ts), so Claude can't write past a write's value.
+    const logs = quietLogs();
+    const noValue = {
+      objects: [
+        {
+          kind: "matrix",
+          id: "mix",
+          x: 600,
+          y: 420,
+          rows: [["", ""]],
+          label: "output",
+        },
+      ],
+      actions: [
+        {
+          do: "write",
+          target: { id: "mix", row: 0, col: 0 },
+          durationMs: 400,
+          atMs: 4300,
+        },
+      ],
+    };
+    const fake = script(reply(noValue), reply(noValue));
+    const res = await post({
+      description:
+        "Show how the weights 0.88 and 0.12 mix the two rows of V into the output row, step by step.",
+      fresh: true,
+      board: EMPTY,
+    });
+    await expectFailed(res, 502);
+    expect(fake.calls[1].body.messages.at(-1)?.content).toContain(
+      'write needs value "mix"',
+    );
+    expect(logs.logged()).toContain('rejected twice: write needs value "mix"');
+  });
 });
 
 describe("POST /api/sketch: the sketch against the board", () => {
