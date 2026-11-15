@@ -5,7 +5,8 @@ import { THEME_SCRIPT } from "@/player/theme";
 import "@/player/theme.css";
 
 export const metadata: Metadata = {
-  title: PRODUCT_NAME,
+  // A page that sets its own title (e.g. "Lesson") reads "Lesson · Unfolded" in the tab.
+  title: { default: PRODUCT_NAME, template: `%s · ${PRODUCT_NAME}` },
   description: PRODUCT_DESCRIPTION,
 };
 

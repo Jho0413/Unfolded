@@ -1,6 +1,6 @@
 # Project Brief: Visual-First AI Tutor
 
-> Working name: **Whiteboard** (rename freely). Track 03: Voice, Vision & Generative Media.
+> Name: **Unfolded** (was the working name Whiteboard). Track 03: Voice, Vision & Generative Media.
 
 ## One-liner
 
