@@ -5,17 +5,23 @@
 //   time the lesson plays (the Start press, which is also the user gesture the browser wants for
 //   audio and the mic prompt) until the lesson ends, or while the tab has been hidden for more
 //   than AWAY_MS. An open session bills ElevenLabs minutes, so it isn't kept for nothing.
-// - `control`: carries out a spoken command (the agent's control tools, qa/tools.ts). Ask
-//   closes first, then the command is an existing machine event (player/controls.ts
-//   commandEvent). "Carry on" closes Ask like the card's "Got it, carry on" (closeAsk, then
+// - `control`: carries out a spoken command (the agent's control tools, qa/tools.ts) with
+//   `controlLesson`: an existing machine event (player/controls.ts commandEvent), after closing
+//   Ask if it's open. "Carry on" closes Ask like the card's "Got it, carry on" (closeAsk, then
 //   afterAskEvent); after a go_to_step jump, the step it loads (paused) starts once it arrives.
+//   "Hold on" while asking closes Ask only from the Answer view (see controlLesson).
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   afterAskEvent,
   commandEvent,
   type LessonCommand,
 } from "@/player/controls";
-import type { PlayerState } from "@/player/machine";
+import type {
+  PlayerContext,
+  PlayerEvent,
+  PlayerState,
+  TransitionResult,
+} from "@/player/machine";
 import type { Player } from "@/player/usePlayer";
 import type { AskSession } from "@/qa/askSession";
 
@@ -43,12 +49,57 @@ export function wantsVoice({
   return !ended;
 }
 
+/**
+ * Carries out a spoken command. While asking, Ask closes first (session, then `closeAsk`), except
+ * for pause_lesson: the lesson is already held during Ask, so "hold on" there closes Ask (back to
+ * the lesson, held) only from the Answer view (a bare "go back" in the prompt, section 8). With no
+ * Answer view (a sketch still in flight, the agent still explaining) it does nothing: the agent
+ * calling it on its own once dropped the sketch mid-answer (board comment 6887751495).
+ */
+export function controlLesson(
+  command: LessonCommand,
+  deps: {
+    state: PlayerState;
+    ctx: PlayerContext;
+    send: (event: PlayerEvent) => TransitionResult;
+    closeSession: () => void;
+    /** Whether a drawn answer has replaced the lesson board (#94); false without one. */
+    isAnswerShowing?: () => boolean;
+    /** A step to start once it has loaded (after a go_to_step jump). */
+    playWhenReady: (step: number) => void;
+  },
+): void {
+  const { state: now, ctx, send } = deps;
+  if (now.kind !== "asking") {
+    const event = commandEvent(command, now, ctx);
+    if (event !== null) send(event);
+    return;
+  }
+  if (command === "pause" && !(deps.isAnswerShowing?.() ?? false)) return;
+  deps.closeSession();
+  const closed = send({ type: "closeAsk" });
+  if (closed.outcome !== "changed") return;
+  if (command === "resume") {
+    // As the card's "Got it, carry on" (section 5.6). After a go_to_step jump, closeAsk
+    // loads that step paused: start it once it's here.
+    if (now.goTo !== undefined) deps.playWhenReady(now.goTo);
+    const next = afterAskEvent("carryOn", now.from, closed.state);
+    if (next !== null) send(next);
+    return;
+  }
+  const event = commandEvent(command, closed.state, ctx);
+  if (event !== null) send(event);
+}
+
 export function useLessonVoice({
   player,
   session,
+  isAnswerShowing,
 }: {
   player: Player;
   session: AskSession;
+  /** Whether the Answer view is up (#94 wires it); "hold on" while asking needs it. */
+  isAnswerShowing?: () => boolean;
 }): { live: boolean; control: (command: LessonCommand) => void } {
   const { state, send, stepCount } = player;
 
@@ -92,28 +143,16 @@ export function useLessonVoice({
   }, [state, send]);
 
   const control = useCallback(
-    (command: LessonCommand) => {
-      const now = stateRef.current;
-      if (now.kind !== "asking") {
-        const event = commandEvent(command, now, { stepCount });
-        if (event !== null) send(event);
-        return;
-      }
-      session.close();
-      const closed = send({ type: "closeAsk" });
-      if (closed.outcome !== "changed") return;
-      if (command === "resume") {
-        // As the card's "Got it, carry on" (section 5.6). After a go_to_step jump, closeAsk
-        // loads that step paused: start it once it's here.
-        if (now.goTo !== undefined) playWhenReady.current = now.goTo;
-        const next = afterAskEvent("carryOn", now.from, closed.state);
-        if (next !== null) send(next);
-        return;
-      }
-      const event = commandEvent(command, closed.state, { stepCount });
-      if (event !== null) send(event);
-    },
-    [session, send, stepCount],
+    (command: LessonCommand) =>
+      controlLesson(command, {
+        state: stateRef.current,
+        ctx: { stepCount },
+        send,
+        closeSession: () => session.close(),
+        isAnswerShowing,
+        playWhenReady: (step) => (playWhenReady.current = step),
+      }),
+    [session, send, stepCount, isAnswerShowing],
   );
 
   return {

@@ -1,8 +1,16 @@
 // When the lesson keeps its voice session open (app/lesson/[lessonId]/useLessonVoice.ts,
 // issue #93): from the first play until the lesson ends, and not while the tab is away.
-import { describe, expect, it } from "vitest";
-import { wantsVoice } from "@/app/lesson/[lessonId]/useLessonVoice";
-import type { PlayerState } from "@/player/machine";
+import { describe, expect, it, vi } from "vitest";
+import {
+  controlLesson,
+  wantsVoice,
+} from "@/app/lesson/[lessonId]/useLessonVoice";
+import type { LessonCommand } from "@/player/controls";
+import {
+  type PlayerEvent,
+  type PlayerState,
+  transition,
+} from "@/player/machine";
 
 const base = { started: true, away: false, stepCount: 3 };
 const at = (state: PlayerState, over: Partial<typeof base> = {}) =>
@@ -33,5 +41,97 @@ describe("wantsVoice", () => {
 
   it("not while the tab has been hidden for a while", () => {
     expect(at({ kind: "playing", step: 0 }, { away: true })).toBe(false);
+  });
+});
+
+describe("controlLesson (a spoken command; Ask closes first, except 'hold on' with no Answer view)", () => {
+  const ctx = { stepCount: 3 };
+  const asking: PlayerState = {
+    kind: "asking",
+    from: { kind: "playing", step: 1 },
+  };
+  /** Runs `command` on the real machine; returns what happened. */
+  function run(
+    command: LessonCommand,
+    start: PlayerState,
+    isAnswerShowing?: () => boolean,
+  ) {
+    let state = start;
+    const events: PlayerEvent["type"][] = [];
+    const closeSession = vi.fn();
+    controlLesson(command, {
+      state: start,
+      ctx,
+      send: (event) => {
+        events.push(event.type);
+        const result = transition(state, event, ctx);
+        state = result.state;
+        return result;
+      },
+      closeSession,
+      isAnswerShowing,
+      playWhenReady: () => {},
+    });
+    return { events, closed: closeSession.mock.calls.length > 0, state };
+  }
+
+  const rows: [
+    string,
+    LessonCommand,
+    PlayerState,
+    (() => boolean) | undefined,
+    { events: string[]; closed: boolean; kind: PlayerState["kind"] },
+  ][] = [
+    [
+      "pause while asking, no Answer view (a sketch in flight): nothing, Ask and the view kept",
+      "pause",
+      asking,
+      () => false,
+      { events: [], closed: false, kind: "asking" },
+    ],
+    [
+      "pause while asking, no flag wired (before #94): nothing",
+      "pause",
+      asking,
+      undefined,
+      { events: [], closed: false, kind: "asking" },
+    ],
+    [
+      "pause while asking from the Answer view (a bare 'go back'): Ask closes, the lesson held",
+      "pause",
+      asking,
+      () => true,
+      { events: ["closeAsk"], closed: true, kind: "paused" },
+    ],
+    [
+      "pause while explaining (not asking): pause, as before",
+      "pause",
+      { kind: "playing", step: 1 },
+      () => false,
+      { events: ["pause"], closed: false, kind: "paused" },
+    ],
+    [
+      "resume while asking, no Answer view: Ask still closes and the lesson goes on",
+      "resume",
+      asking,
+      () => false,
+      { events: ["closeAsk", "resume"], closed: true, kind: "playing" },
+    ],
+    [
+      "replay while asking: Ask closes first, then replay",
+      "replay",
+      asking,
+      () => false,
+      { events: ["closeAsk", "replay"], closed: true, kind: "playing" },
+    ],
+  ];
+
+  it.each(rows)("%s", (_name, command, start, isAnswerShowing, want) => {
+    const got = run(command, start, isAnswerShowing);
+    expect({
+      events: got.events,
+      closed: got.closed,
+      kind: got.state.kind,
+    }).toEqual(want);
   });
 });

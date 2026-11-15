@@ -110,8 +110,16 @@ test("'hold on' keeps the lesson held; 'go back' starts the step before", async 
   await expect(player(page)).toHaveAttribute("data-step", "1");
   await expect(player(page)).toHaveAttribute("data-state", "playing");
 
+  // Speaking opens Ask (barge-in), which already holds the lesson; pause_lesson while asking
+  // with no answer view does nothing, so Ask stays open and the lesson stays held.
   await say(page, "hold on");
-  await expect(player(page)).toHaveAttribute("data-state", "paused");
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__qaFake?.toolCalls.map((c) => c.name)),
+    )
+    .toContain("pause_lesson");
+  await page.waitForTimeout(300);
+  await expect(player(page)).toHaveAttribute("data-state", "asking");
   expect(await audioPaused(page)).toBe(true);
 
   await say(page, "go back");
@@ -204,4 +212,57 @@ test("after a typed question, a spoken command still works: the mic is off only 
   // The same voice session the whole time, listening again.
   expect(await starts(page)).toEqual(["webrtc"]);
   await expect(listening(page)).toHaveText("Listening");
+});
+
+test("'hold on' while asking with a sketch in flight (no Answer view): Ask, the answer and the sketch are kept", async ({
+  page,
+}) => {
+  // The agent once called pause_lesson by itself mid-answer, which closed Ask and dropped the
+  // sketch (board comment 6887751495). Closing Ask from the Answer view (#94) is unit-tested
+  // (tests/unit/app/lesson/lessonVoice.test.ts).
+  await using run = await savedRun("e2e-voice-pause-asking");
+  let release: () => void = () => {};
+  const gate = new Promise<void>((r) => (release = r));
+  await page.route("**/api/sketch", async (route) => {
+    await gate;
+    await route.fulfill({
+      json: {
+        sketch: {
+          objects: [
+            {
+              kind: "text",
+              id: "note",
+              x: 800,
+              y: 700,
+              text: "row times column",
+            },
+          ],
+          actions: [],
+        },
+      },
+    });
+  });
+  await playing(page, run.lessonId);
+  const request = page.waitForRequest("**/api/sketch");
+  await say(page, "can you draw it?");
+  await expect(player(page)).toHaveAttribute("data-state", "asking");
+  await request;
+  await expect(answer(page)).toContainText("Let me sketch that");
+
+  await say(page, "hold on");
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__qaFake?.toolCalls.map((c) => c.name)),
+    )
+    .toContain("pause_lesson");
+  await page.waitForTimeout(300);
+  await expect(player(page)).toHaveAttribute("data-state", "asking");
+  await expect(panel(page)).toHaveAttribute("data-open", "true");
+
+  release();
+  const note = page
+    .getByTestId("whiteboard")
+    .locator('[data-object-id="note"]');
+  await expect(note).toHaveCount(1);
+  await expect(player(page)).toHaveAttribute("data-state", "asking");
 });
