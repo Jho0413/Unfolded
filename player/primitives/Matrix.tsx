@@ -19,9 +19,9 @@ import {
   drawAttr,
   drawOnProps,
   highlightLook,
+  motionProps,
   staggerIn,
-  useReducedMotion,
-  writeOpacity,
+  writeLook,
 } from "./motion";
 import { PulseRing } from "./Pulse";
 import {
@@ -57,23 +57,12 @@ interface CellProps {
   y: number;
   highlight: HighlightColor | null;
   active: readonly ActiveAction[];
-  reduced: boolean;
   /** The cell's share of its matrix's entrance (1 when not entering). */
   enter?: number;
 }
 
 /** One cell: highlight behind, value on top. Both fade in while being set. */
-function Cell({
-  matrix,
-  r,
-  c,
-  x,
-  y,
-  highlight,
-  active,
-  reduced,
-  enter = 1,
-}: CellProps) {
+function Cell({ matrix, r, c, x, y, highlight, active, enter = 1 }: CellProps) {
   const value = matrix.rows[r][c];
   const hlProgress = cellProgress(
     active,
@@ -84,7 +73,8 @@ function Cell({
     highlight,
   );
   const writeProgress = cellProgress(active, "write", matrix.id, r, c, value);
-  const look = highlightLook(hlProgress, reduced);
+  const look = highlightLook(hlProgress);
+  const write = writeLook(writeProgress);
   const hlBox = {
     x: x + HL_INSET,
     y: y + HL_INSET,
@@ -100,13 +90,14 @@ function Cell({
       data-highlight={highlightAttr(highlight)}
       data-highlight-opacity={opacityAttr(highlight ? hlProgress : 0)}
       data-value-opacity={opacityAttr(writeProgress)}
-      opacity={enter < 1 ? enter : undefined}
+      {...(enter < 1 ? { className: "wb-stagger", opacity: enter } : {})}
     >
       {highlight && (
         <>
           <rect
-            className="wb-glow"
-            style={{ ["--hl" as string]: HIGHLIGHT[highlight].stroke }}
+            {...motionProps(look, "wb-glow", {
+              "--hl": HIGHLIGHT[highlight].stroke,
+            })}
             x={hlBox.x}
             y={hlBox.y}
             width={hlBox.w}
@@ -132,7 +123,8 @@ function Cell({
         dominantBaseline="central"
         fontSize={CELL_FONT}
         fill={INK}
-        opacity={writeOpacity(writeProgress, reduced)}
+        {...motionProps(write)}
+        opacity={write.opacity}
       >
         {value}
       </text>
@@ -194,15 +186,8 @@ export function Matrix({
   const w = nCols * CELL.w;
   const h = nRows * CELL.h;
   const opacity = state.visible ? fadeOpacity(active, { id: matrix.id }) : 0;
-  const reduced = useReducedMotion();
-  const look = appearance(
-    active,
-    { id: matrix.id },
-    state.visible,
-    "stroke",
-    reduced,
-  );
-  const labelIn = reduced ? 1 : easeOutCubic(span(look.enter, 0.1, 0.5));
+  const look = appearance(active, { id: matrix.id }, state.visible, "stroke");
+  const labelIn = easeOutCubic(span(look.enter, 0.1, 0.5));
   const nCells = nRows * nCols;
   return (
     <g
@@ -216,19 +201,25 @@ export function Matrix({
       data-cx={matrix.x + w / 2}
       data-cy={matrix.y + h / 2}
       opacity={look.opacity}
+      {...motionProps(look)}
       visibility={state.visible ? undefined : "hidden"}
     >
       {matrix.label && (
         <text
           data-label
           x={matrix.x + w / 2}
-          y={matrix.y - BRACKET_GAP - LABEL_LIFT + (1 - labelIn) * RISE_PX}
+          y={matrix.y - BRACKET_GAP - LABEL_LIFT}
+          transform={
+            labelIn < 1 ? `translate(0 ${(1 - labelIn) * RISE_PX})` : undefined
+          }
           textAnchor="middle"
           fontSize={LABEL_FONT}
           fontWeight={600}
           letterSpacing={0.5}
           fill={MUTED}
-          opacity={labelIn < 1 ? labelIn : undefined}
+          {...(labelIn < 1
+            ? { className: "wb-stagger wb-rise", opacity: labelIn }
+            : {})}
         >
           {matrix.label}
         </text>
@@ -245,8 +236,7 @@ export function Matrix({
             y={matrix.y + r * CELL.h}
             highlight={state.cellHighlight?.[r]?.[c] ?? null}
             active={active}
-            reduced={reduced}
-            enter={staggerIn(look.enter, r * nCols + c, nCells, reduced)}
+            enter={staggerIn(look.enter, r * nCols + c, nCells)}
           />
         )),
       )}
@@ -280,7 +270,6 @@ export function Copy({
   const left = copy.x - w / 2;
   const top = copy.y - h / 2;
   const opacity = copy.visible ? fadeOpacity(active, copy.source) : 0;
-  const reduced = useReducedMotion();
   return (
     <g
       data-copy-of={partKey(copy.source)}
@@ -313,7 +302,6 @@ export function Copy({
             y={top + i * CELL.h}
             highlight={source.cellHighlight?.[r]?.[c] ?? null}
             active={active}
-            reduced={reduced}
           />
         )),
       )}

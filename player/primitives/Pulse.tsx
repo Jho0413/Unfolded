@@ -25,6 +25,7 @@ export function PulseRing({
   const grow = PULSE_GROW * pulse;
   return (
     <rect
+      className="wb-pulse"
       data-pulse={Math.round(pulse * 100) / 100}
       x={x - grow}
       y={y - grow}

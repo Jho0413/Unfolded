@@ -23,7 +23,36 @@
   );
 }
 
+/* The same glow for a formula's highlight (an HTML box in a foreignObject). */
+.wb-glow-box {
+  box-shadow: 0 0 6px
+    color-mix(in srgb, var(--hl) var(--wb-glow-mix), transparent);
+}
+
 /* A moved copy floats over the board while it slides. */
 .wb-lift {
   filter: drop-shadow(0 6px 12px var(--wb-lift));
+}
+
+/*
+ * Reduced motion: no draw-on, rise, stagger or pulse; what is fading in uses its quick fade
+ * (--wb-quick, set from the clock by ./motion.ts motionProps).
+ */
+@media (prefers-reduced-motion: reduce) {
+  .wb-draw {
+    stroke-dasharray: none;
+    stroke-dashoffset: 0;
+  }
+  .wb-rise {
+    transform: none;
+  }
+  .wb-pulse {
+    display: none;
+  }
+  .wb-stagger {
+    opacity: 1 !important;
+  }
+  .wb-quick {
+    opacity: var(--wb-quick) !important;
+  }
 }

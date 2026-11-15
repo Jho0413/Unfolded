@@ -17,7 +17,7 @@ import {
   objectProgress,
   opacityAttr,
 } from "./style";
-import { appearance, highlightLook, useReducedMotion } from "./motion";
+import { appearance, highlightLook, motionProps } from "./motion";
 import { PULSE_GROW } from "./Pulse";
 
 export function Latex({
@@ -34,15 +34,9 @@ export function Latex({
   const hl = state.highlight;
   const hlProgress = objectProgress(active, "highlight", latex.id, hl);
   const { html } = renderLatex(latex.tex);
-  const reduced = useReducedMotion();
-  const look = appearance(
-    active,
-    { id: latex.id },
-    state.visible,
-    "text",
-    reduced,
-  );
-  const hlLook = highlightLook(hlProgress, reduced);
+  const look = appearance(active, { id: latex.id }, state.visible, "text");
+  const hlLook = highlightLook(hlProgress);
+  const hlMotion = motionProps(hlLook, "wb-glow-box");
   return (
     <g
       data-object-id={latex.id}
@@ -55,6 +49,7 @@ export function Latex({
       data-cx={latex.x}
       data-cy={latex.y}
       opacity={look.opacity}
+      {...motionProps(look)}
       visibility={state.visible ? undefined : "hidden"}
       transform={look.rise > 0 ? `translate(0 ${look.rise})` : undefined}
     >
@@ -87,22 +82,30 @@ export function Latex({
             {hl && (
               <span
                 data-latex-highlight
+                className={hlMotion.className}
                 style={{
+                  ...hlMotion.style,
+                  ["--hl" as string]: HIGHLIGHT[hl].stroke,
                   position: "absolute",
                   inset: 0,
                   borderRadius: 10,
                   background: HIGHLIGHT[hl].fill,
                   border: `1.75px solid ${HIGHLIGHT[hl].stroke}`,
                   opacity: hlLook.opacity,
-                  // The glow, and the once-only pulse ring (./Pulse.tsx), as box shadows.
-                  boxShadow: [
-                    `0 0 6px color-mix(in srgb, ${HIGHLIGHT[hl].stroke} var(--wb-glow-mix), transparent)`,
-                    ...(hlLook.pulse > 0
-                      ? [
-                          `0 0 0 ${(PULSE_GROW * hlLook.pulse).toFixed(2)}px color-mix(in srgb, ${HIGHLIGHT[hl].stroke} ${Math.round(45 * hlLook.pulse)}%, transparent)`,
-                        ]
-                      : []),
-                  ].join(", "),
+                }}
+              />
+            )}
+            {hl && hlLook.pulse > 0 && (
+              // The once-only pulse ring (./Pulse.tsx), around the highlight box.
+              <span
+                className="wb-pulse"
+                data-pulse={Math.round(hlLook.pulse * 100) / 100}
+                style={{
+                  position: "absolute",
+                  inset: -PULSE_GROW * hlLook.pulse,
+                  borderRadius: 10 + PULSE_GROW * hlLook.pulse,
+                  border: `${1.5 + hlLook.pulse}px solid ${HIGHLIGHT[hl].stroke}`,
+                  opacity: 0.6 * hlLook.pulse,
                 }}
               />
             )}

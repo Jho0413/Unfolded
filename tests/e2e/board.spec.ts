@@ -391,3 +391,38 @@ test.describe("demo-m1 through sceneAt", () => {
     await expect(page.locator("[data-copy-of]")).toHaveCount(0);
   });
 });
+
+test.describe("draw-on and reduced motion (issue #101)", () => {
+  // The arrows scene shows the arrow ga at 3000 ms over 400 ms: 3100 is a quarter in.
+  const line = (page: Page) => object(page, "ga").locator("line").first();
+  const computed = (loc: Locator, prop: string) =>
+    loc.evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop);
+
+  test("a quarter into its show, the arrow is drawn part way, from the clock", async ({
+    page,
+  }) => {
+    await page.goto("/dev/board?scene=arrows&t=3100");
+    await expect(object(page, "ga")).toHaveAttribute("data-draw", "0.58");
+    expect(
+      Number(await line(page).getAttribute("stroke-dashoffset")),
+    ).toBeCloseTo(0.421875);
+    expect(await computed(line(page), "stroke-dasharray")).not.toBe("none");
+    // Drawn in full once the show ends.
+    await page.goto("/dev/board?scene=arrows&t=3400");
+    await expect(object(page, "ga")).toHaveAttribute("data-draw", "1");
+    expect(await line(page).getAttribute("stroke-dashoffset")).toBeNull();
+  });
+
+  test("prefers-reduced-motion: no draw-on, and a quick fade (opaque a quarter in)", async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/dev/board?scene=arrows&t=3100");
+    expect(await computed(line(page), "stroke-dasharray")).toBe("none");
+    expect(await computed(line(page), "stroke-dashoffset")).toBe("0px");
+    expect(await computed(object(page, "ga"), "opacity")).toBe("1");
+    // Without the preference, the same frame is still fading and drawing.
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    expect(await computed(line(page), "stroke-dasharray")).not.toBe("none");
+  });
+});

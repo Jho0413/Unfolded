@@ -20,5 +20,7 @@ export function easeInOutCubic(p: number): number {
 
 /** Progress of a sub-span [start, start + length] of 0..1 (0 before it, 1 after). */
 export function span(p: number, start: number, length: number): number {
+  // Exactly 1 at the end: (1 - 0.8) / 0.2 is 0.9999999999999998 in floating point.
+  if (p >= start + length) return 1;
   return length <= 0 ? (p >= start ? 1 : 0) : clamp01((p - start) / length);
 }

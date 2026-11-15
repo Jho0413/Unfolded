@@ -10,12 +10,7 @@ import {
   objectProgress,
   opacityAttr,
 } from "./style";
-import {
-  appearance,
-  highlightLook,
-  useReducedMotion,
-  writeOpacity,
-} from "./motion";
+import { appearance, highlightLook, motionProps, writeLook } from "./motion";
 import { PulseRing } from "./Pulse";
 
 export function Text({
@@ -35,15 +30,9 @@ export function Text({
   const { w: boxW, h: boxH } = textBox(text.text, fontSize);
   const hlProgress = objectProgress(active, "highlight", text.id, hl);
   const writeProgress = objectProgress(active, "write", text.id, text.text);
-  const reduced = useReducedMotion();
-  const look = appearance(
-    active,
-    { id: text.id },
-    state.visible,
-    "text",
-    reduced,
-  );
-  const hlLook = highlightLook(hlProgress, reduced);
+  const look = appearance(active, { id: text.id }, state.visible, "text");
+  const hlLook = highlightLook(hlProgress);
+  const write = writeLook(writeProgress);
   const box = { x: text.x - boxW / 2, y: text.y - boxH / 2, w: boxW, h: boxH };
   return (
     <g
@@ -59,14 +48,16 @@ export function Text({
       data-cx={text.x}
       data-cy={text.y}
       opacity={look.opacity}
+      {...motionProps(look)}
       visibility={state.visible ? undefined : "hidden"}
       transform={look.rise > 0 ? `translate(0 ${look.rise})` : undefined}
     >
       {hl && (
         <>
           <rect
-            className="wb-glow"
-            style={{ ["--hl" as string]: HIGHLIGHT[hl].stroke }}
+            {...motionProps(hlLook, "wb-glow", {
+              "--hl": HIGHLIGHT[hl].stroke,
+            })}
             x={box.x}
             y={box.y}
             width={box.w}
@@ -92,7 +83,8 @@ export function Text({
         dominantBaseline="central"
         fontSize={fontSize}
         fill={INK}
-        opacity={writeOpacity(writeProgress, reduced)}
+        {...motionProps(write)}
+        opacity={write.opacity}
       >
         {text.text}
       </text>
