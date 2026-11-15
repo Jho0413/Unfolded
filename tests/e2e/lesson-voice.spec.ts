@@ -244,7 +244,8 @@ test("'hold on' while asking with a sketch in flight (no Answer view): Ask, the 
   });
   await playing(page, run.lessonId);
   const request = page.waitForRequest("**/api/sketch");
-  await say(page, "can you draw it?");
+  // draw_scene waits for the sketch (#90), so this turn only ends after release().
+  const drawTurn = say(page, "can you draw it?");
   await expect(player(page)).toHaveAttribute("data-state", "asking");
   await request;
   await expect(answer(page)).toContainText("Let me sketch that");
@@ -260,6 +261,7 @@ test("'hold on' while asking with a sketch in flight (no Answer view): Ask, the 
   await expect(panel(page)).toHaveAttribute("data-open", "true");
 
   release();
+  await drawTurn;
   const note = page
     .getByTestId("whiteboard")
     .locator('[data-object-id="note"]');
