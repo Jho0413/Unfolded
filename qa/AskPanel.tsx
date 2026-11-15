@@ -2,9 +2,9 @@
 // The Ask panel (ARCHITECTURE.md section 8): voice and typed questions to the
 // Q&A agent, through qa/conversation.ts. The player machine owns the state:
 // the page passes `open` (state.kind === "asking") and turns the callbacks
-// into machine events (ask, closeAsk, agentDisconnected). The panel shows the
-// Ask messages of section 7 itself, so the page shouldn't also show the
-// machine's "Q&A ended unexpectedly." notice.
+// into machine events (ask, closeAsk). The panel shows the Ask messages of
+// section 7 itself: a dropped session keeps Ask open with "Q&A ended
+// unexpectedly." and Retry (qa/connector.ts), so the page never closes Ask for it.
 //
 // What it looks like is section 5.6: the always-visible Ask box (a question
 // typed while Ask is closed opens it and is sent at once), and while asking,
@@ -70,8 +70,6 @@ export type AskPanelProps = {
    * (player/controls.ts afterAskEvent decides what follows).
    */
   onClose: (how: AskClose) => void;
-  /** The session dropped: send the machine `agentDisconnected`. */
-  onAgentDisconnected: () => void;
   /**
    * Whether Ask can open now (the machine takes `ask`). While it can't (a failed step), the
    * closed panel's box and mic are off, so a typed question is never left waiting.
@@ -144,7 +142,6 @@ export function AskPanel({
   tools,
   onAsk,
   onClose,
-  onAgentDisconnected,
   canAsk = true,
   captions = true,
   live = false,
@@ -174,14 +171,12 @@ export function AskPanel({
   // The page's callbacks, read by the connector, which outlives renders.
   const pageRef = useRef({
     onClose,
-    onAgentDisconnected,
     onLearnerMessage,
     onLearnerSpeech,
   });
   useEffect(() => {
     pageRef.current = {
       onClose,
-      onAgentDisconnected,
       onLearnerMessage,
       onLearnerSpeech,
     };
@@ -267,6 +262,7 @@ export function AskPanel({
         typedEcho.current.splice(typedEcho.current.indexOf(m.text), 1);
         return;
       }
+      if (m.role === "agent") connectorRef.current?.answered();
       // Words in the lesson's session with Ask closed: the learner spoke, or the agent did.
       // While Ask is open only the learner's words count (`speech`): the agent's own voice
       // never holds a drawn answer.
@@ -317,7 +313,6 @@ export function AskPanel({
           pendingNote.current = null;
         }
       },
-      onDropped: () => pageRef.current.onAgentDisconnected(),
       onAgentEnded: () => pageRef.current.onClose("dismiss"),
       log: console,
     });
@@ -597,7 +592,12 @@ export function AskPanel({
       {open ? (
         <TutorCard
           view={card}
-          onAction={() => onClose("carryOn")}
+          onAction={(action) => {
+            if (action === "carryOn") return onClose("carryOn");
+            // The question is sent again: its echo, if any, isn't a new one.
+            const resent = connectorRef.current?.retry();
+            if (resent) typedEcho.current.push(resent);
+          }}
           notices={notices}
         />
       ) : (

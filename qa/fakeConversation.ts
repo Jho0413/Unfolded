@@ -196,6 +196,12 @@ export class FakeConversation {
   failNextSend = false;
 
   /**
+   * Test hook: the agent hears questions but never answers, as a session the server never set
+   * up (rehearsal finding 2: a text-only WebRTC session) until it hangs up.
+   */
+  unanswering = false;
+
+  /**
    * Test hook: the learner speaks into the mic (a voice session). The server's VAD scores the
    * speech first, then the transcript arrives and the agent answers, as for a typed question.
    */
@@ -231,6 +237,7 @@ export class FakeConversation {
 
   private async answer(text: string): Promise<void> {
     this.emit({ role: "user", text });
+    if (this.unanswering) return;
     const turn = this.script.find((t) => t.match.test(text));
     if (!turn) return;
     // The agent speaks its reply; a no-wait tool is called during it, as the real agent does.

@@ -1,6 +1,6 @@
 // The Ask panel's connection (qa/connector.ts, issue #84): typed questions never wait on the
-// mic, stale attempts never start a session, failures show section 7 messages, and a blocked
-// WebRTC connection falls back to the websocket.
+// mic, stale attempts never start a session, failures show section 7 messages (with Retry), a
+// text-only session goes over the websocket, and a blocked WebRTC connection falls back to it.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ATTEMPT_TIMEOUT_MS,
@@ -43,7 +43,6 @@ function setup(over: Partial<ConnectorDeps> = {}) {
     requestMicrophone: vi.fn(async () => true),
     onState: (s) => states.push(s),
     onConnected: vi.fn(),
-    onDropped: vi.fn(),
     onAgentEnded: vi.fn(),
     log: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
     ...over,
@@ -97,7 +96,7 @@ describe("deciding the session (typed questions never wait on the mic)", () => {
     c.typing();
     await settle();
     expect(starts).toEqual([
-      { transport: "webrtc", conversationToken: "tok", textOnly: true },
+      { transport: "websocket", signedUrl: "wss://signed", textOnly: true },
     ]);
     // A late mic answer changes nothing.
     mic.resolve(true);
@@ -187,10 +186,10 @@ describe("deciding the session (typed questions never wait on the mic)", () => {
     c.error("voice blocked over the websocket too");
     await settle();
     expect(starts.map((s) => [s.transport, s.textOnly])).toEqual([
-      ["webrtc", true],
+      ["websocket", true],
       ["webrtc", false],
       ["websocket", false],
-      ["webrtc", true],
+      ["websocket", true],
     ]);
     expect(c.current).toMatchObject({
       phase: "connecting",
@@ -290,7 +289,7 @@ describe("no session after the panel gave up (the timeout race)", () => {
 });
 
 describe("errors are shown, not swallowed", () => {
-  it("a question that can't be sent: 'Q&A ended unexpectedly.', logged, the machine told", async () => {
+  it("a question that can't be sent: 'Q&A ended unexpectedly.', logged, Ask kept open to retry", async () => {
     const { c, deps, conversation } = setup();
     c.open();
     await settle();
@@ -300,40 +299,131 @@ describe("errors are shown, not swallowed", () => {
     });
     expect(c.send("why?")).toBe(false);
     expect(c.current).toMatchObject({
-      phase: "idle",
+      phase: "failed",
       notice: CONNECTOR_MESSAGES.ended,
     });
-    expect(deps.onDropped).toHaveBeenCalledOnce();
+    expect(deps.onAgentEnded).not.toHaveBeenCalled();
     expect(deps.log.error).toHaveBeenCalledWith(
       "[qa] couldn't send the question",
       expect.any(Error),
     );
   });
 
-  it("a connected session drops: 'Q&A ended unexpectedly.'; the agent ends it: closed quietly", async () => {
+  it("a connected session drops: 'Q&A ended unexpectedly.', Ask kept open; the agent ends it after answering: closed quietly", async () => {
     const a = setup();
     a.c.open();
     await settle();
     a.c.connected();
     a.c.disconnected("error");
-    expect(a.c.current.notice).toBe(CONNECTOR_MESSAGES.ended);
-    expect(a.deps.onDropped).toHaveBeenCalledOnce();
+    expect(a.c.current).toMatchObject({
+      phase: "failed",
+      notice: CONNECTOR_MESSAGES.ended,
+    });
+    expect(a.deps.onAgentEnded).not.toHaveBeenCalled();
 
     const b = setup();
     b.c.open();
     await settle();
     b.c.connected();
+    b.c.send("why?");
+    b.c.answered();
     b.c.disconnected("agent");
-    expect(b.c.current.notice).toBeNull();
+    expect(b.c.current).toMatchObject({ phase: "idle", notice: null });
     expect(b.deps.onAgentEnded).toHaveBeenCalledOnce();
   });
 
-  it("only the drop message outlives the panel", async () => {
-    const { c } = setup({ requestMicrophone: async () => false });
+  it("the agent hangs up on an unanswered typed question (rehearsal finding 2): a drop, not a silent close", async () => {
+    const { c, deps } = setup({ requestMicrophone: async () => false });
+    c.open();
+    c.send("why rows times columns?");
+    await settle();
+    c.connected();
+    c.disconnected("agent");
+    expect(c.current).toMatchObject({
+      phase: "failed",
+      notice: CONNECTOR_MESSAGES.ended,
+    });
+    expect(deps.onAgentEnded).not.toHaveBeenCalled();
+    expect(deps.log.error).toHaveBeenCalledWith(
+      "[qa] the session dropped (agent)",
+    );
+  });
+
+  it("Retry after a drop: a fresh session in the same mode, the unanswered question sent again", async () => {
+    const { c, starts, sent, deps } = setup({
+      requestMicrophone: async () => false,
+    });
+    c.open();
+    c.send("why?");
+    await settle();
+    c.connected();
+    expect(sent).toEqual(["why?"]);
+    c.disconnected("error");
+    expect(c.retry()).toBe("why?");
+    expect(c.current).toMatchObject({ phase: "connecting", notice: null });
+    await settle();
+    expect(starts.map((s) => [s.transport, s.textOnly])).toEqual([
+      ["websocket", true],
+      ["websocket", true],
+    ]);
+    c.connected();
+    expect(sent).toEqual(["why?", "why?"]);
+    expect(deps.onConnected).toHaveBeenCalledTimes(2);
+    // Answered, then a drop: Retry reconnects with nothing to resend.
+    c.answered();
+    c.disconnected("error");
+    expect(c.retry()).toBeNull();
+    await settle();
+    c.connected();
+    expect(sent).toHaveLength(2);
+  });
+
+  it("Retry after no session could start: tried again, the queued question kept", async () => {
+    const fetchToken = vi.fn(async () => null as string | null);
+    const fetchSignedUrl = vi.fn(async () => null as string | null);
+    const { c, sent } = setup({ fetchToken, fetchSignedUrl });
+    c.open();
+    c.send("why?");
+    await settle();
+    expect(c.current).toMatchObject({
+      phase: "failed",
+      notice: CONNECTOR_MESSAGES.unavailable,
+    });
+    fetchSignedUrl.mockResolvedValue("wss://signed");
+    c.retry();
+    await settle();
+    c.connected();
+    expect(sent).toEqual(["why?"]);
+  });
+
+  it("Retry does nothing unless Ask is open and failed", async () => {
+    const { c, starts } = setup();
+    expect(c.retry()).toBeNull();
     c.open();
     await settle();
+    c.connected();
+    expect(c.retry()).toBeNull();
+    c.disconnected("error");
     c.close();
-    expect(c.current.notice).toBeNull();
+    expect(c.retry()).toBeNull();
+    await settle();
+    expect(starts).toHaveLength(1);
+  });
+
+  it("closing Ask clears its messages, the drop's too", async () => {
+    const a = setup({ requestMicrophone: async () => false });
+    a.c.open();
+    await settle();
+    a.c.close();
+    expect(a.c.current.notice).toBeNull();
+
+    const b = setup();
+    b.c.open();
+    await settle();
+    b.c.connected();
+    b.c.disconnected("error");
+    b.c.close();
+    expect(b.c.current).toMatchObject({ phase: "idle", notice: null });
   });
 });
 
@@ -554,7 +644,7 @@ describe("the lesson's voice session (issue #93)", () => {
     expect(text.starts.map((s) => s.textOnly)).toEqual([true, false]);
   });
 
-  it("drops with Ask closed: no message, the machine isn't told, reopened after LIVE_RETRY_MS", async () => {
+  it("drops with Ask closed: no message, Ask isn't closed, reopened after LIVE_RETRY_MS", async () => {
     const { c, starts, deps } = setup();
     c.setLive(true);
     await settle();
@@ -565,7 +655,7 @@ describe("the lesson's voice session (issue #93)", () => {
       live: false,
       notice: null,
     });
-    expect(deps.onDropped).not.toHaveBeenCalled();
+    expect(deps.onAgentEnded).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(LIVE_RETRY_MS);
     await settle();
     expect(starts).toHaveLength(2);
@@ -590,15 +680,17 @@ describe("the lesson's voice session (issue #93)", () => {
     expect(c.current.notice).toBe(CONNECTOR_MESSAGES.unavailable);
   });
 
-  it("drops while Ask is open: 'Q&A ended unexpectedly.' as before, reopened once Ask closes", async () => {
-    const { c, starts, deps } = setup();
+  it("drops while Ask is open: 'Q&A ended unexpectedly.' with Retry, reopened once Ask closes", async () => {
+    const { c, starts } = setup();
     c.setLive(true);
     await settle();
     c.connected();
     c.open();
     c.disconnected("error");
-    expect(c.current.notice).toBe(CONNECTOR_MESSAGES.ended);
-    expect(deps.onDropped).toHaveBeenCalledOnce();
+    expect(c.current).toMatchObject({
+      phase: "failed",
+      notice: CONNECTOR_MESSAGES.ended,
+    });
     c.close();
     await settle();
     expect(starts).toHaveLength(2);
@@ -635,7 +727,7 @@ describe("the lesson's voice session (issue #93)", () => {
     c.typing();
     await settle();
     expect(starts).toEqual([
-      { transport: "webrtc", conversationToken: "tok", textOnly: true },
+      { transport: "websocket", signedUrl: "wss://signed", textOnly: true },
     ]);
     mic.resolve(true);
     await settle();

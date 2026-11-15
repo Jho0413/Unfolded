@@ -10,7 +10,8 @@
 //   A switch to voice that fails on both transports goes back to a text session.
 // - Each attempt has a generation: after every await, a stale attempt (the panel closed,
 //   failed, or moved on) stops, so nothing starts after the panel has given up.
-// - WebRTC first (or the transport that last worked on this page). If it fails before
+// - Voice: WebRTC first (or the transport that last worked on this page). Text-only: the
+//   websocket first (transportFor: WebRTC never answers a session that sends no audio). If it fails before
 //   connecting (no credentials, the start rejects, an error or a disconnect arrives, or it takes
 //   longer than ATTEMPT_TIMEOUT_MS, credentials included), the other transport is tried once, at
 //   once: a websocket with a signed URL when WebRTC is blocked on venue Wi-Fi. The conversation
@@ -24,7 +25,9 @@
 //   up to MAX_LIVE_RETRIES times, LIVE_RETRY_MS apart.
 // - Failures are logged and shown with the section 7 messages: "Questions are unavailable right
 //   now." when no session starts, "Q&A ended unexpectedly." when a session drops or a question
-//   can't be sent.
+//   can't be sent. Either way Ask stays open (failed) and the card offers Retry: a fresh session,
+//   with the unanswered typed question sent again. The agent ending a session with a typed
+//   question still unanswered counts as a drop (rehearsal finding 2: it never closes silently).
 import { MESSAGES } from "@/player/machine";
 import { QA_UNAVAILABLE } from "@/shared/lesson";
 import type {
@@ -76,9 +79,7 @@ export type ConnectorDeps = {
   onState: (state: ConnectorState) => void;
   /** The session connected: send the agent its context (queued questions follow). */
   onConnected: (state: ConnectorState) => void;
-  /** A connected session dropped, or a question couldn't be sent: the machine's agentDisconnected. */
-  onDropped: () => void;
-  /** The agent ended the session normally: close Ask. */
+  /** The agent ended the session normally (its last question answered): close Ask. */
   onAgentEnded: () => void;
   log: Pick<Console, "error" | "warn" | "info">;
   setTimer?: (fn: () => void, ms: number) => unknown;
@@ -114,6 +115,8 @@ export class AskConnector {
   private state: ConnectorState = INITIAL_CONNECTOR_STATE;
   private gen = 0;
   private queue: string[] = [];
+  /** The latest typed question until the agent answers (answered()): Retry sends it again. */
+  private unanswered: string | null = null;
   /** Set until the mode is decided for the current open (typing or the mic answer). */
   private decide: ((textOnly: boolean) => void) | null = null;
   private timer: unknown = null;
@@ -164,6 +167,7 @@ export class AskConnector {
   /** Ask opened: fetch credentials and ask for the mic in parallel; the first answer decides. */
   open(): void {
     this.askOpen = true;
+    this.unanswered = null;
     this.cancelLiveRetry();
     const { phase, live } = this.state;
     if (live && (phase === "connected" || phase === "connecting")) {
@@ -175,8 +179,8 @@ export class AskConnector {
     this.set({ ...INITIAL_CONNECTOR_STATE, phase: "waiting" });
     const decided = new Promise<boolean>((resolve) => (this.decide = resolve));
     // Fetched now, not after the mic answer; a failure shows up when the attempt uses it.
-    const transport = this.preferred;
-    const credentials = this.credentials(transport).catch(() => null);
+    const early = this.preferred;
+    const credentials = this.credentials(early).catch(() => null);
     void this.deps.requestMicrophone().then(
       (mic) => this.micAnswered(gen, mic),
       (err: unknown) => {
@@ -188,10 +192,13 @@ export class AskConnector {
       const textOnly = await decided;
       if (gen !== this.gen) return;
       this.set({ phase: "connecting", textOnly });
+      const transport = this.transportFor(textOnly);
       await this.tryTransport(
         gen,
         { transport, textOnly, canFallBack: true, micSwitch: false },
-        credentials,
+        transport === early
+          ? credentials
+          : this.credentials(transport).catch(() => null),
       );
     })();
   }
@@ -230,6 +237,7 @@ export class AskConnector {
    */
   close(): void {
     this.askOpen = false;
+    this.unanswered = null;
     const { phase, textOnly } = this.state;
     const working = phase === "connected" || phase === "connecting";
     if (
@@ -239,23 +247,13 @@ export class AskConnector {
       this.attempt?.micSwitch !== true
     ) {
       this.queue = [];
-      // Only a dropped session's message outlives the panel.
-      const notice =
-        this.state.notice === CONNECTOR_MESSAGES.ended
-          ? CONNECTOR_MESSAGES.ended
-          : null;
-      this.set({ live: true, notice });
+      this.set({ live: true, notice: null });
       return;
     }
     this.begin();
     this.queue = [];
     this.deps.conversation.end();
-    // Only a dropped session's message outlives the panel.
-    const notice =
-      this.state.notice === CONNECTOR_MESSAGES.ended
-        ? CONNECTOR_MESSAGES.ended
-        : null;
-    this.set({ ...INITIAL_CONNECTOR_STATE, notice });
+    this.set(INITIAL_CONNECTOR_STATE);
     if (this.wantLive) this.startLive();
   }
 
@@ -287,10 +285,42 @@ export class AskConnector {
     if (phase === "waiting" || phase === "connecting") {
       this.decideMode(true);
       this.queue.push(text);
+      this.unanswered = text;
       return true;
     }
     if (phase !== "connected") return false;
+    this.unanswered = text;
     return this.sendNow(text);
+  }
+
+  /** The agent said something: the latest typed question has its answer. */
+  answered(): void {
+    this.unanswered = null;
+  }
+
+  /**
+   * The card's Retry, once a session dropped or couldn't start: a fresh session in the same
+   * mode, the unanswered typed question queued for it. Returns that question, or null.
+   */
+  retry(): string | null {
+    if (!this.askOpen || this.state.phase !== "failed") return null;
+    const gen = this.begin();
+    const { textOnly } = this.state;
+    const question = this.unanswered;
+    this.queue = question === null ? [] : [question];
+    this.set({
+      phase: "connecting",
+      notice: null,
+      live: false,
+      transport: null,
+    });
+    const transport = this.transportFor(textOnly);
+    void this.tryTransport(
+      gen,
+      { transport, textOnly, canFallBack: true, micSwitch: false },
+      this.credentials(transport).catch(() => null),
+    );
+    return question;
   }
 
   // ---- conversation callbacks
@@ -304,7 +334,8 @@ export class AskConnector {
     }
     this.stopTimer();
     if (this.state.live) this.liveRetries = 0;
-    this.preferred = attempt.transport;
+    // A text session working says nothing about WebRTC (transportFor).
+    if (!attempt.textOnly) this.preferred = attempt.transport;
     this.set({ phase: "connected", transport: attempt.transport });
     this.deps.onConnected(this.state);
     const queued = this.queue;
@@ -327,14 +358,18 @@ export class AskConnector {
       if (reason !== "user")
         this.attemptFailed(`disconnected (${reason}) before connecting`);
     } else if (phase === "connected") {
-      this.set({ phase: "idle" });
-      if (reason === "error") {
-        this.deps.log.error("[qa] the session dropped");
-        this.set({ notice: CONNECTOR_MESSAGES.ended });
-        this.deps.onDropped();
-      } else if (reason === "agent") {
-        this.deps.onAgentEnded();
+      if (
+        reason === "error" ||
+        (reason === "agent" && this.unanswered !== null)
+      ) {
+        // An agent that hangs up on a typed question (a text-only session the server never
+        // set up, rehearsal finding 2) is a drop too: the learner gets a message and Retry.
+        this.deps.log.error(`[qa] the session dropped (${reason})`);
+        this.dropped();
+        return;
       }
+      this.set({ phase: "idle" });
+      if (reason === "agent") this.deps.onAgentEnded();
     }
   }
 
@@ -432,6 +467,16 @@ export class AskConnector {
     decide(textOnly);
   }
 
+  /**
+   * Voice goes over WebRTC (or the transport that last worked); a text-only session over the
+   * websocket. On WebRTC the server waits for the client to publish audio before it fully sets
+   * the session up, so a text-only one (no mic) connects, never answers, and is dropped about
+   * 12 s later (rehearsal finding 2).
+   */
+  private transportFor(textOnly: boolean): Transport {
+    return textOnly ? "websocket" : this.preferred;
+  }
+
   private async credentials(transport: Transport): Promise<Credentials | null> {
     if (transport === "webrtc") {
       const conversationToken = await this.deps.fetchToken();
@@ -503,7 +548,7 @@ export class AskConnector {
     if (failed.micSwitch) {
       // Voice failed on both transports: back to typing, as before the click.
       this.deps.log.info("[qa] voice failed; back to a text session");
-      const transport = this.preferred;
+      const transport = this.transportFor(true);
       this.set({ textOnly: true, notice: CONNECTOR_MESSAGES.voiceFailed });
       void this.tryTransport(
         ++this.gen,
@@ -532,13 +577,22 @@ export class AskConnector {
       return true;
     } catch (err) {
       this.deps.log.error("[qa] couldn't send the question", err);
-      this.queue = [];
-      this.begin();
-      this.deps.conversation.end();
-      this.set({ phase: "idle", notice: CONNECTOR_MESSAGES.ended });
-      this.deps.onDropped();
+      this.dropped();
       return false;
     }
+  }
+
+  /** The session is gone with Ask open: "Q&A ended unexpectedly.", and the card offers Retry. */
+  private dropped(): void {
+    this.begin();
+    this.queue = [];
+    this.deps.conversation.end();
+    this.set({
+      phase: "failed",
+      live: false,
+      transport: null,
+      notice: CONNECTOR_MESSAGES.ended,
+    });
   }
 
   private stopTimer(): void {

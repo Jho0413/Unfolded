@@ -276,8 +276,11 @@ export type AskCardInput = {
   captions: boolean;
 };
 
-/** The one Ask action: "Got it, carry on" (closeAsk, then player/controls.ts afterAskEvent). */
-export type AskAction = "carryOn";
+/**
+ * The Ask actions: "Got it, carry on" (closeAsk, then player/controls.ts afterAskEvent), and
+ * Retry once a session dropped or couldn't start (qa/connector.ts retry).
+ */
+export type AskAction = "carryOn" | "retry";
 
 /** The card while asking. */
 export function askCard(input: AskCardInput): CardView<AskAction> {
@@ -291,7 +294,18 @@ export function askCard(input: AskCardInput): CardView<AskAction> {
     answer: shown,
     wait,
   });
-  // No session (replay, failed, or dropped): the section 7 notice says why.
+  // No session (replay, failed, or dropped): the section 7 notice says why. A session that
+  // dropped or couldn't start can be tried again; a replay run has no Q&A at all.
+  if (phase === "failed" && !input.replay)
+    return {
+      ...base,
+      status: CARD_STATUS.stopped,
+      body: ask(null),
+      buttons: [
+        { label: CARD_TEXT.retry, action: "retry", primary: true },
+        carryOn,
+      ],
+    };
   if (input.replay || phase === "failed" || phase === "idle")
     return { ...base, status: CARD_STATUS.stopped, body: ask(null) };
   // The agent's holding line ("Let me show you.") may already be in: the answer isn't.
