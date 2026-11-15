@@ -8,7 +8,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { ANSWER_VIEW_TEXT } from "@/app/lesson/[lessonId]/boardView";
-import { ANSWER_CONTEXT } from "@/qa/answerContext";
+import { ANSWER_CONTEXT, answerContextUpdate } from "@/qa/answerContext";
 import { ANSWER_SHOWING } from "@/qa/tools";
 import { CANVAS } from "@/shared/scene";
 import { ANSWER_TEMPLATE } from "@/shared/validate";
@@ -32,6 +32,12 @@ const contextUpdates = (page: Page) =>
 
 /** The fake agent's draw_scene description (qa/fakeConversation.ts). */
 const DESCRIPTION = "Circle the first row of q";
+/** What the agent is told when the answer shows: the description and the narrator's words (#105). */
+const SHOWING_UPDATE = answerContextUpdate(false, {
+  kind: "drawn",
+  description: DESCRIPTION,
+  narration: "Here it is.",
+});
 
 /** Two answers laid out from the template, to tell a follow-up from the first. */
 const answerSketch = (id: string, title: string) => ({
@@ -87,9 +93,7 @@ test("draw_scene: the Answer view, with its tag and chip, instead of the lesson;
   await expect(
     object(page, "first").locator('[data-cell="0,0"]'),
   ).toHaveAttribute("data-highlight", "accent");
-  await expect
-    .poll(() => contextUpdates(page))
-    .toContain(ANSWER_CONTEXT.showing(DESCRIPTION));
+  await expect.poll(() => contextUpdates(page)).toContain(SHOWING_UPDATE);
 });
 
 test("a follow-up draw_scene replaces the drawing with the new one", async ({
