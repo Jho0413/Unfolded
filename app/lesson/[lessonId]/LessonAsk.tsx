@@ -198,7 +198,12 @@ export function LessonAsk({
       canAsk={player.can({ type: "ask" })}
       captions={captions}
       live={voice.live}
-      onLearnerMessage={signals?.heard}
+      // "Hold on" over a drawn answer isn't a question (qa/askSignals.ts isAnswerControl).
+      onLearnerMessage={
+        signals &&
+        ((text) =>
+          signals.heard(text, { answerShowing: answerShowing(session) }))
+      }
       // The learner speaking over a drawn answer holds its narration (barge-in, #105).
       onLearnerSpeech={() => answerPlayer.send("learnerSpoke")}
       handle={askHandle}
