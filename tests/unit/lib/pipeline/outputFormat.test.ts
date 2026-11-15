@@ -699,9 +699,9 @@ describe("widgetJson (#110): one test per row", () => {
       withWidget(JSON.stringify({ ...HEATMAP_WIDGET, values: [] })),
     );
     expect(value).not.toHaveProperty("widget");
-    expect(errs).toEqual([
-      expect.stringMatching(/^widgetJson: could not be read \(.+\)$/),
-    ]);
+    expect(errs).toContain(
+      "widgetJson.values: Too small: expected array to have >=1 items",
+    );
   });
 
   it("a widget the contract rejects (an expr with an unknown name): validateStep's named error, for the retry", () => {
@@ -938,9 +938,9 @@ describe("objectsJson: one test per row", () => {
       withJson(JSON.stringify([{ ...HEATMAP, values: [] }, PLOT])),
     );
     expect(value.objects.map((o) => o.id)).toEqual(["p", "a"]);
-    expect(errs).toEqual([
-      expect.stringMatching(/^objectsJson\.0: could not be read \(.+\)$/),
-    ]);
+    expect(errs).toContain(
+      "objectsJson.0.values: Too small: expected array to have >=1 items",
+    );
   });
 
   it("actions on objectsJson's objects validate as on any object: a heatmap row shown, a plot series drawn on", () => {

@@ -175,7 +175,7 @@ export const HeatmapObject = z
     hidden,
   })
   .superRefine((m, ctx) => {
-    const cols = m.values[0].length;
+    const cols = m.values[0]?.length ?? 0;
     if (!m.values.every((r) => r.length === cols))
       ctx.addIssue({
         code: "custom",

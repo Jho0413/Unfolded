@@ -90,7 +90,7 @@ export const HeatmapWidget = z
       .optional(),
   })
   .superRefine((w, ctx) => {
-    const cols = w.values[0].length;
+    const cols = w.values[0]?.length ?? 0;
     if (!w.values.every((r) => r.length === cols))
       ctx.addIssue({
         code: "custom",

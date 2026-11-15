@@ -128,6 +128,11 @@ describe("validation: invalid expr / unknown param / out-of-range values are rej
     );
   });
 
+  it("a heatmap with empty values is an error, not a TypeError", () => {
+    expect(() => errorsOf(heat({ values: [] }))).not.toThrow();
+    expect(errorsOf(heat({ values: [] })).length).toBeGreaterThan(0);
+  });
+
   it("a temperature without softmax-rows, or at or below 0", () => {
     const t = { min: 0.5, max: 2, step: 0.1, value: 1 };
     expect(errorsOf(heat({ temperature: t }))).toContain(
