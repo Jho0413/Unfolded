@@ -67,6 +67,11 @@ export type AskPanelProps = {
    * and speaking stops the narration (barge-in opens Ask). Off on /dev/ask.
    */
   live?: boolean;
+  /**
+   * The learner said or typed something to the agent (issue #102): the lesson page records it
+   * as a question signal unless it turns out to be a command (qa/askSignals.ts).
+   */
+  onLearnerMessage?: (text: string) => void;
 };
 
 const NO_DRAWING: { asked: number; drewFor: number | null } = {
@@ -101,6 +106,7 @@ export function AskPanel({
   canAsk = true,
   captions = true,
   live = false,
+  onLearnerMessage,
 }: AskPanelProps) {
   const [session, setSession] = useState<ConnectorState>(
     () => INITIAL_CONNECTOR_STATE,
@@ -116,9 +122,9 @@ export function AskPanel({
     contextRef.current = { context, questions };
   });
   // The page's callbacks, read by the connector, which outlives renders.
-  const pageRef = useRef({ onClose, onAgentDisconnected });
+  const pageRef = useRef({ onClose, onAgentDisconnected, onLearnerMessage });
   useEffect(() => {
-    pageRef.current = { onClose, onAgentDisconnected };
+    pageRef.current = { onClose, onAgentDisconnected, onLearnerMessage };
   });
 
   // Typed questions sent but not yet echoed back by the conversation.
@@ -129,6 +135,7 @@ export function AskPanel({
   const addMessage = useCallback((m: ShownMessage) => {
     setMessages((ms) => [...ms, m]);
     if (m.role === "user") {
+      pageRef.current.onLearnerMessage?.(m.text);
       setDrawn((d) => ({ ...d, asked: d.asked + 1 }));
       setQuestions((qs) => [...qs, m.text]);
     }

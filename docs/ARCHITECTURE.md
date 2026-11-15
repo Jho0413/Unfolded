@@ -73,6 +73,8 @@ app/
   lesson/[lessonId]/LessonAsk.tsx   the Ask panel and the Ask board, mounted through the stage's renderAsk / renderBoard
   lesson/[lessonId]/AnswerView.tsx, boardView.ts   a drawn answer on its own board, and when it shows (pure, section 5.6)
   lesson/[lessonId]/useLessonVoice.ts   the always-on mic's lesson side: when the voice session is wanted, and spoken commands (section 8)
+  lesson/[lessonId]/useLessonSignals.ts the learner signals (section 5.4): posts Ask's questions and "started", refreshes the next step when Ask closes
+  lesson/[lessonId]/signalsRoute.ts   POST /api/lessons/<id>/signals from the browser; a 404 or failure is only logged
   api/lessons/route.ts              POST: PDF -> lesson plan, saved as runs/<id>/plan.json, paper.json and paper.pdf
   api/lessons/[lessonId]/steps/[n]/route.ts   POST: generate step n (script + audio + cue times), or return it if it's ready; after a failure, a new POST tries again (section 6.2)
   api/sketch/route.ts               POST: Q&A drawing request -> sketch
@@ -115,9 +117,10 @@ player/                             browser
   paper/                            the paper beside the board (#98): pdf.js viewer, quote locator, paperRefAt, focus reducer
   usePlayer.ts                      audio element, clock, Space
   stepLoader.ts                     a step's request, then its audio as a blob; only the latest request reports back
-  prefetch.ts                       step n + 1 requested ahead (L2), and each step's request status for the outline
+  prefetch.ts                       step n + 1 requested ahead (L2), refreshed after a signal (5.4), and each step's request status for the outline
   controls.ts                       pure: which events change the state, key and play() results -> events, carry on after Ask
   cardView.ts                       pure: the tutor card's status, text and buttons for each state (section 5.6)
+  adapted.ts                        pure: the "Updated because you asked…" marker of a regenerated step (section 5.4)
   captions.ts                       pure: the narration sentence being said at time t (section 5.6)
   theme.ts, theme.css               the two palettes (one place), the board's tokens, the theme script and toggle
   TutorCard.tsx                     the tutor card and the Ask box (presentation)
@@ -129,6 +132,7 @@ qa/                                 browser
   context.ts                        pure: the sendContextualUpdate() message, and the narration heard by time t
   askBoard.ts                       pure: the board during Ask (frozen lesson board + highlights and sketches timed from arrival, fresh resets)
   askSession.ts                     one lesson's Ask state outside React: the Ask layer, when Ask opened, the session id
+  askSignals.ts                     pure: which learner messages are questions (not commands), posted as signals (section 5.4)
   drawScene.ts                      the draw_scene request: POST /api/sketch (always fresh), validate on arrival, draw or "Couldn't draw that."
   answerContext.ts                  pure: what the agent is told as the Answer view opens, changes or closes (section 5.6)
   AskPanel.tsx                      the Ask box (typed or the mic) and, while asking, the tutor card, through conversation.ts; shows the Ask messages of section 7
@@ -395,9 +399,15 @@ sceneAt(objects: BoardObject[], timed: { action; startMs; durationMs }[], tMs: n
   - Shapes (`shared/lesson.ts`): `{ question, step?, t? }`, `{ simplify, step?, t? }` (`step` is the step on screen, 0-based, and `t` the ms into its audio; the browser always sends both) and `{ started, version }`. The answer is `200 { version }` (`SignalResponse`).
   - `signals.json` is a `SignalsFile`: `{ version, signals }`, each signal with the server's `at` (ISO time). `version` counts the question and simplify signals (`signalsVersion`): a `started` one is recorded but makes no step stale. No file reads as `{ version: 0, signals: [] }`.
 - Every step generation records the signals version it used (`SavedStep.signalsVersion`). A regenerated version (k > 1) that used newer signals than the one it replaces also records the newest of them as `adaptedFrom: { kind: "question" | "simplify", text, atStep }`, which reaches the browser in the `StepResponse`; the player shows "Updated because you asked: …" on that version.
+- **What the browser posts** (`qa/askSignals.ts`, `app/lesson/[lessonId]/useLessonSignals.ts`):
+  - Each learner message in Ask (a voice transcript or a typed question) is held, with the step on screen and the time into it, until it's known not to be a lesson command: a control tool the agent calls for it (`go_to_step`, `resume_lesson`, `pause_lesson`, `next_step`, `previous_step`, `replay_step`) drops it. The next message, or Ask closing, posts it as a question.
+  - `simplify_upcoming` posts a simplify signal at once.
+  - "Started" is posted once per step version, when it first plays.
+  - Posting is fire-and-forget: a 404 (no route, e.g. an older server) is logged once as info, any other failure as an error, and the learner sees nothing.
 - When a question or simplify signal arrives, any step that **hasn't started playing** is out of date if it was generated (or is still generating) with an older version:
   - The server marks it stale and regenerates it as soon as the current generation finishes (section 6.2).
-  - The browser keeps its prefetched copy of N+1 and requests the step again. When Next is pressed, it plays the new version if it has arrived, and otherwise the copy it already has, so Next never waits for a regeneration.
+  - The browser keeps its prefetched copy of N+1 and requests the step again (`player/prefetch.ts` `refresh`): when Ask closes (or after a simplify request with Ask closed) and at least one signal was recorded, once the first request for N+1 has answered, so the server sees the saved step to regenerate. When Next is pressed, it plays the new version if it has arrived, and otherwise the copy it already has, so Next never waits for a regeneration. A refresh that fails is dropped.
+  - A version with `adaptedFrom` shows "Updated because you asked: “<question>”" (cut to 60 characters) or "Made simpler because you asked" under the tutor card's head while it's on screen (`player/adapted.ts`).
 - A step that has started playing is kept as it is. A regeneration still running for it is discarded when it finishes.
 - A regeneration that fails keeps the older version: the step stays playable.
 
