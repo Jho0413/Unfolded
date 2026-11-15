@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { askAboutNote } from "@/player/paper/selection";
+import { PASSAGES_HEADER } from "@/qa/context";
 import { CLIENT_TOOLS } from "@/shared/tools";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
@@ -148,6 +150,14 @@ describe("agent config", () => {
     expect(prompt).toMatch(
       /call resume_lesson, which plays the rest of the answer/,
     );
+    // highlight_paper quotes come from the context's verified passages (qa/context.ts), never memory.
+    expect(prompt).toContain(`under "${PASSAGES_HEADER}"`);
+    expect(prompt).toMatch(/passed exactly as written, with its page/);
+    expect(prompt).toMatch(/Never quote the paper from memory/);
+    // A passage selected in the paper (player/paper/selection.ts) is what the next question is about.
+    const note = askAboutNote({ quote: "Q", page: 7 });
+    expect(prompt).toContain(note.slice(0, note.indexOf("(page 7)")));
+    expect(prompt).toContain("(page N) and is asking about it");
     // Speech after a control tool counts as barge-in and stops the lesson it just moved.
     expect(prompt).toMatch(/then call the tool as the last thing in your turn/);
     expect(prompt).toMatch(/Never speak after calling one of these tools/);
