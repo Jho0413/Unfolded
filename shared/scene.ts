@@ -310,7 +310,7 @@ const actionShapes = {
   },
 } as const;
 
-/** Builds the action union with extra fields on every member (cue, atMs). */
+/** Builds the action union with extra fields on every member (a cue). */
 function actionUnion<E extends z.ZodRawShape>(extra: E) {
   return z.union([
     z.object({ ...actionShapes.show, ...extra }),
@@ -331,10 +331,6 @@ export const CuedAction = actionUnion({
   cue: z.string().regex(OBJECT_ID_RE),
 });
 export type CuedAction = z.infer<typeof CuedAction>;
-
-/** An action fired at a time offset, with no narration (Q&A sketches). */
-export const TimedSketchAction = actionUnion({ atMs: z.number().int().min(0) });
-export type TimedSketchAction = z.infer<typeof TimedSketchAction>;
 
 /** The longest `PaperRef.quote`: a sentence or two, never a paragraph. */
 export const MAX_PAPER_QUOTE_CHARS = 300;
@@ -377,11 +373,17 @@ export const Step = z.object({
 });
 export type Step = z.infer<typeof Step>;
 
-/** What /api/sketch returns for a Q&A drawing. */
+/**
+ * What /api/sketch returns for a Q&A drawing (#105): a short narrated answer, built like a
+ * step, so it draws word by word in the narrator's voice.
+ */
 export const Sketch = z.object({
+  /** 2-4 sentences with cue markers, as a step's narration. */
+  narration: z.string().min(1),
   /** Added to the current board, or to an empty one with `fresh`. */
   objects: z.array(BoardObject),
-  actions: z.array(TimedSketchAction),
+  /** As a step's: each fires when its cue's word is spoken. */
+  actions: z.array(CuedAction),
 });
 export type Sketch = z.infer<typeof Sketch>;
 

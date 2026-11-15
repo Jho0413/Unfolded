@@ -1,15 +1,22 @@
-// Q&A sketch generation (ARCHITECTURE.md sections 4 and 8): Claude writes a sketch in the wire
-// format with structured output for the agent's description, on top of the learner's board (or
-// an empty one with `fresh`). It is converted to a Sketch, validate.ts checks its ids against
-// its own objects plus the board's, and
+// Q&A sketch generation (ARCHITECTURE.md sections 4 and 8): Claude writes a narrated sketch in
+// the wire format with structured output for the agent's description, on top of the learner's
+// board (or an empty one with `fresh`). It is converted to a Sketch, validate.ts checks its
+// narration and cues as a step's and its ids against its own objects plus the board's, and
 // lib/pipeline/generate.ts retries a rejection once; a second rejection, a refusal, a cut-off
-// or a provider error fails the sketch.
+// or a provider error fails the sketch. Then its narration is voiced like a step's (#105), and
+// the audio is saved under runs/<lessonId>/answers/ for the browser to play it on its cues.
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { SketchRequest } from "@/shared/lesson";
+import {
+  ANSWERS_DIR,
+  SketchRequest,
+  type SketchResponse,
+} from "@/shared/lesson";
 import { BoardState, type Sketch } from "@/shared/scene";
 import { config } from "@/lib/config";
+import { narrate } from "@/lib/narration/tts";
+import { saveAnswer } from "@/lib/runs/store";
 import {
   claudeMessages,
   type ClaudeMessages,
@@ -68,4 +75,27 @@ export async function generateSketch(
     },
     messages,
   );
+}
+
+/**
+ * A narrated answer (#105): the sketch, its narration voiced with the lesson's narrator as a
+ * step's is, and the audio saved in the lesson's run folder. Throws GenerationError (Claude),
+ * TtsError or NoAlignmentError (voicing), or a save error.
+ */
+export async function narratedAnswer(
+  req: SketchRequestBody,
+  messages?: ClaudeMessages,
+): Promise<SketchResponse> {
+  const sketch = await generateSketch(req, messages);
+  const { audio, cueTimes } = await narrate(sketch.narration);
+  const file = await saveAnswer(
+    req.lessonId,
+    { description: req.description, sketch, cueTimes },
+    audio,
+  );
+  return {
+    sketch,
+    audioUrl: `/api/runs/${req.lessonId}/${ANSWERS_DIR}/${file}`,
+    cueTimes,
+  };
 }

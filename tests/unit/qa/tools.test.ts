@@ -86,7 +86,8 @@ function harness(
     send,
     isAsking: () => state.kind === "asking",
     askId: () => 1,
-    drawSketch: () => {},
+    lessonId: "lesson-1",
+    playAnswer: async () => ({ kind: "shown" }),
     showNotice: () => {},
     fetch: vi.fn(() => new Promise<Response>(() => {})),
     ...extra,
@@ -314,22 +315,30 @@ describe("simplify_upcoming (issue #102)", () => {
 });
 
 describe("draw_scene", () => {
-  it("waits: resolves with what's drawn once the sketch is on the board (qa/drawScene.ts)", async () => {
+  it("waits: resolves Shown: <narration> once the narrated answer has played (qa/drawScene.ts)", async () => {
     const sketch = {
+      narration: "Here is [[box]]a box.",
       objects: [{ kind: "text", id: "t", x: 800, y: 400, text: "a box" }],
       actions: [],
     };
-    const drawSketch = vi.fn();
+    const playAnswer = vi.fn(async () => ({ kind: "shown" }) as const);
     const { tools } = harness(asking, {
-      drawSketch,
-      fetch: vi.fn(async () => Response.json({ sketch })),
+      playAnswer,
+      fetch: vi.fn(async () =>
+        Response.json({
+          sketch,
+          audioUrl: "/api/runs/lesson-1/answers/a.mp3",
+          cueTimes: { box: 300 },
+        }),
+      ),
+      fetchAudio: async () => new Blob([]),
     });
     const result = await tools.draw_scene?.({
       description: "a box",
       fresh: false,
     });
-    expect(drawSketch).toHaveBeenCalledOnce();
-    expect(result).toMatch(/^Drawn: .*text "a box"/);
+    expect(playAnswer).toHaveBeenCalledOnce();
+    expect(result).toBe("Shown: Here is a box.");
   });
 
   it(`after Ask closed: "${ASK_CLOSED}", nothing requested`, async () => {
@@ -349,7 +358,8 @@ describe("draw_scene", () => {
       send: () => ({ outcome: "ignored", state: asking }),
       isAsking: () => true,
       askId: () => 1,
-      drawSketch: () => {},
+      lessonId: "lesson-1",
+      playAnswer: async () => ({ kind: "shown" }),
       showNotice: () => {},
       fetch,
     });

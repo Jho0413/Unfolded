@@ -26,9 +26,11 @@ import {
   MAX_PAPER_QUOTE_CHARS,
   Sketch,
   Step,
-  TimedSketchAction,
 } from "@/shared/scene";
 import { ANSWER_TEMPLATE, errors } from "@/shared/validate";
+
+/** A narrated answer's narration (#105): its one cue, "c", fires on the first word. */
+const SAID = "[[c]]Here it is.";
 
 const LIMITS = { maxNarrationChars: config.maxNarrationChars };
 
@@ -192,9 +194,10 @@ const step = fc
 
 const sketch = fc
   .record({
+    narration: fc.string({ minLength: 1 }),
     objects: fc.array(boardObject, { maxLength: 5 }),
     actions: fc.array(
-      action.chain((a) => fc.nat().map((atMs) => ({ ...a, atMs }))),
+      action.chain((a) => cue.map((c) => ({ ...a, cue: c }))),
       { maxLength: 8 },
     ),
   })
@@ -359,10 +362,10 @@ describe("round trip: contract -> wire -> contract", () => {
 // ------------------------------------------------------------ field coverage
 
 /** Every field of every member of a contract action union. */
-function contractFields(union: typeof CuedAction | typeof TimedSketchAction) {
+function contractFields(union: typeof CuedAction) {
   return new Set(union.options.flatMap((o) => Object.keys(o.shape)));
 }
-function contractKinds(union: typeof CuedAction | typeof TimedSketchAction) {
+function contractKinds(union: typeof CuedAction) {
   return new Set(union.options.map((o) => o.shape.do.value));
 }
 
@@ -378,11 +381,9 @@ describe("field coverage: the wire has every contract action field and kind", ()
   it("every field of every contract sketch action is a wire sketch action field", () => {
     const wire = WireSketch.shape.actions.element;
     expect(new Set(Object.keys(wire.shape))).toEqual(
-      contractFields(TimedSketchAction),
+      contractFields(CuedAction),
     );
-    expect(new Set(wire.shape.do.options)).toEqual(
-      contractKinds(TimedSketchAction),
-    );
+    expect(new Set(wire.shape.do.options)).toEqual(contractKinds(CuedAction));
   });
 
   it("the wire step and sketch have the contract's top-level fields", () => {
@@ -546,17 +547,19 @@ describe("wireToStep / wireToSketch: one test per row", () => {
     ]);
   });
 
-  it("a sketch keeps each action's atMs, and its moves and writes are checked the same way", () => {
+  it("a sketch keeps its narration and each action's cue (#105), and its moves and writes are checked the same way", () => {
     const { value, errors: errs } = wireToSketch({
+      narration: "[[c]]Here it is.",
       objects: [],
       actions: [
-        { do: "show", target: { id: "a" }, durationMs: 400, atMs: 250 },
-        { do: "move", target: { id: "a" }, durationMs: 400, atMs: 500 },
-        { do: "write", target: { id: "t" }, durationMs: 400, atMs: 900 },
+        { do: "show", target: { id: "a" }, durationMs: 400, cue: "c" },
+        { do: "move", target: { id: "a" }, durationMs: 400, cue: "c" },
+        { do: "write", target: { id: "t" }, durationMs: 400, cue: "c" },
       ],
     });
+    expect(value.narration).toBe("[[c]]Here it is.");
     expect(value.actions).toStrictEqual([
-      { do: "show", target: { id: "a" }, durationMs: 400, atMs: 250 },
+      { do: "show", target: { id: "a" }, durationMs: 400, cue: "c" },
     ]);
     expect(errs).toEqual(['move needs to "a"', 'write needs value "t"']);
   });
@@ -652,10 +655,11 @@ describe("validateWireStep / validateWireSketch", () => {
   it("a sketch: conversion errors and validateSketch's errors together", () => {
     const result = validateWireSketch(
       {
+        narration: SAID,
         objects: [{ kind: "text", id: "t", x: 10, y: 10, text: "hi" }],
         actions: [
-          { do: "move", target: { id: "t" }, durationMs: 400, atMs: 0 },
-          { do: "show", target: { id: "ghost" }, durationMs: 400, atMs: 0 },
+          { do: "move", target: { id: "t" }, durationMs: 400, cue: "c" },
+          { do: "show", target: { id: "ghost" }, durationMs: 400, cue: "c" },
         ],
       },
       { board: EMPTY_BOARD },
@@ -669,12 +673,13 @@ describe("validateWireStep / validateWireSketch", () => {
   it("a fresh sketch with a conversion error and an overlap: not drawable (no softOnly)", () => {
     const result = validateWireSketch(
       {
+        narration: SAID,
         objects: [
           { kind: "latex", id: "f", x: 700, y: 450, tex: "x" },
           { kind: "latex", id: "g", x: 715, y: 450, tex: "y" },
         ],
         actions: [
-          { do: "move", target: { id: "f" }, durationMs: 400, atMs: 0 },
+          { do: "move", target: { id: "f" }, durationMs: 400, cue: "c" },
         ],
       },
       { board: EMPTY_BOARD, fresh: true },
@@ -690,6 +695,7 @@ describe("validateWireStep / validateWireSketch", () => {
 
   it("a valid sketch: the converted sketch", () => {
     const wire: WireSketch = {
+      narration: SAID,
       objects: [{ kind: "text", id: "t", x: 10, y: 10, text: "hi" }],
       actions: [
         {
@@ -697,7 +703,7 @@ describe("validateWireStep / validateWireSketch", () => {
           target: { id: "t" },
           value: "bye",
           durationMs: 400,
-          atMs: 100,
+          cue: "c",
         },
       ],
     };

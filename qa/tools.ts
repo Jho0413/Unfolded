@@ -8,8 +8,8 @@
 //                      means back to where it stopped (the "Back to step N" chip), not a restart
 //   simplify_upcoming  records a simplify signal for the next step (section 5.4); no wait
 //   highlight_paper    highlights a passage in the paper beside the board; "ok: …" or why not
-//   draw_scene         waits: resolves once the sketch is drawn (what's on the board), failed or
-//                      superseded, so the agent explains what is drawn (qa/drawScene.ts)
+//   draw_scene         waits: resolves once the narrated answer has played ("Shown: …"), the
+//                      learner spoke over it, or it failed or was superseded (qa/drawScene.ts)
 //   resume_lesson, pause_lesson, next_step, previous_step, replay_step
 //                      no wait: the learner's spoken commands (issue #93), run by `control`
 //                      once the agent has finished speaking (`afterAgentSpeaks`)
@@ -70,7 +70,14 @@ export type ClientToolDeps = {
   simplifyUpcoming?: (reason: string) => void;
 } & Pick<
   DrawSceneDeps,
-  "askId" | "drawSketch" | "showNotice" | "fetch" | "timeoutMs"
+  | "askId"
+  | "lessonId"
+  | "playAnswer"
+  | "showNotice"
+  | "sketching"
+  | "fetch"
+  | "fetchAudio"
+  | "timeoutMs"
 >;
 
 /** What a tool that changes the board or the step returns after Ask closed. */

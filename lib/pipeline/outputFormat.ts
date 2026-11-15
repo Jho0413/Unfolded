@@ -27,7 +27,6 @@ import {
   type Sketch,
   type Step,
   Target,
-  type TimedSketchAction,
 } from "@/shared/scene";
 import {
   type SketchContext,
@@ -59,8 +58,8 @@ const wireRequired = {
 /**
  * The fields only some kinds take. Structured output writes an object's properties in the
  * schema's order and skips an optional one only by moving past it, so these come after every
- * required field: once Claude wrote a required field listed after them (a sketch's atMs), it
- * could no longer add a write's value, and the sketch failed twice with `write needs value`
+ * required field: once Claude wrote a required field listed after them (a sketch's old atMs),
+ * it could no longer add a write's value, and the sketch failed twice with `write needs value`
  * (#90).
  */
 const wireOptional = {
@@ -85,31 +84,27 @@ const WirePaperRef = z.object({
   cue: z.string().optional(),
 });
 
+/** A cued action on the wire, a step's or a narrated sketch's (#105). */
+const WireCuedAction = z.object({
+  ...wireRequired,
+  cue: z.string().regex(OBJECT_ID_RE),
+  ...wireOptional,
+});
+
 export const WireStep = z.object({
   title: z.string(),
   narration: z.string(),
   objects: z.array(BoardObject),
-  actions: z.array(
-    z.object({
-      ...wireRequired,
-      cue: z.string().regex(OBJECT_ID_RE),
-      ...wireOptional,
-    }),
-  ),
+  actions: z.array(WireCuedAction),
   /** Last, after everything the board needs (#98). An empty list isn't saved. */
   paperRefs: z.array(WirePaperRef).optional(),
 });
 export type WireStep = z.infer<typeof WireStep>;
 
 export const WireSketch = z.object({
+  narration: z.string(),
   objects: z.array(BoardObject),
-  actions: z.array(
-    z.object({
-      ...wireRequired,
-      atMs: z.number().int().min(0),
-      ...wireOptional,
-    }),
-  ),
+  actions: z.array(WireCuedAction),
 });
 export type WireSketch = z.infer<typeof WireSketch>;
 
@@ -140,7 +135,7 @@ export interface Converted<T> {
   warnings?: string[];
 }
 
-type WireAction = WireStep["actions"][number] | WireSketch["actions"][number];
+type WireAction = z.infer<typeof WireCuedAction>;
 
 /**
  * One wire action as a contract action, or its error. A field the action's kind doesn't take
@@ -209,11 +204,12 @@ export function wireToStep(wire: WireStep): Converted<Step> {
 
 /** The wire sketch as a shared Sketch (pure). The inverse of reading a Sketch as a WireSketch. */
 export function wireToSketch(wire: WireSketch): Converted<Sketch> {
-  const actions = toActions(wire.actions, (w) => ({ atMs: w.atMs }));
+  const actions = toActions(wire.actions, (w) => ({ cue: w.cue }));
   return {
     value: {
+      narration: wire.narration,
       objects: wire.objects,
-      actions: actions.value satisfies TimedSketchAction[],
+      actions: actions.value satisfies CuedAction[],
     },
     errors: actions.errors,
   };

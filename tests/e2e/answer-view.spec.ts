@@ -14,6 +14,7 @@ import { CANVAS } from "@/shared/scene";
 import { ANSWER_TEMPLATE } from "@/shared/validate";
 import { savedRun } from "./support/savedRun";
 import { answer, askQuestion, carryOn, goOn } from "./support/tutor";
+import { narratedReply } from "./support/answer";
 
 test.use({
   launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
@@ -34,6 +35,7 @@ const DESCRIPTION = "Circle the first row of q";
 
 /** Two answers laid out from the template, to tell a follow-up from the first. */
 const answerSketch = (id: string, title: string) => ({
+  narration: "[[c]]Here it is.",
   objects: [
     { kind: "text", id: `${id}_title`, x: 800, y: 110, text: title },
     {
@@ -45,7 +47,7 @@ const answerSketch = (id: string, title: string) => ({
       label: "row",
     },
   ],
-  actions: [{ do: "highlight", target: { id, row: 0 }, atMs: 0 }],
+  actions: [{ do: "highlight", target: { id, row: 0 }, cue: "c" }],
 });
 const FIRST = answerSketch("first", "Row times column");
 const SECOND = answerSketch("second", "The same, again");
@@ -54,7 +56,7 @@ const SECOND = answerSketch("second", "The same, again");
 async function fakeSketches(page: Page) {
   let n = 0;
   await page.route("**/api/sketch", (route) =>
-    route.fulfill({ json: { sketch: n++ === 0 ? FIRST : SECOND } }),
+    route.fulfill({ json: narratedReply(n++ === 0 ? FIRST : SECOND) }),
   );
 }
 

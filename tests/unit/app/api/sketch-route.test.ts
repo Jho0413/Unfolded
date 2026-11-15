@@ -1,8 +1,12 @@
 // POST /api/sketch (ROADMAP SK1, ARCHITECTURE.md sections 4, 7 and 8). One test per case,
 // named after it. Claude is never called: each test scripts lib/fakes/claude.ts, or runs with
-// FAKE_APIS=1 and its recorded fixture.
+// FAKE_APIS=1 and its recorded fixture. The narration is voiced by the TTS fake (FAKE_APIS=1)
+// and saved in a temporary runs folder (#105).
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/sketch/route";
 import { config } from "@/lib/config";
 import { resetEnvForTests } from "@/lib/env";
@@ -13,7 +17,14 @@ import {
   type FakeClaude,
   type FakeReply,
 } from "@/lib/fakes/claude";
-import { ApiError, SKETCH_FAILED, SketchResponse } from "@/shared/lesson";
+import {
+  ANSWERS_DIR,
+  ApiError,
+  SKETCH_FAILED,
+  SketchResponse,
+} from "@/shared/lesson";
+import { NoAlignmentError } from "@/lib/narration/cues";
+import { TtsError } from "@/lib/narration/tts";
 import { ANSWER_TEMPLATE, errors } from "@/shared/validate";
 import {
   type BoardState,
@@ -22,10 +33,40 @@ import {
   Step,
 } from "@/shared/scene";
 
+/** A narrated answer's narration (#105): its one cue, "c", fires on the first word. */
+const SAID = "[[c]]Here it is.";
+
 // The Claude the route gets: a scripted fake per test, or the real factory (FAKE_APIS=1).
 const claude = vi.hoisted(() => ({
   current: undefined as FakeClaude | undefined,
 }));
+// The voice: the TTS fake, or a failure a test sets; and the runs folder, a temporary one.
+const voice = vi.hoisted(() => ({
+  error: undefined as Error | undefined,
+  narrated: [] as string[],
+  runs: "",
+}));
+vi.mock("@/lib/narration/tts", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/narration/tts")>();
+  return {
+    ...real,
+    narrate: (...args: Parameters<typeof real.narrate>) => {
+      voice.narrated.push(args[0]);
+      return voice.error ? Promise.reject(voice.error) : real.narrate(...args);
+    },
+  };
+});
+vi.mock("@/lib/config", async (importOriginal) => {
+  const { config } = await importOriginal<typeof import("@/lib/config")>();
+  return {
+    config: {
+      ...config,
+      get runsDir() {
+        return voice.runs;
+      },
+    },
+  };
+});
 vi.mock("@/lib/pipeline/generate", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/pipeline/generate")>();
   return {
@@ -63,6 +104,7 @@ const EMPTY: BoardState = { objects: [], copies: [], active: [] };
 
 /** Highlights row 0 of the board's matrix `a` and points a new note at it. */
 const TARGETS_BOARD: Sketch = {
+  narration: SAID,
   objects: [
     { kind: "text", id: "note", x: 600, y: 120, text: "this row" },
     {
@@ -78,24 +120,33 @@ const TARGETS_BOARD: Sketch = {
       target: { id: "a", row: 0 },
       color: "accent",
       durationMs: 400,
-      atMs: 0,
+      cue: "c",
     },
-    { do: "show", target: { id: "note" }, durationMs: 400, atMs: 800 },
+    { do: "show", target: { id: "note" }, durationMs: 400, cue: "c" },
   ],
 };
 
 /** A new object reusing the board's id `a`. */
 const REUSES_BOARD_ID: Sketch = {
+  narration: SAID,
   objects: [{ kind: "text", id: "a", x: 600, y: 120, text: "a clash" }],
   actions: [],
 };
 
+/** The lesson whose run folder keeps the answers' audio. */
+const LESSON = "lesson-1";
+
+/** Posts a body; an object body gets LESSON as its lessonId unless it names its own. */
 function post(body: unknown): Promise<Response> {
+  const json =
+    typeof body === "object" && body !== null && !Array.isArray(body)
+      ? { lessonId: LESSON, ...body }
+      : body;
   return POST(
     new Request("http://localhost/api/sketch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: typeof body === "string" ? body : JSON.stringify(body),
+      body: typeof json === "string" ? json : JSON.stringify(json),
     }),
   );
 }
@@ -117,8 +168,16 @@ async function expectFailed(res: Response, status: number) {
   expect(body).not.toHaveProperty("sketch");
 }
 
-afterEach(() => {
+beforeEach(async () => {
+  voice.runs = await mkdtemp(path.join(tmpdir(), "sketch-runs-"));
+  vi.stubEnv("FAKE_APIS", "1");
+  resetEnvForTests();
+});
+afterEach(async () => {
   claude.current = undefined;
+  voice.error = undefined;
+  voice.narrated = [];
+  await rm(voice.runs, { recursive: true, force: true });
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   resetEnvForTests();
@@ -127,14 +186,16 @@ afterEach(() => {
 describe("POST /api/sketch: a fresh answer and its template (#90)", () => {
   /** A valid answer board: a title and a formula. */
   const ANSWER: Sketch = {
+    narration: SAID,
     objects: [
       { kind: "text", id: "title", x: 800, y: 110, text: "Why scale?" },
       { kind: "latex", id: "f", x: 800, y: 450, tex: "\\frac{40}{8}=5" },
     ],
-    actions: [{ do: "show", target: { id: "f" }, durationMs: 400, atMs: 0 }],
+    actions: [{ do: "show", target: { id: "f" }, durationMs: 400, cue: "c" }],
   };
   /** The research run's failure: d_k in plain text, and an object off the area. */
   const SCATTERED: Sketch = {
+    narration: SAID,
     objects: [
       { kind: "text", id: "title", x: 800, y: 110, text: "Why divide by d_k?" },
       { kind: "latex", id: "f", x: 1560, y: 450, tex: "\\frac{40}{8}=5" },
@@ -144,6 +205,7 @@ describe("POST /api/sketch: a fresh answer and its template (#90)", () => {
 
   /** Two formulas about 37 apart, not touching: tight spacing, only a warning. */
   const CRAMPED: Sketch = {
+    narration: SAID,
     objects: [
       { kind: "text", id: "title", x: 800, y: 110, text: "Why scale?" },
       { kind: "latex", id: "f", x: 700, y: 450, tex: "x" },
@@ -287,10 +349,11 @@ describe("POST /api/sketch: a fresh answer and its template (#90)", () => {
 
   it('the research request s3-mix, whose two answers wrote to "mix" with no value: Couldn\'t draw that (502), as before the fix', async () => {
     // /tmp/sketch-research/req-s3-mix.json and resp-s3-mix.json (2026-11-14): the same
-    // rejection twice. The wire schema now lists every required field (atMs) before the
+    // rejection twice. The wire schema now lists every required field (then atMs) before the
     // optional ones (outputFormat.test.ts), so Claude can't write past a write's value.
     const logs = quietLogs();
     const noValue = {
+      narration: SAID,
       objects: [
         {
           kind: "matrix",
@@ -306,7 +369,7 @@ describe("POST /api/sketch: a fresh answer and its template (#90)", () => {
           do: "write",
           target: { id: "mix", row: 0, col: 0 },
           durationMs: 400,
-          atMs: 4300,
+          cue: "c",
         },
       ],
     };
@@ -333,9 +396,9 @@ describe("POST /api/sketch: the sketch against the board", () => {
       board: BOARD,
     });
     expect(res.status).toBe(200);
-    expect(SketchResponse.parse(await res.json())).toEqual({
-      sketch: TARGETS_BOARD,
-    });
+    expect(SketchResponse.parse(await res.json()).sketch).toEqual(
+      TARGETS_BOARD,
+    );
     expect(fake.calls).toHaveLength(1);
   });
 
@@ -393,8 +456,9 @@ describe("POST /api/sketch: the sketch against the board", () => {
   it("a wire action that can't convert (a move with no to): retried with the error", async () => {
     const logs = quietLogs();
     const noTo = {
+      narration: SAID,
       objects: [],
-      actions: [{ do: "move", target: { id: "a" }, durationMs: 400, atMs: 0 }],
+      actions: [{ do: "move", target: { id: "a" }, durationMs: 400, cue: "c" }],
     };
     const fake = script(reply(noTo), reply(TARGETS_BOARD));
     const res = await post({ description: "slide it", board: BOARD });
@@ -466,6 +530,110 @@ describe("POST /api/sketch: an invalid sketch or a failed request is an error re
   });
 });
 
+// #105: the answer is narrated like a step: voiced, its cues timed, its audio saved.
+describe("POST /api/sketch: a narrated answer (#105)", () => {
+  const NARRATED: Sketch = {
+    narration: "First [[row]]the row, then [[note]]the note.",
+    objects: TARGETS_BOARD.objects,
+    actions: [
+      {
+        do: "highlight",
+        target: { id: "a", row: 0 },
+        durationMs: 400,
+        cue: "row",
+      },
+      { do: "show", target: { id: "note" }, durationMs: 400, cue: "note" },
+    ],
+  };
+  const answersDir = () => path.join(voice.runs, LESSON, ANSWERS_DIR);
+
+  it("answer + audio: 200 with { sketch, audioUrl, cueTimes }, the narration voiced with its markers", async () => {
+    script(reply(NARRATED));
+    const res = await post({ description: "point at it", board: BOARD });
+    expect(res.status).toBe(200);
+    const body = SketchResponse.parse(await res.json());
+    expect(body.sketch).toEqual(NARRATED);
+    expect(voice.narrated).toEqual([NARRATED.narration]);
+    // Every cue has a time, in narration order.
+    expect(Object.keys(body.cueTimes)).toEqual(["row", "note"]);
+    expect(body.cueTimes.row).toBeLessThan(body.cueTimes.note);
+    expect(body.audioUrl).toMatch(
+      new RegExp(`^/api/runs/${LESSON}/${ANSWERS_DIR}/[0-9a-f-]+\\.mp3$`),
+    );
+  });
+
+  it("the audio and a record of the answer are saved under runs/<lessonId>/answers/", async () => {
+    script(reply(NARRATED));
+    const res = await post({ description: "point at it", board: BOARD });
+    const body = SketchResponse.parse(await res.json());
+    const audio = path.basename(body.audioUrl);
+    const files = (await readdir(answersDir())).sort();
+    expect(files).toEqual([audio.replace(/\.mp3$/, ".json"), audio].sort());
+    const record: unknown = JSON.parse(
+      await readFile(
+        path.join(answersDir(), audio.replace(/\.mp3$/, ".json")),
+        "utf8",
+      ),
+    );
+    expect(record).toEqual({
+      description: "point at it",
+      sketch: NARRATED,
+      cueTimes: body.cueTimes,
+    });
+    expect(
+      (await readFile(path.join(answersDir(), audio))).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("two answers never replace each other: each gets its own files", async () => {
+    script(reply(NARRATED), reply(NARRATED));
+    const first = SketchResponse.parse(
+      await (await post({ description: "a", board: BOARD })).json(),
+    );
+    const second = SketchResponse.parse(
+      await (await post({ description: "b", board: BOARD })).json(),
+    );
+    expect(first.audioUrl).not.toBe(second.audioUrl);
+    expect(await readdir(answersDir())).toHaveLength(4);
+  });
+
+  it("voicing fails (ElevenLabs): 502 Couldn't draw that, logged, nothing saved", async () => {
+    const logs = quietLogs();
+    script(reply(NARRATED));
+    voice.error = new TtsError("provider", "ElevenLabs TTS returned 500");
+    await expectFailed(
+      await post({ description: "point at it", board: BOARD }),
+      502,
+    );
+    expect(logs.logged()).toContain("ElevenLabs TTS returned 500");
+    await expect(readdir(answersDir())).rejects.toThrow();
+  });
+
+  it("the voice's alignment doesn't match (no alignment): 502 Couldn't draw that", async () => {
+    quietLogs();
+    script(reply(NARRATED));
+    voice.error = new NoAlignmentError("text", null, "alignment is null");
+    await expectFailed(
+      await post({ description: "point at it", board: BOARD }),
+      502,
+    );
+  });
+
+  it("a sketch whose action's cue isn't in its narration: unknown cue, retried once with it", async () => {
+    quietLogs();
+    const offCue = {
+      ...NARRATED,
+      actions: [{ ...NARRATED.actions[0], cue: "elsewhere" }],
+    };
+    const fake = script(reply(offCue), reply(NARRATED));
+    const res = await post({ description: "point at it", board: BOARD });
+    expect(res.status).toBe(200);
+    expect(fake.calls[1].body.messages.at(-1)?.content).toContain(
+      errors.unknownCue("elsewhere"),
+    );
+  });
+});
+
 describe("POST /api/sketch: a bad request body is a 400, and Claude isn't called", () => {
   const cases: [string, unknown][] = [
     ["not JSON", "{not json"],
@@ -487,6 +655,11 @@ describe("POST /api/sketch: a bad request body is a 400, and Claude isn't called
       "fresh that isn't a boolean",
       { description: "x", fresh: "yes", board: BOARD },
     ],
+    [
+      "a lessonId that isn't one (#105: it names the run folder)",
+      { description: "x", board: BOARD, lessonId: "../etc" },
+    ],
+    ["a null lessonId", { description: "x", board: BOARD, lessonId: null }],
     [
       "a board object with an invalid id",
       {
@@ -531,7 +704,7 @@ describe("POST /api/sketch: a bad request body is a 400, and Claude isn't called
   });
 
   it("a board of exactly config.maxBoardObjects: accepted", async () => {
-    script(reply({ objects: [], actions: [] }));
+    script(reply({ narration: SAID, objects: [], actions: [] }));
     const res = await post({
       description: "x",
       board: boardOf(config.maxBoardObjects),

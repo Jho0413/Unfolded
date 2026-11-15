@@ -31,37 +31,40 @@ describe("createAskSession", () => {
     expect(session.askId()).toBe(2);
   });
 
-  it("draws sketches timed from when Ask opened, and close throws them away", () => {
+  it("shows a drawn answer on its own clock (#105), and close throws it away", () => {
     const { session, advance } = setup();
     const listener = vi.fn();
     session.subscribe(listener);
+    let answerMs = 0;
+    session.setAnswerClock(() => answerMs);
     session.open();
     advance(500);
-    session.addSketch(
+    session.showAnswer(
       {
+        narration: "Look at [[row]]the row.",
         objects: [note],
         actions: [
           {
             do: "highlight",
-            target: { id: "q", row: 0 },
-            atMs: 100,
+            target: { id: "note" },
+            cue: "row",
             durationMs: 0,
           },
         ],
       },
-      false,
+      { row: 100 },
     );
-    const row = () => session.board().objects[0].cellHighlight?.[0];
-    expect(session.board().objects.map((s) => s.object.id)).toEqual([
-      "q",
-      "note",
-    ]);
-    expect(row()).toEqual([null, null]);
-    advance(100);
-    expect(row()).toEqual(["accent", "accent"]);
+    const highlight = () => session.board().objects[0].highlight;
+    expect(session.board().objects.map((s) => s.object.id)).toEqual(["note"]);
+    expect(highlight()).toBeNull();
+    // Time since Ask opened doesn't move it; its narration's clock does.
+    advance(5000);
+    expect(highlight()).toBeNull();
+    answerMs = 100;
+    expect(highlight()).toBe("accent");
     session.close();
     expect(session.board().objects.map((s) => s.object.id)).toEqual(["q"]);
-    expect(listener).toHaveBeenCalledTimes(3); // open, sketch, close
+    expect(listener).toHaveBeenCalledTimes(3); // open, answer, close
   });
 
   it("every open and close changes the version, even with nothing drawn", () => {
@@ -87,7 +90,7 @@ describe("createAskSession", () => {
   it("ignores drawings while not asking", () => {
     const { session } = setup();
     session.addAction({ do: "highlight", target: { id: "q" }, durationMs: 0 });
-    session.addSketch({ objects: [note], actions: [] }, false);
+    session.showAnswer({ narration: "Hi.", objects: [note], actions: [] }, {});
     expect(session.layer().timed).toEqual([]);
     expect(session.layer().objects).toEqual([]);
   });

@@ -17,6 +17,7 @@ export const CARD_STATUS = {
   stopped: "Stopped to listen",
   listening: "Listening",
   thinking: "Thinking",
+  sketching: "Sketching",
   answering: "Answering",
 } as const;
 
@@ -36,6 +37,8 @@ export const CARD_TEXT = {
   stopped: "I've stopped. Go ahead: ask out loud, or type below.",
   stoppedTyping: "I've stopped. Go ahead: type your question below.",
   thinking: "Thinking…",
+  /** A draw_scene answer is being made (#105): nothing is drawn yet. */
+  sketching: "Sketching…",
   carryOn: "Carry on",
   gotIt: "Got it, carry on",
   askedTyped: "You asked",
@@ -222,6 +225,8 @@ export type AskCardInput = {
   answer: string | null;
   /** The agent called draw_scene while answering the latest question. */
   drew: boolean;
+  /** A draw_scene answer is being made (#105): the card says "Sketching…" until it plays. */
+  sketching?: boolean;
   captions: boolean;
 };
 
@@ -243,6 +248,14 @@ export function askCard(input: AskCardInput): CardView<AskAction> {
   // No session (replay, failed, or dropped): the section 7 notice says why.
   if (input.replay || phase === "failed" || phase === "idle")
     return { ...base, status: CARD_STATUS.stopped, body: ask(null) };
+  // The agent's holding line ("Let me show you.") may already be in: the answer isn't.
+  if (question !== null && input.sketching)
+    return {
+      ...base,
+      status: CARD_STATUS.sketching,
+      speaking: answer === null ? null : "answer",
+      body: ask(CARD_TEXT.sketching, showText ? answer : null),
+    };
   if (question !== null && answer === null)
     return {
       ...base,

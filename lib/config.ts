@@ -15,14 +15,16 @@ export const config = {
   },
   /**
    * Step: medium, chosen by spike S3 (ARCHITECTURE.md section 11). Plan: not measured yet (L1).
-   * Sketch: medium (#90, Jason's call, 2026-11-15). Low was tried first (4.2 to 15.3 s against
-   * medium's 4.5 to 25.8 s on four Q&A drawings); with the layout retry no longer losing a
-   * drawing (a failed retry falls back to the first attempt), medium's better layouts win.
+   * Sketch: low (#105, Jason's call, 2026-11-15). A narrated answer took about 15 s at medium
+   * (14.8 and 15.8 s on two real requests, and a live one passed the 20 s deadline) against
+   * 5.3 s at low, and the learner waits in silence after "Let me show you." #90 had chosen
+   * medium for its layouts; the answer template's validator and its one retry catch what low
+   * gets wrong.
    */
   effort: {
     plan: "medium",
     step: "medium",
-    sketch: "medium",
+    sketch: "low",
   } satisfies Record<string, Effort>,
   /** Narration cap after cue markers are stripped (`narration too long`, ARCHITECTURE.md section 4). */
   maxNarrationChars: 1500,
@@ -60,7 +62,8 @@ export const config = {
     maxTokens: 16_000,
     /**
      * Deadline for one attempt, the SDK's own retries included, until the whole answer is in.
-     * A real sketch takes 3 to 5 s; with the one retry, the browser hears back within 40 s.
+     * A narrated sketch takes about 5 s at low effort (#105); with the one retry, the browser
+     * hears back within 40 s, plus voicing.
      */
     timeoutMs: 20_000,
     /**

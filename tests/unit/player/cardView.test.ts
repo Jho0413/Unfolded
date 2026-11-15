@@ -268,6 +268,33 @@ describe("askCard", () => {
     ]);
   });
 
+  it("a question with a draw_scene answer being made (#105): Sketching, Sketching…, nothing drawn yet", () => {
+    const v = askCard(ask({ question: typed, sketching: true }));
+    expect(v.status).toBe(CARD_STATUS.sketching);
+    expect(v.body).toEqual({
+      kind: "ask",
+      question: typed,
+      answer: null,
+      wait: CARD_TEXT.sketching,
+    });
+    expect(v.tag).toBeNull();
+    expect(v.buttons).toEqual([
+      { label: CARD_TEXT.carryOn, action: "carryOn" },
+    ]);
+  });
+
+  it("Sketching… with the agent's holding line already in: the line shows too", () => {
+    const v = askCard(
+      ask({ question: typed, answer: "Let me show you.", sketching: true }),
+    );
+    expect(v.status).toBe(CARD_STATUS.sketching);
+    expect(v.speaking).toBe("answer");
+    expect(v.body).toMatchObject({
+      answer: "Let me show you.",
+      wait: CARD_TEXT.sketching,
+    });
+  });
+
   it("answered with draw_scene: Drawing on the board", () => {
     expect(
       askCard(ask({ question: typed, answer: "Look.", drew: true })).tag,

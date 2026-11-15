@@ -108,13 +108,19 @@ describe("agent config", () => {
     const prompt: string = agent.conversation_config.agent.prompt.prompt;
     for (const tool of CLIENT_TOOLS) expect(prompt).toContain(tool.name);
     expect(prompt).toMatch(
-      /"why", "how" or "explain" question, and for anything that isn't already on the board, draw it/,
+      /"why", "how" or "explain" question, and for anything that isn't already on the board, answer with a drawing/,
     );
-    // draw_scene waits for the drawing (#90): explain it only once it's on the board.
+    // draw_scene plays a narrated answer (#105): one short line, then silence while the
+    // narrator explains it, then a check-in once "Shown: ..." arrives.
     expect(prompt).toMatch(/then call draw_scene/);
-    expect(prompt).toMatch(/only then explain/);
+    expect(prompt).toMatch(/stay completely silent while it plays/);
+    expect(prompt).toMatch(/never explain the drawing yourself/);
+    expect(prompt).toMatch(/returns "Shown: "/);
+    expect(prompt).toMatch(/then check in with one short line/);
+    expect(prompt).toMatch(/"Paused after: \.\.\."/);
+    // Backward compatible while a browser without #105 answers "Drawn: ...": explain in words.
     expect(prompt).toMatch(
-      /Never say "here it is" or describe a sketch before its result arrives/,
+      /If it returns "Drawn: \.\.\." instead, the board has no narrator: explain the drawing yourself/,
     );
     expect(prompt).toMatch(
       /whenever you refer to something that is on the board, call highlight/,
@@ -133,6 +139,11 @@ describe("agent config", () => {
     // The answer view's contextual updates (#90's qa/answerContext.ts), quoted exactly.
     expect(prompt).toContain('"Answer board showing: <title>"');
     expect(prompt).toContain('"Back on the lesson."');
+    // On a drawn answer (#105): "say that again" replays it, "carry on" lets a held one finish.
+    expect(prompt).toMatch(/call replay_step, which replays the drawn answer/);
+    expect(prompt).toMatch(
+      /call resume_lesson, which plays the rest of the answer/,
+    );
   });
 
   it("sends the VAD scores barge-in uses, keeping the events the panel needs (issue #93)", () => {

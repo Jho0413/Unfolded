@@ -67,7 +67,7 @@ export const CLIENT_TOOLS = [
   {
     name: "draw_scene",
     description:
-      "Sketch an answer on a clean answer board. Waits until it is drawn, then returns what is on the board (or why it couldn't be drawn): explain the drawing only after that.",
+      "Show the answer as a narrated drawing on a clean answer board: the lesson's narrator explains it while it draws. Waits until it has played, then returns what was said (or that the learner spoke over it, or why it couldn't be drawn). Stay quiet until then.",
     expectsResponse: true,
     parameters: DrawSceneParams,
   },
