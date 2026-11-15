@@ -30,7 +30,7 @@ Where a drawn answer's time goes (ten typed questions on two lessons, and the wa
 
 ## The script (about 6 minutes)
 
-1. **Upload.** On the upload page, choose the PDF and click **Make the lesson** (it reads "Reading the paper…" while it works).
+1. **Upload.** On the upload page, click **Choose a PDF** and pick the PDF, or drop it anywhere on the page. It uploads at once, with a stage list ("Reading the PDF", …) and the outline filling in as skeleton rows on the right.
    - About 20 s later, the plan shows the lesson's title, a cover and 10 or 11 ideas.
    - Say: "It read the paper and planned a lesson."
    - Click **Start the lesson**. If the lesson page shows **Start with "…" →** (the browser blocked autoplay), click it.

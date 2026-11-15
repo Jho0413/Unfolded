@@ -100,7 +100,7 @@ describe("stepContextPrompt", () => {
       paperPageCount: 15,
     });
     expect(text).toContain(paperContextPrompt(15));
-    expect(text).toContain("The paper has 15 pages");
+    expect(text).toContain("The document has 15 pages");
   });
 
   it("no paper to quote (#98): says paperRefs is empty", () => {

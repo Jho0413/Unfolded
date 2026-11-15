@@ -377,7 +377,7 @@ describe('POST /api/lessons: "This PDF is too large or locked."', () => {
   });
 });
 
-describe(`POST /api/lessons: "Couldn't read this paper."`, () => {
+describe(`POST /api/lessons: "${UPLOAD_ERRORS.planFailed}"`, () => {
   it("an invalid plan twice: 502, logged, nothing saved", async () => {
     const logs = quietLogs();
     const short = { ...PLAN, steps: PLAN.steps.slice(0, 1) };

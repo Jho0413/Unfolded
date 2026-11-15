@@ -19,7 +19,7 @@ Any change to a decision, a contract or a state machine in this file goes in the
 | Avatar | **None** (Anam dropped). | Removes the access risk. The bounties are Track 03 main, ElevenLabs and fal. |
 | Generation | **Fully live**, with step N+1 generated while step N plays. Every run is saved to `runs/` and can be replayed offline. | Live by default, with a safety net if the network fails during judging. |
 | Storage | **No database.** The `runs/<lessonId>/` folder is both the store and the replay set. | Fewer moving parts. |
-| Papers | ***Attention Is All You Need*** is the **demo** paper. A second, different paper (non-ML or math-heavy, picked in spike S3) checks that the pipeline generalises. | Attention is very visual for the demo: matrix multiplication → dot-product attention → multi-head. But the product works for any paper: no paper-specific logic or concept lists in code or prompts. |
+| Papers | ***Attention Is All You Need*** is the **demo** paper. A second, different paper (non-ML or math-heavy, picked in spike S3) checks that the pipeline generalises. | Attention is very visual for the demo: matrix multiplication → dot-product attention → multi-head. But the product works for any paper, and for any long PDF (an article, a report, a book chapter, lecture notes; #98's page view and quotes included): no paper-specific logic or concept lists in code or prompts, which say "the document". |
 | Screen | **Desktop width; a dark "studio" theme by default, and a light one** (a toggle on the lesson page, kept in `localStorage`, applied before first paint; with nothing saved, the system's preference: dark unless it prefers light). Fonts: Geist (UI), Geist Mono (small labels), STIX Two Text (the board), self-hosted with `next/font`. | It's demoed on a laptop. The board reads best on dark, and light suits a bright room. Mobile is out of scope. |
 
 ## 2. System overview
@@ -63,7 +63,10 @@ Both modes draw through the same renderer, from the same scene contract.
 
 ```
 app/
-  page.tsx, UploadForm.tsx          upload page: PDF in, the plan as a list of step titles, then Start the lesson
+  page.tsx, UploadView.tsx          upload page (section 5.1): PDF in (picked or dropped), the plan, then Start the lesson; the samples
+  uploadFlow.ts                     the upload page's state machine, paced stages, words and preview view (pure, section 5.1)
+  LessonPreview.tsx, previewScene.ts   the upload page's miniature lesson page, and the sample step it draws (real board)
+  samples.ts                        the sample lessons (config.samples) whose run is on this server
   upload.ts                         the upload form field and the section 7 upload and plan messages (page and route)
   layout.tsx                        fonts (next/font) and the theme script that sets data-theme before first paint
   lesson/[lessonId]/page.tsx        player page
@@ -416,7 +419,7 @@ sequenceDiagram
   - The retry resends the first request, then Claude's rejected answer (unchanged, thinking included) and the errors, so it reuses the cached paper.
   - Effort per request type (plan, step, sketch) is set in `lib/config.ts`.
   - The contract's own `Step` schema is rejected with "The compiled grammar is too large" (S3, G1, #27), so requests send the wire format (section 4). On 2026-11-14 a real request accepted both `WireStep` and `WireSketch`, and one real step (Attention paper, scaled dot-product scores, `medium` effort) was valid on the first try in 9.3 s with 926 output tokens. On 2026-11-15 (#103) real requests accepted `WireStep` with `objectsJson`: eight steps of the Attention lesson, each valid on the first try (8 to 16 s, 860 to 1,670 output tokens, prompt wording tuned between them). For the plan's own goals (softmax, multi-head, positional encoding) Claude kept to matrices and text; given a goal that shows a whole grid of weights and a curve, it wrote a valid heatmap (filled row by row, its peak highlighted) and a plot (drawn on), in 11.7 s with 1,388 output tokens. With #98's `paperRefs` on the wire too, and the paper's page text in the request, the same goal gave a valid step with a heatmap, a plot and one verbatim paper quote, in 24.1 s with 3,081 output tokens (1,511 of them thinking). With `widgetJson` on the wire too (#110), a request for the plan's own softmax goal was accepted and valid with no widget (14.0 s); a goal that invites playing with the scores and a temperature gave a valid step with a heatmap, a heatmap widget (`softmax-rows` with a temperature slider) and a quote, in 17.8 s with 2,288 output tokens. In the lesson itself, one learner question asking to play with the scores and a temperature regenerated the two steps not yet played, each valid on the first try: multi-head attention with a `softmax-rows` heatmap widget, and positional encoding with a plot widget (a sine over position, with a dimension-index slider). The 17.8 s response is the `FAKE_APIS=1` step fixture (`lib/fakes/fixtures/claude-step.message.json`).
-- **Prompts are generic.** No paper-specific logic, hard-coded concept lists or examples taken from the demo paper, in prompts or code. Paper-specific content lives only in fixtures and demo checks.
+- **Prompts are generic.** They teach "the document": a paper, an article, a report, a book chapter or lecture notes all work, so nothing assumes an academic paper (identifiers such as `paperRefs` keep their names). No paper-specific logic, hard-coded concept lists or examples taken from the demo paper, in prompts or code. Paper-specific content lives only in fixtures and demo checks.
 - **Prompts** live in `lib/pipeline/prompts/`. A step prompt receives:
   - the plan and the step's goal
   - the previous step's narration if it has been generated, otherwise that step's goal from the plan (needed after a jump)
@@ -433,6 +436,41 @@ sequenceDiagram
   - **The lesson page** (`app/lesson/[lessonId]/page.tsx`) reads `plan.json` on the server. The player gets each step from the step route (below, `app/lesson/[lessonId]/stepRoute.ts`), which serves the saved step or generates it, and its `.mp3` through this route. Once the player takes step n (script and audio), step n + 1 is requested ahead (`player/prefetch.ts`, L2), so Next on it makes no new step request and doesn't wait for generation (its audio is still downloaded then, from our own route). A prefetched reply is handed over once, not kept: Retry or Back asks the route again (which serves the saved step), and a prefetch that failed is forgotten, so reaching the step asks again. A bad `lessonId` or a lesson with no `plan.json` is a 404 page with "No such lesson or step." and a link back to upload; a step the route can't give fails in the player with the route's message (section 7), and Retry, Next or Back recover. Playing the step version recorded in `signals.json` waits for S1 (it plays the latest until then).
 - **The step route** (`POST /api/lessons/<lessonId>/steps/<n>`, `n` 0-based) answers a `StepResponse` (`{ step, version, audioUrl, cueTimes }`, the same shape the lesson page builds from a saved step). A saved step is served with no provider call: its played version if `signals.json` records one, else its latest, unless that latest is stale (section 5.4). Otherwise it reads `plan.json` and `paper.json`, and the paper's page text (`readPaperPages`, section 4, #98), calls `generateStep` with the plan, the paper's file id, the page text, the previous step's saved narration (if any) and the learner signals the replaced version didn't see, narrates the step (`narrate`), and saves it with `saveStepVersion` as `SavedStep` plus its audio. Errors are in section 7.
 - **Seeded lessons (`npm run seed:m2`).** For each lesson in `scripts/seed-m2.lessons.json` (the Attention paper as `m2-attention`, Kelley's paper as `m2-newton3p`), it downloads the paper (or takes `--pdf <lessonId>=<file>`), runs the same PDF checks as the upload route, uploads it with the Files API and writes `paper.json` and `paper.pdf`, then the hand-made plan as `plan.json` (seeding again backfills `paper.pdf` for a run made before #98), so the step route can generate from it. Plans are data, held to the plan rules (`validatePlan`) before anything is uploaded. Real mode needs only `ANTHROPIC_API_KEY`; `FAKE_APIS=1` uses the recorded upload.
+
+### The upload page (`app/page.tsx`, `app/UploadView.tsx`, `app/uploadFlow.ts`)
+
+Two columns. The left has the brand and the theme toggle (the lesson page's `ThemeToggle`), the pitch, the **Choose a PDF** picker (a PDF dropped anywhere on the page counts too), the sample lessons and the lesson's key hints (`player/controls.ts`). The right is a miniature of the lesson page (`app/LessonPreview.tsx`: the outline, the board with the tutor card, the PDF beside it), slightly tilted; it is hidden below 900 px.
+
+- **The preview.** Idle (and failed), the board draws a sample step (`app/previewScene.ts`, held to the step rules by a test) through the real renderer: `sceneAt` on a clock and `Whiteboard`, cropped by `stepView`, once; with reduced motion it shows the final frame. While uploading, the outline is skeleton rows. Planned, it shows the plan's title and ideas (`plan-steps`) and the tutor card's intro (`introParts`), and the frame faces the learner.
+- **Stages.** `POST /api/lessons` is one request of about 20 s, so the stage list ("Reading the PDF", "Finding the ideas worth teaching", "Planning the lesson", "Painting a cover") moves on every `UPLOAD_STAGE_MS` (5 s), and the last stays in progress until the answer arrives: the list is never all done before it. The current stage is marked `aria-current="step"`.
+- **Samples.** `config.samples` lists ready-made run folders (`m2-attention`, `calibrating-modern-neural-netw-647864c1`). The server page shows a chip for each whose `plan.json` it can read (`app/samples.ts`, through `loadLesson`), labelled with the plan's title; it opens `/lesson/<id>`.
+- **Replay mode** (`REPLAY_RUN`) redirects to the lesson before any of this (section 5.5).
+
+```mermaid
+stateDiagram-v2
+  [*] --> idle
+  idle --> uploading: choose or drop a PDF
+  idle --> idle: choose or drop a non-PDF / "Please choose a PDF."
+  uploading --> planned: 200 plan
+  uploading --> failed: 4xx/5xx, network error, bad JSON
+  planned --> idle: Another PDF
+  failed --> uploading: choose or drop a PDF
+  failed --> idle: choose or drop a non-PDF / "Please choose a PDF."
+```
+
+| State | Event | Result |
+|---|---|---|
+| idle | choose a PDF (by type or a `.pdf` name, not empty) | uploading, with the stage list |
+| idle | drop a PDF anywhere on the page | uploading |
+| idle | choose or drop a non-PDF | stays idle, "Please choose a PDF." (no request) |
+| uploading | 200 with a plan | planned: the title, "N ideas", the cover if any, **Start the lesson →** (`/lesson/<id>`), **Another PDF**; the preview shows the plan |
+| uploading | 4xx/5xx with `{ error }` | failed: the server's message, the picker still there |
+| uploading | 200 that isn't a plan, an error without `{ error }`, a network error or a body that isn't JSON | failed: "Couldn't read this PDF." (the answer or error is logged in the console) |
+| uploading or planned | choose or drop a file | can't happen: the picker is gone, and a drop is ignored |
+| planned | Another PDF | idle, the picker focused (planned focuses **Start the lesson →**) |
+| failed | choose or drop again | uploading (or idle with "Please choose a PDF." for a non-PDF) |
+| idle or failed | a sample chip (shown only there, so a chip never abandons an upload) | navigates to that lesson |
+| server | a sample's run or `plan.json` is missing | that chip isn't rendered |
 
 ### 5.2 Cue markers become times (`lib/narration/cues.ts`, pure)
 
@@ -793,7 +831,7 @@ The developer gets the full error in the server log, tagged with the route, less
 |---|---|---|---|
 | Upload | No file, or not a PDF | "Please choose a PDF." | Pick again |
 | Upload | Over `config.maxPdfMb`, encrypted or over `config.maxPdfPages` pages (our byte checks, section 5.1), or Claude rejects the document (too many pages, encrypted, unreadable) | "This PDF is too large or locked." | Another PDF |
-| Plan | Invalid plan twice (zod, or fewer than `config.plan.minSteps` steps), refusal, a cut-off, or a Claude or Files API error | "Couldn't read this paper." | Retry, or another PDF |
+| Plan | Invalid plan twice (zod, or fewer than `config.plan.minSteps` steps), refusal, a cut-off, or a Claude or Files API error | "Couldn't read this PDF." | Retry, or another PDF |
 | Step | Any `failed` cause in section 6.2 (502), or a failure outside the table such as a missing `paper.json` or a failed save (500); the reason is logged with the route, lesson and step, and `failed (<event>)` | "Couldn't make this step." | Retry (player `failed` state): the next request generates again; or Next to skip the step, or Back |
 | Step | A regeneration of a stale step fails (any `failed` cause, section 6.2) | Nothing: the older version plays (200), logged as `failed (<event>), keeping v<k>` | None needed; a newer signal tries again |
 | Signals | `POST /api/lessons/<id>/signals` with a body that isn't JSON or isn't a `Signal`, or text over `config.maxSignalChars` (logged); a bad `lessonId` (400) or a lesson with no `plan.json` (404) gets "No such lesson or step." | 400 "That isn't a learner signal." (posted in the background: the console, not the learner) | None: the lesson carries on unadapted |

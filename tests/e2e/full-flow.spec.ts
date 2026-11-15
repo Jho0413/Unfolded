@@ -12,6 +12,7 @@
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { HOME_TEXT } from "@/app/uploadFlow";
 import {
   CreateLessonResponse,
   SketchResponse,
@@ -110,13 +111,13 @@ test("upload → plan → step plays → highlight at its cue → Next → Ask �
 
   // Upload → plan.
   await page.goto("/");
-  await page.getByLabel("A research paper (PDF)").setInputFiles({
+  // Choosing the PDF sends it.
+  const lessonAnswer = page.waitForResponse("**/api/lessons");
+  await page.getByLabel(HOME_TEXT.pick).setInputFiles({
     name: "paper.pdf",
     mimeType: "application/pdf",
     buffer: Buffer.from(makePdf()),
   });
-  const lessonAnswer = page.waitForResponse("**/api/lessons");
-  await page.getByRole("button", { name: "Make the lesson" }).click();
   const raw = (await (await lessonAnswer).json()) as { lessonId?: string };
   // Recorded first, so the run is removed even if the answer doesn't parse.
   if (typeof raw.lessonId === "string") created.push(raw.lessonId);
