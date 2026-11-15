@@ -1,6 +1,7 @@
 // `npm run seed:m2` (ROADMAP G2): a lesson from a hand-made plan instead of Claude's, so steps
 // can be generated before (or without) the upload page. The paper is uploaded with the Files
-// API and the run folder gets what POST /api/lessons writes: paper.json, then plan.json last.
+// API and the run folder gets what POST /api/lessons writes: paper.json, paper.pdf, then
+// plan.json last.
 // Generic: the papers and their plans are data (scripts/seed-m2.lessons.json), never code.
 import "server-only";
 import { z } from "zod";
@@ -55,7 +56,7 @@ export function parseSeedFile(input: unknown): SeedLesson[] {
 }
 
 /**
- * Uploads the paper and writes the lesson's run folder: paper.json, then plan.json. Replaces
+ * Uploads the paper and writes the lesson's run folder: paper.json, paper.pdf, then plan.json. Replaces
  * an earlier seed of the same lesson (steps already saved in it are kept). Throws when the
  * bytes aren't a usable PDF (before uploading) or the upload fails (GenerationError).
  */

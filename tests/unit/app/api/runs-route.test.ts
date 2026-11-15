@@ -100,6 +100,15 @@ describe("missing file -> 404 with a clear message", () => {
     });
   });
 
+  it("a run with no paper.pdf (made before #98): the viewer stays hidden", async () => {
+    await writeRunFile("demo-m1", "plan.json", "{}");
+    const res = await get("demo-m1", "paper.pdf");
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({
+      error: RUNS_ROUTE_ERRORS.missing("demo-m1", "paper.pdf"),
+    });
+  });
+
   it("a lesson with no run folder", async () => {
     const res = await get("no-such-lesson", "plan.json");
     expect(res.status).toBe(404);
