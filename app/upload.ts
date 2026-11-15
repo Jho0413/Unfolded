@@ -10,5 +10,5 @@ export const UPLOAD_ERRORS = {
   /** Over config.maxPdfMb, or the PDF can't be used (too many pages, encrypted, unreadable). */
   tooLargeOrLocked: "This PDF is too large or locked.",
   /** Invalid plan twice, refusal, or a Claude error. */
-  planFailed: "Couldn't read this paper.",
+  planFailed: "Couldn't read this PDF.",
 } as const;
