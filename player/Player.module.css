@@ -103,6 +103,8 @@
   border: 1px solid var(--line);
   border-radius: 14px;
   overflow: hidden;
+  /* Its height sizes the widget panel (player/widget/Widget.module.css: cqh). */
+  container-type: size;
 }
 
 /* The drawing sits above the dock, as large as fits at 16:9. */

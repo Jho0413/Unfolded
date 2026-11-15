@@ -9,9 +9,13 @@
   color: var(--ink);
   font-family: var(--ui-font);
   container-type: inline-size;
-  /* Never taller than most of the board: the rest scrolls. */
-  max-height: min(56vh, 460px);
+  /* A share of the board's height (the board is a size container, Player.module.css), so the
+     lesson's drawing above keeps a usable height on short screens (#148); the rest scrolls. */
+  max-height: clamp(180px, var(--widget-share) * 100cqh, 460px);
   overflow: auto;
+  --widget-share: 0.36;
+  /* The drawing and the controls fit this tall, under the panel's head. */
+  --widget-body: calc(clamp(180px, var(--widget-share) * 100cqh, 460px) - 52px);
 }
 
 .head {
@@ -52,7 +56,8 @@
   outline-offset: 2px;
 }
 
-/* The drawing beside its controls; stacked when the panel is narrow (a phone). */
+/* The drawing beside its controls, the controls scrolling on their own so the drawing stays in
+   view as a slider moves; stacked when the panel is narrow (a phone). */
 .body {
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
@@ -60,9 +65,19 @@
   align-items: center;
   margin-top: 8px;
 }
-@container (max-width: 520px) {
+.body > .controls {
+  max-height: var(--widget-body);
+  overflow: auto;
+  /* Room for the slider thumbs and focus rings inside the scroller. */
+  padding: 2px 4px 2px 2px;
+}
+@container (max-width: 440px) {
   .body {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .body > .controls {
+    max-height: none;
+    overflow: visible;
   }
 }
 
@@ -70,7 +85,7 @@
   display: block;
   width: 100%;
   height: auto;
-  max-height: 260px;
+  max-height: min(260px, var(--widget-body));
   background: var(--board);
   border-radius: 8px;
 }
