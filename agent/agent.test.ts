@@ -108,7 +108,13 @@ describe("agent config", () => {
     const prompt: string = agent.conversation_config.agent.prompt.prompt;
     for (const tool of CLIENT_TOOLS) expect(prompt).toContain(tool.name);
     expect(prompt).toMatch(
-      /"why", "how" or "explain" question, call draw_scene/,
+      /"why", "how" or "explain" question, and for anything that isn't already on the board, draw it/,
+    );
+    // draw_scene waits for the drawing (#90): explain it only once it's on the board.
+    expect(prompt).toMatch(/then call draw_scene/);
+    expect(prompt).toMatch(/only then explain/);
+    expect(prompt).toMatch(
+      /Never say "here it is" or describe a sketch before its result arrives/,
     );
     expect(prompt).toMatch(
       /whenever you refer to something that is on the board, call highlight/,
@@ -121,6 +127,9 @@ describe("agent config", () => {
     expect(prompt).toMatch(/Stay completely silent while the lesson plays/);
     expect(prompt).toMatch(/Never answer the narration itself/);
     expect(prompt).toMatch(/Never move the lesson on your own/);
+    expect(prompt).toMatch(
+      /Never call pause_lesson on your own while answering a question/,
+    );
     // The answer view's contextual updates (#90's qa/answerContext.ts), quoted exactly.
     expect(prompt).toContain('"Answer board showing: <title>"');
     expect(prompt).toContain('"Back on the lesson."');

@@ -1,8 +1,9 @@
 {
   "type": "client",
   "name": "draw_scene",
-  "description": "Sketch something on the board. Returns nothing: describe it aloud while it appears.",
-  "expects_response": false,
+  "description": "Sketch an answer on a clean answer board. Waits until it is drawn, then returns what is on the board (or why it couldn't be drawn): explain the drawing only after that.",
+  "expects_response": true,
+  "response_timeout_secs": 50,
   "parameters": {
     "type": "object",
     "description": "What to sketch",
