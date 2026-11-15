@@ -4,12 +4,19 @@
 import "server-only";
 import { CANVAS, CELL, MAX_MATRIX_DIM } from "@/shared/scene";
 
+/**
+ * The longest value that fits a matrix cell. The cell is CELL.w (64) wide and drawn at the
+ * board's cell font (26 px STIX Two Text): "0.98" is 45 px and "-0.25" 53 px, but "0.9817" (71)
+ * and "BMW" (64) run into their neighbours, as they did in a real lesson's softmax step.
+ */
+export const MATRIX_CELL_MAX_CHARS = 4;
+
 /** The "# The whiteboard" section: the canvas and the kinds of object. */
 export const BOARD_OBJECTS_PROMPT = `# The whiteboard
 
 The canvas is ${CANVAS.w} wide and ${CANVAS.h} high, origin at the top left. Every object needs a unique id (lowercase letters, digits and underscores, starting with a letter, at most 32 characters). In objects, use only these kinds of object (there are no images):
 
-- matrix: x, y is the top-left corner. rows is 1 to ${MAX_MATRIX_DIM} rows of 1 to ${MAX_MATRIX_DIM} cells, all the same length; "" is an empty cell. Every cell is ${CELL.w} wide and ${CELL.h} high, so cell (r, c) has its centre at (x + ${CELL.w}c + ${CELL.w / 2}, y + ${CELL.h}r + ${CELL.h / 2}) and the whole matrix fits in its cell box. Optional label, drawn outside the box. Keep cell values short (a number or a symbol).
+- matrix: x, y is the top-left corner. rows is 1 to ${MAX_MATRIX_DIM} rows of 1 to ${MAX_MATRIX_DIM} cells, all the same length; "" is an empty cell. Every cell is ${CELL.w} wide and ${CELL.h} high, so cell (r, c) has its centre at (x + ${CELL.w}c + ${CELL.w / 2}, y + ${CELL.h}r + ${CELL.h / 2}) and the whole matrix fits in its cell box. Optional label, drawn outside the box. A cell holds at most ${MATRIX_CELL_MAX_CHARS} characters, such as 0.98, 1e-3, -2.5 or 128: round numbers to fit, since a longer value runs into the next cell. Words don't fit in cells: put names such as class labels in the label or in text objects beside the matrix.
 - text: x, y is the centre. size is "s", "m" or "l".
 - latex: x, y is the centre. tex is KaTeX math (no \\href, \\url or other links).
 - arrow: from and to are each an object (its centre), a matrix row, column or cell, or a point {x, y}. Never another arrow. Optional label.

@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { config } from "@/lib/config";
 import { validateWireStep } from "@/lib/pipeline/outputFormat";
+import { MATRIX_CELL_MAX_CHARS } from "@/lib/pipeline/prompts/board";
 import {
   PAPER_REFS_PROMPT,
   paperContextPrompt,
@@ -119,6 +120,14 @@ describe("STEP_SYSTEM_PROMPT", () => {
     );
     expect(PAPER_REFS_PROMPT).toContain("counting the PDF's first page as 1");
     expect(PAPER_REFS_PROMPT).toContain("cue: optional");
+  });
+
+  it("caps a matrix cell at what fits its width, and keeps words out of cells", () => {
+    expect(STEP_SYSTEM_PROMPT).toContain(
+      `A cell holds at most ${MATRIX_CELL_MAX_CHARS} characters`,
+    );
+    expect(STEP_SYSTEM_PROMPT).toContain("round numbers to fit");
+    expect(STEP_SYSTEM_PROMPT).toContain("Words don't fit in cells");
   });
 
   it("offers heatmaps and plots in objectsJson, with the contract's limits (#103)", () => {
