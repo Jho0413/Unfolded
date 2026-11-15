@@ -15,13 +15,14 @@ export const config = {
   },
   /**
    * Step: medium, chosen by spike S3 (ARCHITECTURE.md section 11). Plan: not measured yet (L1).
-   * Sketch: medium since #90: the research requests answered in 4.3 to 5.0 s (low took 3 to
-   * 5 s), and 12.7 to 13.1 s when the answer template sent one back for its single retry.
+   * Sketch: low (#90). On the same four Q&A drawings low took 4.2 to 15.3 s and medium 4.5 to
+   * 25.8 s, with drawings as good (low's arithmetic was even right where medium's wasn't): a
+   * drawing the learner waits for wants speed. Lesson generation stays medium.
    */
   effort: {
     plan: "medium",
     step: "medium",
-    sketch: "medium",
+    sketch: "low",
   } satisfies Record<string, Effort>,
   /** Narration cap after cue markers are stripped (`narration too long`, ARCHITECTURE.md section 4). */
   maxNarrationChars: 1500,
