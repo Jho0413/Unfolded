@@ -290,7 +290,7 @@ describe("paper quotes (#98): one test per row", () => {
     ...valid,
     paperRefs,
   });
-  const reply = (step: Step) => fakeMessage(JSON.stringify(step));
+  const reply = (step: Step) => fakeMessage(asWire(step));
   const context = (claude: ReturnType<typeof fakeClaude>) =>
     JSON.stringify(claude.calls[0].body.messages[0].content);
   const warnings = (warn: { mock: { calls: unknown[][] } }) =>
