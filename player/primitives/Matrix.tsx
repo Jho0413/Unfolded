@@ -24,6 +24,8 @@ import {
   writeLook,
 } from "./motion";
 import { PulseRing } from "./Pulse";
+import { FitLines } from "./FitLines";
+import { fitText } from "./fitText";
 import {
   CELL_FONT,
   COPY_STROKE,
@@ -47,6 +49,9 @@ const {
 const BRACKET_STROKE = 2.5;
 const HL_INSET = 3;
 const HL_RADIUS = 8;
+/** The room a cell's value has, and its smallest font before it is squeezed (QA A3). */
+const VALUE_BOX = { w: CELL.w - 8, h: CELL.h - 6 };
+const MIN_CELL_FONT = 12;
 
 interface CellProps {
   matrix: MatrixObject;
@@ -75,6 +80,10 @@ function Cell({ matrix, r, c, x, y, highlight, active, enter = 1 }: CellProps) {
   const writeProgress = cellProgress(active, "write", matrix.id, r, c, value);
   const look = highlightLook(hlProgress);
   const write = writeLook(writeProgress);
+  const fitted = fitText(value, VALUE_BOX, {
+    max: CELL_FONT,
+    min: MIN_CELL_FONT,
+  });
   const hlBox = {
     x: x + HL_INSET,
     y: y + HL_INSET,
@@ -121,12 +130,12 @@ function Cell({ matrix, r, c, x, y, highlight, active, enter = 1 }: CellProps) {
         y={y + CELL.h / 2}
         textAnchor="middle"
         dominantBaseline="central"
-        fontSize={CELL_FONT}
+        fontSize={fitted.fontSize}
         fill={INK}
         {...motionProps(write)}
         opacity={write.opacity}
       >
-        {value}
+        <FitLines fitted={fitted} x={x + CELL.w / 2} boxW={VALUE_BOX.w} />
       </text>
     </g>
   );

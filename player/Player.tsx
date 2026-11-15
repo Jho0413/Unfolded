@@ -28,6 +28,7 @@ import { AdaptedNote, TutorCard } from "./TutorCard";
 import type { FetchStep } from "./stepLoader";
 import { type Player as PlayerApi, usePlayer } from "./usePlayer";
 import { Whiteboard } from "./Whiteboard";
+import { stepView } from "./viewport";
 import { WidgetPanel, WidgetPrompt } from "./widget/WidgetPanel";
 import { widgetOnScreen } from "./widget/widgetView";
 import styles from "./Player.module.css";
@@ -101,6 +102,9 @@ export function PlayerStage({
   } | null>(null);
   const userTab = chosenTab?.step === player.step ? chosenTab.pane : null;
   const tab = userTab ?? focus;
+  // The board shows the part of the canvas the step uses (QA A4), fixed for the step.
+  const step = loaded?.step;
+  const view = useMemo(() => (step ? stepView(step) : undefined), [step]);
   // The audio's duration, the captions' last anchor, for the audio it was read from: a new
   // step's audio has none until its metadata loads.
   const [duration, setDuration] = useState<{ src: string; ms: number } | null>(
@@ -198,7 +202,7 @@ export function PlayerStage({
               {renderBoard ? (
                 renderBoard(player)
               ) : (
-                <Whiteboard state={player.board} />
+                <Whiteboard state={player.board} view={view} />
               )}
             </div>
           </div>

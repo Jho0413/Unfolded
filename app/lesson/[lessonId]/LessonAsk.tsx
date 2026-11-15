@@ -17,6 +17,7 @@ import { useParams } from "next/navigation";
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -25,6 +26,7 @@ import type { AskClose, LessonCommand } from "@/player/controls";
 import type { PlayerState } from "@/player/machine";
 import type { Player } from "@/player/usePlayer";
 import { Whiteboard } from "@/player/Whiteboard";
+import { stepView } from "@/player/viewport";
 import { tellAnswerContext } from "@/qa/answerContext";
 import { AskPanel } from "@/qa/AskPanel";
 import { type AskSession, frozenBoard } from "@/qa/askSession";
@@ -277,6 +279,10 @@ export function LessonBoard({
   const { state, send } = player;
   const asking = state.kind === "asking" && session.isAsking();
   const view = boardView(asking, session.layer());
+  // The step's part of the canvas (QA A4): Ask's highlights draw on the same objects, and a
+  // drawn answer has its own board.
+  const step = player.loaded?.step;
+  const crop = useMemo(() => (step ? stepView(step) : undefined), [step]);
   // Redraw every frame while asking, so sketch actions play from arrival.
   const [, setFrame] = useState(0);
   useEffect(() => {
@@ -295,5 +301,7 @@ export function LessonBoard({
         onBack={() => leaveAsk(send, session, "back", state)}
       />
     );
-  return <Whiteboard state={asking ? session.board() : player.board} />;
+  return (
+    <Whiteboard state={asking ? session.board() : player.board} view={crop} />
+  );
 }

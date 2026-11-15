@@ -67,6 +67,8 @@ export interface SavedRunOptions {
   paperRefs?: CuedPaperRef[];
   /** A "try it yourself" widget step 0 ends with (issue #110). */
   widget?: Widget;
+  /** Objects added to step 0's board (QA A3: values that must fit their cells). */
+  extraObjects?: Step["objects"];
 }
 
 /** Writes runs/<lessonId>/ and returns a handle that removes it. */
@@ -82,6 +84,7 @@ export async function savedRun(
     paper,
     paperRefs,
     widget,
+    extraObjects,
   } = options;
   const dir = path.join(RUNS_DIR, lessonId);
   // A folder left by an interrupted run must not change the results.
@@ -116,6 +119,8 @@ export async function savedRun(
           title,
           ...(paperRefs && { paperRefs }),
           ...(widget && n === 0 && { widget }),
+          ...(extraObjects &&
+            n === 0 && { objects: [...m1Step.objects, ...extraObjects] }),
         },
         cueTimes: M1_CUE_TIMES,
       };

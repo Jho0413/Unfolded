@@ -33,6 +33,8 @@ import {
   highlightAttr,
   opacityAttr,
 } from "./style";
+import { FitLines } from "./FitLines";
+import { fitText } from "./fitText";
 import styles from "./Viz.module.css";
 import { heatColor, heatTextColor, revealOf, revealOrder } from "./vizStyle";
 
@@ -60,6 +62,14 @@ export function Heatmap({
     cellW /
       (0.6 *
         Math.max(1, ...heatmap.values.flat().map((v) => formatTick(v).length))),
+  );
+  // A column label shrinks to its column (QA A3); one line, squeezed if it must be.
+  const colFit = (heatmap.colLabels ?? []).map((label) =>
+    fitText(
+      label,
+      { w: cellW - 4, h: VIZ_FONT.label * 1.2 },
+      { max: VIZ_FONT.label, min: 11 },
+    ),
   );
   const cells = heatmap.values.flatMap((row, r) =>
     row.map((value, c) => {
@@ -112,10 +122,14 @@ export function Heatmap({
           x={grid.x + (c + 0.5) * cellW}
           y={grid.y - LABEL_GAP}
           textAnchor="middle"
-          fontSize={VIZ_FONT.label}
+          fontSize={colFit[c].fontSize}
           fill={MUTED}
         >
-          {label}
+          <FitLines
+            fitted={colFit[c]}
+            x={grid.x + (c + 0.5) * cellW}
+            boxW={cellW - 4}
+          />
         </text>
       ))}
       {heatmap.rowLabels?.map((label, r) => (
