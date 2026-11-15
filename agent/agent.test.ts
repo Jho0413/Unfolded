@@ -116,7 +116,11 @@ describe("agent config", () => {
     expect(prompt).toMatch(/stay completely silent while it plays/);
     expect(prompt).toMatch(/never explain the drawing yourself/);
     expect(prompt).toMatch(/returns "Shown: "/);
-    expect(prompt).toMatch(/then check in with one short line/);
+    // A narrated answer ends with one check-in, never a summary of what the narrator said.
+    expect(prompt).toMatch(/then say one short check-in and nothing else/);
+    expect(prompt).toMatch(
+      /never repeat, summarise or add to what the narrator said/,
+    );
     expect(prompt).toMatch(/"Paused after: \.\.\."/);
     // Backward compatible while a browser without #105 answers "Drawn: ...": explain in words.
     expect(prompt).toMatch(
@@ -143,6 +147,13 @@ describe("agent config", () => {
     expect(prompt).toMatch(/call replay_step, which replays the drawn answer/);
     expect(prompt).toMatch(
       /call resume_lesson, which plays the rest of the answer/,
+    );
+    // Speech after a control tool counts as barge-in and stops the lesson it just moved.
+    expect(prompt).toMatch(/then call the tool as the last thing in your turn/);
+    expect(prompt).toMatch(/Never speak after calling one of these tools/);
+    // "Hold on" on a drawn answer keeps it (the learner's voice already paused it).
+    expect(prompt).toMatch(
+      /While a drawn answer is showing \(see below\), "hold on", "wait" or "pause" call no tool/,
     );
   });
 
