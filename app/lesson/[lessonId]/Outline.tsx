@@ -3,6 +3,7 @@
 // step (done, current, preparing, not ready), and the keyboard hints. A row goes to its step
 // (the machine's goToStep); what each row shows is ./outlineRows.ts.
 import { Fragment, useState } from "react";
+import { PRODUCT_NAME } from "@/app/brand";
 import { shortcutHintLines } from "@/player/controls";
 import type { PlayerEvent, PlayerState } from "@/player/machine";
 import type { StepFetchStatus } from "@/player/prefetch";
@@ -37,7 +38,7 @@ export function Outline({
     <nav className={styles.outline} aria-label="Lesson outline">
       <div className={styles.brand}>
         <i aria-hidden />
-        Whiteboard
+        {PRODUCT_NAME}
       </div>
       <div className={styles.paper}>
         {coverSrc !== null && <Cover src={coverSrc} />}

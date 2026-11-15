@@ -6,6 +6,7 @@
 // picker still there to try again. The decisions are in ./uploadFlow.ts.
 import Link from "next/link";
 import { type ChangeEvent, useEffect, useRef, useState } from "react";
+import { PRODUCT_NAME } from "@/app/brand";
 import { ThemeToggle } from "@/app/lesson/[lessonId]/Toggles";
 import lessonStyles from "@/app/lesson/[lessonId]/lesson.module.css";
 import { shortcut } from "@/player/controls";
@@ -131,7 +132,7 @@ export function UploadView({ samples }: { samples: SampleLesson[] }) {
         <header className={styles.top}>
           <div className={lessonStyles.brand}>
             <i aria-hidden />
-            Whiteboard
+            {PRODUCT_NAME}
           </div>
           <ThemeToggle />
         </header>
