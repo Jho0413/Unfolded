@@ -2,10 +2,15 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
+  EMPTY_SIGNALS,
   LESSON_ID_RE,
   RUN_FILE_RE,
+  SavedStep,
+  Signal,
+  SignalsFile,
   StepResponse,
   isRunFileUrl,
+  signalsVersion,
 } from "@/shared/lesson";
 
 describe("run file names", () => {
@@ -86,5 +91,105 @@ describe("StepResponse.audioUrl", () => {
       "https://evil.example/api/runs/demo-m1/x.mp3",
     ])
       expect(audioUrlOk(url), url).toBe(false);
+  });
+});
+
+describe("Signal (section 5.4)", () => {
+  it("accepts a question or simplify with or without where it was sent", () => {
+    for (const body of [
+      { question: "why divide by √d?" },
+      { question: "why divide by √d?", step: 2, t: 4100 },
+      { simplify: "softmax lost them", step: 0 },
+      { started: 3, version: 2 },
+    ])
+      expect(Signal.safeParse(body).success, JSON.stringify(body)).toBe(true);
+  });
+
+  it("refuses bodies of two kinds, unknown keys and bad positions", () => {
+    for (const body of [
+      { question: "q", simplify: "s" },
+      { question: "q", started: 1, version: 1 },
+      { started: 1, version: 1, step: 1 },
+      { question: "q", at: "2026-11-15T03:00:00.000Z" },
+      { question: "" },
+      { question: "q", step: -1 },
+      { question: "q", step: 1.5 },
+      { simplify: "s", t: -1 },
+    ])
+      expect(Signal.safeParse(body).success, JSON.stringify(body)).toBe(false);
+  });
+});
+
+describe("SignalsFile (section 5.4)", () => {
+  const at = "2026-11-15T03:00:00.000Z";
+
+  it("parses a file with each kind of signal and its time", () => {
+    const file = {
+      version: 2,
+      signals: [
+        { question: "why √d?", step: 1, t: 2000, at },
+        { started: 2, version: 1, at },
+        { simplify: "too fast", step: 2, at },
+      ],
+    };
+    expect(SignalsFile.parse(file)).toEqual(file);
+    expect(SignalsFile.parse(EMPTY_SIGNALS)).toEqual(EMPTY_SIGNALS);
+  });
+
+  it("refuses a recorded signal without a time", () => {
+    expect(
+      SignalsFile.safeParse({ version: 1, signals: [{ question: "q" }] })
+        .success,
+    ).toBe(false);
+  });
+
+  it("counts only question and simplify signals in the version", () => {
+    expect(signalsVersion([])).toBe(0);
+    expect(
+      signalsVersion([
+        { question: "a" },
+        { started: 0, version: 1 },
+        { simplify: "b" },
+        { started: 1, version: 1 },
+      ]),
+    ).toBe(2);
+  });
+});
+
+describe("SavedStep and StepResponse: adaptation fields", () => {
+  const step = { title: "t", narration: "n", objects: [], actions: [] };
+  const adaptedFrom = {
+    kind: "question" as const,
+    text: "why divide by √d?",
+    atStep: 1,
+  };
+
+  it("an older saved step without them still parses", () => {
+    expect(SavedStep.parse({ step, cueTimes: {} })).toEqual({
+      step,
+      cueTimes: {},
+    });
+  });
+
+  it("keeps signalsVersion and adaptedFrom through the response", () => {
+    const saved = { step, cueTimes: {}, signalsVersion: 3, adaptedFrom };
+    expect(SavedStep.parse(saved)).toEqual(saved);
+    const response = {
+      ...saved,
+      version: 2,
+      audioUrl: "/api/runs/demo-m1/step-2.v2.mp3",
+    };
+    expect(StepResponse.parse(response)).toEqual(response);
+  });
+
+  it("refuses an unknown kind or a bad step", () => {
+    for (const bad of [
+      { ...adaptedFrom, kind: "started" },
+      { ...adaptedFrom, atStep: -1 },
+      { ...adaptedFrom, text: "" },
+    ])
+      expect(
+        SavedStep.safeParse({ step, cueTimes: {}, adaptedFrom: bad }).success,
+      ).toBe(false);
   });
 });

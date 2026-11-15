@@ -392,7 +392,9 @@ sceneAt(objects: BoardObject[], timed: { action; startMs; durationMs }[], tMs: n
   - `{ started: n, version: k }` when version k of step n starts playing
 
   The server appends it to `runs/<id>/signals.json` and bumps the lesson's **signals version**.
-- Every step generation records the signals version it used.
+  - Shapes (`shared/lesson.ts`): `{ question, step?, t? }`, `{ simplify, step?, t? }` (`step` is the step on screen, 0-based, and `t` the ms into its audio; the browser always sends both) and `{ started, version }`. The answer is `200 { version }` (`SignalResponse`).
+  - `signals.json` is a `SignalsFile`: `{ version, signals }`, each signal with the server's `at` (ISO time). `version` counts the question and simplify signals (`signalsVersion`): a `started` one is recorded but makes no step stale. No file reads as `{ version: 0, signals: [] }`.
+- Every step generation records the signals version it used (`SavedStep.signalsVersion`). A regenerated version (k > 1) that used newer signals than the one it replaces also records the newest of them as `adaptedFrom: { kind: "question" | "simplify", text, atStep }`, which reaches the browser in the `StepResponse`; the player shows "Updated because you asked: …" on that version.
 - When a question or simplify signal arrives, any step that **hasn't started playing** is out of date if it was generated (or is still generating) with an older version:
   - The server marks it stale and regenerates it as soon as the current generation finishes (section 6.2).
   - The browser keeps its prefetched copy of N+1 and requests the step again. When Next is pressed, it plays the new version if it has arrived, and otherwise the copy it already has, so Next never waits for a regeneration.
