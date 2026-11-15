@@ -123,6 +123,7 @@ export function LessonView({ lessonId, plan, replay, debug }: LessonViewProps) {
                   pages={paper.pages}
                   highlight={paper.highlight}
                   onAskAbout={onAskAbout}
+                  onSelecting={paper.onSelecting}
                 />
               )
             }

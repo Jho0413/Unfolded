@@ -9,6 +9,9 @@
 //   lasts, over the narration's. Closing Ask throws it away, as it does the board's drawing.
 // - A passage the learner selected and asked about (issue #129): highlighted in the answer
 //   blue for ASK_ABOUT_HIGHLIGHT_MS, over the narration's (the agent's still wins).
+// - While the learner selects in the paper (a drag, or a selection still up), the paper holds
+//   still: the pane in focus and the highlight stay as they were, so no cue resizes, scrolls
+//   or re-marks it under the pointer (QA A7). They catch up once the selection goes.
 // - Focus (player/paper/focus.ts): a new passage grows the paper; the board starting to animate
 //   (a lesson action, or the Answer view opening during Ask) grows the board; a click or hover on a
 //   pane focuses it.
@@ -59,6 +62,8 @@ export type LessonPaper = {
   highlightPaper: (quote: string, page?: number) => string;
   /** "Ask about this" on a selection (issue #129): highlights it briefly. */
   askAbout: (selection: PaperSelection) => void;
+  /** The paper viewer's onSelecting: holds the paper still while the learner selects. */
+  onSelecting: (selecting: boolean) => void;
 };
 
 export function useLessonPaper(
@@ -197,12 +202,24 @@ export function useLessonPaper(
     [setPicked],
   );
 
+  // What was on screen when the learner started selecting, held until they finish.
+  const [held, setHeld] = useState<{
+    focus: Pane;
+    highlight: PaperHighlight | null;
+  } | null>(null);
+  const onSelecting = useCallback(
+    (selecting: boolean) =>
+      setHeld(selecting ? { focus: focus.pane, highlight } : null),
+    [focus.pane, highlight],
+  );
+
   return {
     pages,
-    highlight,
-    focus: focus.pane,
+    highlight: held ? held.highlight : highlight,
+    focus: held ? held.focus : focus.pane,
     onFocusPane,
     highlightPaper,
     askAbout,
+    onSelecting,
   };
 }

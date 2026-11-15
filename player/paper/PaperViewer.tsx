@@ -13,6 +13,12 @@
 //   through it (the pane widens as the passage is scrolled to), until the learner scrolls.
 // - Text selected in the pages offers an "Ask about this" chip beside it (issue #129): the
 //   chip hands the quote and its page to `onAskAbout` (./selection.ts).
+// - Selecting works as in pdf.js's own viewer (TextLayerBuilder): each text layer ends with an
+//   `endOfContent` box that, while the learner drags (`data-selecting`), covers the layer
+//   behind the text and can't be selected, so a pointer between lines or past a line's end
+//   doesn't make the browser jump the selection to text elsewhere (the other column: QA A7).
+//   `onSelecting` tells the page while a drag or a selection in the paper is up, so it holds
+//   the paper still (no cue resizes, scrolls or re-marks it).
 // - `data-*` attributes expose the highlight for tests.
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { TextLayer } from "pdfjs-dist";
@@ -43,11 +49,14 @@ export const PaperViewer = memo(function PaperViewer({
   pages,
   highlight,
   onAskAbout,
+  onSelecting,
 }: {
   pages: readonly PaperPage[];
   highlight: PaperHighlight | null;
   /** The learner pressed "Ask about this" on a selection (issue #129); none: no chip. */
   onAskAbout?: (selection: PaperSelection) => void;
+  /** A drag or a selection in the paper starts (true) or ends (false): hold the paper still. */
+  onSelecting?: (selecting: boolean) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // The same element, for writing the test attributes (the scroll ref is only read).
@@ -105,6 +114,7 @@ export const PaperViewer = memo(function PaperViewer({
   };
 
   const picked = useSelectionChip(scrollRef, onAskAbout !== undefined, width);
+  useSelecting(scrollRef, onSelecting);
 
   return (
     <>
@@ -163,6 +173,62 @@ export const PaperViewer = memo(function PaperViewer({
     </>
   );
 });
+
+/**
+ * While the learner drags in the paper, `data-selecting` on the scroller (the endOfContent
+ * boxes cover their layers); and `onSelecting` while a drag or a selection in the paper is up.
+ */
+function useSelecting(
+  scrollRef: React.RefObject<HTMLDivElement | null>,
+  onSelecting?: (selecting: boolean) => void,
+) {
+  const onSelectingRef = useRef(onSelecting);
+  useEffect(() => {
+    onSelectingRef.current = onSelecting;
+  });
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    if (scroller === null) return;
+    let dragging = false;
+    let selecting = false;
+    const tell = () => {
+      const sel = window.getSelection();
+      const now =
+        dragging ||
+        (sel !== null &&
+          !sel.isCollapsed &&
+          sel.rangeCount > 0 &&
+          scroller.contains(sel.getRangeAt(0).commonAncestorContainer));
+      if (now === selecting) return;
+      selecting = now;
+      onSelectingRef.current?.(now);
+    };
+    const down = () => {
+      dragging = true;
+      scroller.dataset.selecting = "";
+      tell();
+    };
+    const up = () => {
+      if (!dragging) return;
+      dragging = false;
+      delete scroller.dataset.selecting;
+      tell();
+    };
+    scroller.addEventListener("pointerdown", down);
+    document.addEventListener("pointerup", up);
+    document.addEventListener("pointercancel", up);
+    window.addEventListener("blur", up);
+    document.addEventListener("selectionchange", tell);
+    return () => {
+      scroller.removeEventListener("pointerdown", down);
+      document.removeEventListener("pointerup", up);
+      document.removeEventListener("pointercancel", up);
+      window.removeEventListener("blur", up);
+      document.removeEventListener("selectionchange", tell);
+      if (selecting) onSelectingRef.current?.(false);
+    };
+  }, [scrollRef]);
+}
 
 /** Where the chip goes (px from the pane's top left) and what it asks about. */
 type Picked = {
@@ -275,7 +341,12 @@ function PdfPage({
         viewport: page.proxy.getViewport({ scale: 1 }),
       });
       await layer.render();
-      if (!cancelled) onLayerRef.current(layer.textDivs);
+      if (cancelled) return;
+      // pdf.js's selection helper (TextLayerBuilder): see the header.
+      const end = document.createElement("div");
+      end.className = styles.endOfContent;
+      container.append(end);
+      onLayerRef.current(layer.textDivs);
     });
     return () => {
       cancelled = true;

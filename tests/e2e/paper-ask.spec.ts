@@ -7,9 +7,15 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { ASK_ABOUT_HIGHLIGHT_MS } from "@/player/paper/selection";
-import { PAPER_PAGES, paperPdf } from "./support/paperPdf";
+import {
+  PAPER_PAGES,
+  paperPdf,
+  TWO_COLUMN_PAGE,
+  twoColumnPdf,
+} from "./support/paperPdf";
 import { savedRun } from "./support/savedRun";
 import { askInput } from "./support/tutor";
+import type { CuedPaperRef } from "@/shared/scene";
 
 test.use({
   launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
@@ -32,19 +38,32 @@ const micMuted = (page: Page) => page.evaluate(() => window.__qaFake?.micMuted);
 /** A whole line of page 2 of ./support/paperPdf.ts. */
 const LINE = "In short, every output cell is a row times a column.";
 
-async function openLesson(page: Page, name: string) {
-  await using run = await savedRun(name);
+async function openLesson(
+  page: Page,
+  name: string,
+  {
+    pdf = paperPdf(),
+    pages = PAPER_PAGES.length,
+    paperRefs,
+    play = false,
+  }: {
+    pdf?: Buffer;
+    pages?: number;
+    paperRefs?: CuedPaperRef[];
+    /** Leave the lesson playing (the tests hold on by default). */
+    play?: boolean;
+  } = {},
+) {
+  await using run = await savedRun(name, { paperRefs });
   await page.route(`**/api/runs/${run.lessonId}/paper.pdf`, (route) =>
-    route.fulfill({ body: paperPdf(), contentType: "application/pdf" }),
+    route.fulfill({ body: pdf, contentType: "application/pdf" }),
   );
   await page.goto(`/lesson/${run.lessonId}`);
-  await expect(paper(page)).toHaveAttribute(
-    "data-pages",
-    String(PAPER_PAGES.length),
-  );
+  await expect(paper(page)).toHaveAttribute("data-pages", String(pages));
   // The lesson's voice session is listening (the agent can be told the passage at once).
   await expect(page.getByTestId("ask-listening")).toHaveText("Listening");
   await expect(player(page)).toHaveAttribute("data-state", "playing");
+  if (play) return run;
   await page.keyboard.press("Space");
   await expect(player(page)).toHaveAttribute("data-state", "paused");
   return run;
@@ -85,6 +104,21 @@ async function dragAcross(page: Page, text: string) {
   await page.mouse.down();
   await page.mouse.move(box.x + box.width - 1, y, { steps: 10 });
   await page.mouse.up();
+}
+
+/** The paper pane's width once the panes have settled into their layout (after the PDF loads). */
+async function settledWidth(page: Page): Promise<number> {
+  const pane = page.getByTestId("paper-pane");
+  let last = 0;
+  await expect
+    .poll(async () => {
+      const now = (await pane.boundingBox())!.width;
+      const still = Math.abs(now - last) < 0.5;
+      last = now;
+      return still;
+    })
+    .toBe(true);
+  return last;
 }
 
 const SIZES = [
@@ -222,16 +256,7 @@ test("a drag that starts on the unfocused paper doesn't grow the pane under it; 
   const pane = page.getByTestId("paper-pane");
   await expect(split).toHaveAttribute("data-focus", "board");
   const width = async () => (await pane.boundingBox())!.width;
-  // The panes settle into their layout once the paper has loaded.
-  let before = 0;
-  await expect
-    .poll(async () => {
-      const now = await width();
-      const still = Math.abs(now - before) < 0.5;
-      before = now;
-      return still;
-    })
-    .toBe(true);
+  const before = await settledWidth(page);
   // Straight onto the line and pressing, with no rest on the paper first; then a slow drag,
   // longer than the hover focus (300 ms) and the pane's transition (0.45 s) together.
   const span = await lineSpan(page, LINE);
@@ -260,4 +285,105 @@ test("a drag that starts on the unfocused paper doesn't grow the pane under it; 
   await page.evaluate(() => getSelection()!.removeAllRanges());
   await pane.click({ position: { x: 20, y: 20 } });
   await expect(split).toHaveAttribute("data-focus", "paper");
+});
+
+test("two columns (QA A7): a drag across a line and into a gap below the next stays in its column", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openLesson(page, "e2e-paper-ask-columns", {
+    pdf: twoColumnPdf(),
+    pages: 2,
+  });
+  const [, , from, next] = TWO_COLUMN_PAGE.right;
+  await page.getByTestId("paper-pane").hover({ position: { x: 20, y: 20 } });
+  await expect(page.getByTestId("stage-split")).toHaveAttribute(
+    "data-focus",
+    "paper",
+  );
+  await page.waitForTimeout(600); // the pane's transition
+  const start = (await (await lineSpan(page, from)).boundingBox())!;
+  const below = (await (await lineSpan(page, next)).boundingBox())!;
+  // From the start of the line, past the end of the next one and down into the gap under
+  // it, where there is no text: the pointer is over the text layer, not a span.
+  await page.mouse.move(start.x + 1, start.y + start.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(below.x + below.width / 2, below.y + below.height / 2, {
+    steps: 8,
+  });
+  await page.mouse.move(
+    below.x + below.width + 30,
+    below.y + below.height + 4,
+    { steps: 8 },
+  );
+  await page.mouse.up();
+  const selected = await page.evaluate(() => String(getSelection()));
+  expect(selected).toContain("measure in addition to its prediction");
+  for (const line of TWO_COLUMN_PAGE.left) expect(selected).not.toContain(line);
+  expect(selected).not.toContain(TWO_COLUMN_PAGE.right[0]);
+  await expect(chip(page)).toBeVisible();
+  await chip(page).click();
+  await expect(page.getByLabel("Type your question")).toHaveValue(
+    /^About "measure in addition to its prediction\. In other words, the/,
+  );
+  await screenshot(page, "a7-two-columns");
+});
+
+test("while the learner drags, a narration cue neither resizes nor re-marks the paper; it catches up after", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openLesson(page, "e2e-paper-ask-freeze", {
+    paperRefs: [
+      {
+        page: 2,
+        quote: "The products of the paired entries are added together",
+        cue: "add",
+      },
+    ],
+    play: true,
+  });
+  const split = page.getByTestId("stage-split");
+  const pane = page.getByTestId("paper-pane");
+  await expect(split).toHaveAttribute("data-focus", "board");
+  const width = async () => (await pane.boundingBox())!.width;
+  const before = await settledWidth(page);
+  const span = paper(page).locator("[data-page] span", {
+    hasText: PAPER_PAGES[0][1],
+  });
+  const box = (await span.boundingBox())!;
+  // Just before the [[add]] cue (about 5.3 s), still playing.
+  await page
+    .getByTestId("player-audio")
+    .evaluate((a: HTMLAudioElement) => (a.currentTime = 4.6));
+  const y = box.y + box.height / 2;
+  // Straight onto a line of page 1 and pressing, then a slow drag across the cue.
+  await page.mouse.move(box.x + 1, y);
+  await page.mouse.down();
+  const seen: { width: number; key: string | null; focus: string | null }[] =
+    [];
+  for (let i = 1; i <= 16; i++) {
+    await page.mouse.move(box.x + 1 + ((box.width - 2) * i) / 16, y);
+    await page.waitForTimeout(100);
+    seen.push({
+      width: await width(),
+      key: await paper(page).getAttribute("data-highlight-key"),
+      focus: await split.getAttribute("data-focus"),
+    });
+  }
+  await page.mouse.up();
+  // The cue has passed (the narration moved on), but the paper held still.
+  expect(
+    await page
+      .getByTestId("player-audio")
+      .evaluate((a: HTMLAudioElement) => a.currentTime),
+  ).toBeGreaterThan(5.5);
+  expect(seen.every((s) => Math.abs(s.width - before) < 1)).toBe(true);
+  expect(seen.every((s) => s.key === "" && s.focus === "board")).toBe(true);
+  // Still selected: the chip stays where it is, and so does the paper.
+  await expect(chip(page)).toBeVisible();
+  await expect(paper(page)).toHaveAttribute("data-highlight-key", "");
+  // The selection goes: the cue's passage catches up.
+  await page.evaluate(() => getSelection()!.removeAllRanges());
+  await expect(paper(page)).toHaveAttribute("data-highlight-page", "2");
 });
