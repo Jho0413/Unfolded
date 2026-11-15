@@ -88,10 +88,18 @@ describe("sceneAt: times", () => {
     expect(obj(m, "t").object).toMatchObject({ x: 500, y: 500 });
   });
 
-  it("mid-animation: a move is part way, with its progress", () => {
+  it("mid-animation: a move is part way, eased (in and out), with its linear progress", () => {
+    // A quarter of the time: easeInOutCubic(0.25) = 0.0625 of the way (500 -> 900).
     const s = sceneAt(board(), timed, 2100);
-    expect(obj(s, "t").object).toMatchObject({ x: 600, y: 500 });
+    expect(obj(s, "t").object).toMatchObject({ x: 525, y: 500 });
     expect(s.active).toEqual([{ action: timed[1].action, progress: 0.25 }]);
+    // Halfway through, halfway there; three quarters, 0.9375 of the way.
+    expect(obj(sceneAt(board(), timed, 2200), "t").object).toMatchObject({
+      x: 700,
+    });
+    expect(obj(sceneAt(board(), timed, 2300), "t").object).toMatchObject({
+      x: 875,
+    });
   });
 
   it("after the end: every action complete, nothing active", () => {

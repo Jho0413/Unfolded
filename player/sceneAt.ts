@@ -18,6 +18,7 @@ import {
   type Target,
 } from "@/shared/scene";
 import type { CueTimes } from "@/shared/lesson";
+import { easeInOutCubic } from "./easing";
 
 /** One action on the timeline. `durationMs` here wins over `action.durationMs`. */
 export interface TimedAction {
@@ -332,7 +333,8 @@ function apply(
     }
     case "move": {
       if (!plan) break;
-      const at = lerp(plan.from, plan.to, p);
+      // Eased (issue #101): it sets off and lands gently, still a pure function of t.
+      const at = lerp(plan.from, plan.to, easeInOutCubic(p));
       if (!isPart(t)) {
         moveObjectCentre(state.object, at);
         break;
@@ -481,8 +483,9 @@ function changedCells(
  * actions that start at the same time apply in their array order.
  *
  * - `show`, `highlight`, `unhighlight` and `write` take effect when they
- *   start; `hide` when it ends. `move` slides linearly from where its target
- *   was when the move started to where its anchor was then.
+ *   start; `hide` when it ends. `move` slides, eased in and out
+ *   (easeInOutCubic), from where its target was when the move started to
+ *   where its anchor was then.
  * - `active` lists the actions in progress (start <= t < start + duration)
  *   that change the board, with how far along they are, 0..1. A highlight,
  *   unhighlight or write on a matrix also lists the cells it changed that no

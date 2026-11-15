@@ -1,0 +1,58 @@
+/*
+ * The board's depth (issue #101): new tokens for both themes, beside player/theme.css's (same
+ * selectors), and the two effects that use them. Nothing here animates on its own clock: every
+ * motion on the board comes from the audio clock (./motion.ts).
+ */
+:root,
+[data-theme="dark"] {
+  /* The shadow under a lifted copy (a row or column sliding over the board). */
+  --wb-lift: rgba(0, 0, 0, 0.55);
+  /* How strongly a highlight glows in its own colour. */
+  --wb-glow-mix: 40%;
+}
+
+[data-theme="light"] {
+  --wb-lift: rgba(20, 20, 10, 0.16);
+  --wb-glow-mix: 28%;
+}
+
+/* A highlight (cell, text, formula, arrow) glows softly in its colour, set as --hl. */
+.wb-glow {
+  filter: drop-shadow(
+    0 0 5px color-mix(in srgb, var(--hl) var(--wb-glow-mix), transparent)
+  );
+}
+
+/* The same glow for a formula's highlight (an HTML box in a foreignObject). */
+.wb-glow-box {
+  box-shadow: 0 0 6px
+    color-mix(in srgb, var(--hl) var(--wb-glow-mix), transparent);
+}
+
+/* A moved copy floats over the board while it slides. */
+.wb-lift {
+  filter: drop-shadow(0 6px 12px var(--wb-lift));
+}
+
+/*
+ * Reduced motion: no draw-on, rise, stagger or pulse; what is fading in uses its quick fade
+ * (--wb-quick, set from the clock by ./motion.ts motionProps).
+ */
+@media (prefers-reduced-motion: reduce) {
+  .wb-draw {
+    stroke-dasharray: none;
+    stroke-dashoffset: 0;
+  }
+  .wb-rise {
+    transform: none;
+  }
+  .wb-pulse {
+    display: none;
+  }
+  .wb-stagger {
+    opacity: 1 !important;
+  }
+  .wb-quick {
+    opacity: var(--wb-quick) !important;
+  }
+}

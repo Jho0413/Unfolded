@@ -51,7 +51,7 @@ export const LATEX_ERROR = "#cc0000";
  * is exact.
  */
 export const ARROW = {
-  stroke: 3,
+  stroke: 2.5,
   head: { len: 18, w: 14 },
   margin: 10,
   /**
