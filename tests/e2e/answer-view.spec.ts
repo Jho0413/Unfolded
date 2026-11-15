@@ -10,6 +10,8 @@ import { expect, type Page, test } from "@playwright/test";
 import { ANSWER_VIEW_TEXT } from "@/app/lesson/[lessonId]/boardView";
 import { ANSWER_CONTEXT } from "@/qa/answerContext";
 import { ANSWER_SHOWING } from "@/qa/tools";
+import { CANVAS } from "@/shared/scene";
+import { ANSWER_TEMPLATE } from "@/shared/validate";
 import { savedRun } from "./support/savedRun";
 import { answer, askQuestion, carryOn } from "./support/tutor";
 
@@ -165,22 +167,34 @@ test("highlight while the Answer view is up: a no-op, and the agent is told why"
 });
 
 const EVIDENCE = path.join(process.cwd(), "evidence", "90");
-// The lesson page is laid out for a desktop browser (ARCHITECTURE.md section 1).
+// The lesson page is laid out for a desktop browser (ARCHITECTURE.md section 1); the tag and
+// chip scale with the board, so they stay above the answer area at any desktop width.
 for (const theme of ["dark", "light"] as const)
-  test(`evidence: the Answer view at 1440 x 900, ${theme}`, async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.emulateMedia({ colorScheme: theme });
-    await using run = await savedRun(`e2e-answer-shot-${theme}`);
-    await drawnAnswer(page, run.lessonId);
-    await expect(answer(page)).toContainText("Let me sketch that");
-    // The highlight has faded in.
-    await expect(
-      object(page, "first").locator('[data-cell="0,0"]'),
-    ).toHaveAttribute("data-highlight-opacity", "1");
-    await mkdir(EVIDENCE, { recursive: true });
-    await page.screenshot({
-      path: path.join(EVIDENCE, `e2e-answer-view-${theme}.png`),
+  for (const [width, height] of [
+    [1440, 900],
+    [1024, 768],
+  ] as const)
+    test(`the tag and chip stay above the answer area at ${width} x ${height}, ${theme} (evidence)`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      await page.emulateMedia({ colorScheme: theme });
+      await using run = await savedRun(`e2e-answer-shot-${theme}-${width}`);
+      await drawnAnswer(page, run.lessonId);
+      await expect(answer(page)).toContainText("Let me sketch that");
+      // The highlight has faded in.
+      await expect(
+        object(page, "first").locator('[data-cell="0,0"]'),
+      ).toHaveAttribute("data-highlight-opacity", "1");
+      const svg = (await board(page).boundingBox())!;
+      const areaTop = svg.y + (ANSWER_TEMPLATE.area.y0 / CANVAS.h) * svg.height;
+      for (const id of ["answer-view-tag", "answer-view-back"]) {
+        const box = (await page.getByTestId(id).boundingBox())!;
+        expect(box.y).toBeGreaterThanOrEqual(svg.y);
+        expect(box.y + box.height).toBeLessThanOrEqual(areaTop);
+      }
+      await mkdir(EVIDENCE, { recursive: true });
+      await page.screenshot({
+        path: path.join(EVIDENCE, `e2e-answer-view-${theme}-${width}.png`),
+      });
     });
-  });

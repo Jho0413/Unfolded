@@ -1,20 +1,30 @@
-/* The Answer view (./AnswerView.tsx): the tag and chip sit in the board's top corners, which
-   the answer template keeps clear (shared/validate.ts ANSWER_TEMPLATE.area). */
+/* The Answer view (./AnswerView.tsx). The tag and chip are sized in board units, so they scale
+   with the board and stay in the strip above the answer area at any width: the board is
+   1600 units wide = 100cqw (1 unit = 0.0625cqw), and the area starts at y = 60 units
+   = 3.75cqw (shared/validate.ts ANSWER_TEMPLATE.area). Both end above 3.4cqw. They take the
+   card's tag and button look; `.view .x` outranks those classes. */
 .view {
   position: relative;
+  container-type: inline-size;
 }
 
-.tag {
+.view .tag {
   position: absolute;
-  top: 10px;
-  left: 10px;
+  top: 1cqw;
+  left: 1cqw;
+  font-size: 1.05cqw;
+  line-height: 1.3;
+  padding: 0.3cqw 0.6cqw;
+  border-radius: 0.4cqw;
 }
 
-.back {
+.view .back {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  min-height: 28px;
-  padding: 3px 10px;
-  font-size: 12.5px;
+  top: 0.9cqw;
+  right: 0.9cqw;
+  min-height: 0;
+  font-size: 1.15cqw;
+  line-height: 1.3;
+  padding: 0.35cqw 0.8cqw;
+  border-radius: 0.6cqw;
 }
