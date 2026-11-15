@@ -80,7 +80,20 @@ export async function generateWithRetry<T>(
       { role: "user", content: gen.retryPrompt(firstTry.result.errors) },
     ],
   };
-  const secondTry = await attempt(gen, messages, retry);
+  let secondTry: Attempt<T>;
+  try {
+    secondTry = await attempt(gen, messages, retry);
+  } catch (err) {
+    // The retry was only for a better layout: if it times out or fails, a first attempt with
+    // only soft problems (a sketch's overlaps) is still drawn, not lost (#90, a real case).
+    const usable = firstTry.result.softOnly;
+    if (usable === undefined) throw err;
+    console.warn(
+      `[pipeline] ${gen.label} retry failed, using the first attempt: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    logSoft(gen.label, firstTry.result.errors);
+    return usable.value;
+  }
   const chosen = chooseAttempt(firstTry.result, secondTry.result);
   if ("value" in chosen) {
     logSoft(gen.label, chosen.softErrors);

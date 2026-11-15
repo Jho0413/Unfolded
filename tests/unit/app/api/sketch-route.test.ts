@@ -203,6 +203,30 @@ describe("POST /api/sketch: a fresh answer and its template (#90)", () => {
     expect(logs.warned()).toContain("used with soft problems only");
   });
 
+  it("overlaps, then the retry times out: 200 with the first attempt, not Couldn't draw that", async () => {
+    // A real case (2026-11-15): the layout retry hit the 20 s timeout and the answer was lost.
+    const logs = quietLogs();
+    const fake = script(reply(OVERLAPPING), new Anthropic.APIUserAbortError());
+    const res = await post({ description: "why", fresh: true, board: EMPTY });
+    expect(res.status).toBe(200);
+    expect(SketchResponse.parse(await res.json()).sketch).toEqual(OVERLAPPING);
+    expect(fake.calls).toHaveLength(2);
+    expect(logs.warned()).toContain("retry failed, using the first attempt");
+  });
+
+  it("a hard problem, then the retry times out: 502 Couldn't draw that", async () => {
+    quietLogs();
+    const hardFirst: Sketch = {
+      ...CRAMPED,
+      objects: [{ kind: "text", id: "t", x: 20, y: 400, text: "far left" }],
+    };
+    script(reply(hardFirst), new Anthropic.APIUserAbortError());
+    await expectFailed(
+      await post({ description: "why", fresh: true, board: EMPTY }),
+      502,
+    );
+  });
+
   it("hard, then overlaps only: 200 with the second", async () => {
     quietLogs();
     const hardFirst: Sketch = {
