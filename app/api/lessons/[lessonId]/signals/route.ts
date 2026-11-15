@@ -5,6 +5,7 @@
 // next request (lib/pipeline/lessonStep.ts).
 import "server-only";
 import { z } from "zod";
+import { config } from "@/lib/config";
 import { appendSignal, PLAN_FILE, readRunJson } from "@/lib/runs/store";
 import {
   LESSON_ID_RE,
@@ -19,6 +20,13 @@ const TAG = "[api/lessons/signals]";
 
 function failed(error: string, status: number): Response {
   return Response.json({ error } satisfies ApiError, { status });
+}
+
+/** The learner's words in a signal: a question or a simplify reason ("" for started). */
+function signalText(signal: Signal): string {
+  if ("question" in signal) return signal.question;
+  if ("simplify" in signal) return signal.simplify;
+  return "";
 }
 
 export async function POST(
@@ -40,6 +48,14 @@ export async function POST(
   const signal = Signal.safeParse(json);
   if (!signal.success) {
     console.warn(TAG, lessonId, "bad request:", z.prettifyError(signal.error));
+    return failed(SIGNAL_ROUTE_ERRORS.badSignal, 400);
+  }
+  if (signalText(signal.data).length > config.maxSignalChars) {
+    console.warn(
+      TAG,
+      lessonId,
+      `bad request: over ${config.maxSignalChars} characters`,
+    );
     return failed(SIGNAL_ROUTE_ERRORS.badSignal, 400);
   }
 

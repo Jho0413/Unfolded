@@ -101,6 +101,11 @@ export const config = {
   },
   /** Cap on `board.objects` in a POST /api/sketch body (ARCHITECTURE.md section 8). */
   maxBoardObjects: 200,
+  /**
+   * Cap on a question's or simplify reason's characters in a POST /api/lessons/<id>/signals body
+   * (ARCHITECTURE.md section 5.4): signals.json keeps it, and step prompts send it to Claude.
+   */
+  maxSignalChars: 1000,
   /** fal illustrations per lesson, cover included (E1). fal credits are tight. */
   maxImagesPerLesson: 4,
   /** The Q&A agent's WebRTC conversation token (ARCHITECTURE.md section 8). */

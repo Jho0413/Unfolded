@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/lessons/[lessonId]/signals/route";
 import { SIGNAL_ROUTE_ERRORS } from "@/app/api/lessons/[lessonId]/signals/errors";
+import { config } from "@/lib/config";
 import {
   PLAN_FILE,
   readSignals,
@@ -119,6 +120,13 @@ describe("signal recorded", () => {
   });
 });
 
+it("a question of exactly maxSignalChars is recorded", async () => {
+  await expectVersion(
+    await post(LESSON, { question: "x".repeat(config.maxSignalChars) }),
+    1,
+  );
+});
+
 describe("concurrent posts", () => {
   it("both recorded: two signals at once both land, versions 1 and 2", async () => {
     const [a, b] = await Promise.all([
@@ -171,6 +179,14 @@ describe('bad body rejected: 400 "That isn\'t a learner signal.", nothing record
     ["started with step and t", { started: 0, version: 1, step: 0 }],
     ["a client-sent `at`", { question: "why?", at: "2026-01-01T00:00:00Z" }],
     ["an array", [{ question: "why?" }]],
+    [
+      "a question over maxSignalChars",
+      { question: "x".repeat(config.maxSignalChars + 1) },
+    ],
+    [
+      "a simplify reason over maxSignalChars",
+      { simplify: "x".repeat(config.maxSignalChars + 1) },
+    ],
     ["null", null],
   ];
   for (const [name, body] of bad)

@@ -6,7 +6,7 @@ import { NO_SUCH_LESSON } from "@/shared/lesson";
 export const SIGNAL_ROUTE_ERRORS = {
   /** A bad lessonId (400), or a lesson with no plan (404). */
   noSuchLesson: NO_SUCH_LESSON,
-  /** The body isn't JSON, or isn't a Signal. */
+  /** The body isn't JSON, isn't a Signal, or its text is over `config.maxSignalChars`. */
   badSignal: "That isn't a learner signal.",
   /** signals.json isn't a SignalsFile, or the write failed (logged). */
   failed: "Couldn't record that signal.",
