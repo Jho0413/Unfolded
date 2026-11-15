@@ -44,6 +44,10 @@ const claude = vi.hoisted(() => ({
 // The voice: the TTS fake, or a failure a test sets; and the runs folder, a temporary one.
 const voice = vi.hoisted(() => ({
   error: undefined as Error | undefined,
+  /** Narrations whose voicing fails, while others are voiced. */
+  failing: new Set<string>(),
+  /** Narrations whose next voicing fails once (a passing TTS error). */
+  failingOnce: new Set<string>(),
   narrated: [] as string[],
   runs: "",
 }));
@@ -54,6 +58,10 @@ vi.mock("@/lib/narration/tts", async (importOriginal) => {
     // Always the TTS fake, whatever the mode: a route test never reaches ElevenLabs.
     narrate: (narration: string) => {
       voice.narrated.push(narration);
+      if (voice.failing.has(narration) || voice.failingOnce.delete(narration))
+        return Promise.reject(
+          new real.TtsError("provider", `voicing failed: ${narration}`),
+        );
       return voice.error
         ? Promise.reject(voice.error)
         : real.narrate(narration, { mode: "fake" });
@@ -180,6 +188,8 @@ beforeEach(async () => {
 afterEach(async () => {
   claude.current = undefined;
   voice.error = undefined;
+  voice.failing.clear();
+  voice.failingOnce.clear();
   voice.narrated = [];
   await rm(voice.runs, { recursive: true, force: true });
   vi.restoreAllMocks();
@@ -675,6 +685,144 @@ describe("POST /api/sketch: a narrated answer (#105)", () => {
     expect(fake.calls[1].body.messages.at(-1)?.content).toContain(
       errors.unknownCue("elsewhere"),
     );
+  });
+});
+
+describe("POST /api/sketch: the narration is voiced while the sketch streams", () => {
+  /** A valid answer board whose one cue, "c", fires on its first word. */
+  const VALID: Sketch = {
+    narration: "[[c]]Here it is.",
+    objects: [
+      { kind: "text", id: "title", x: 800, y: 110, text: "Why scale?" },
+      { kind: "latex", id: "f", x: 800, y: 450, tex: "\\frac{40}{8}=5" },
+    ],
+    actions: [{ do: "show", target: { id: "f" }, durationMs: 400, cue: "c" }],
+  };
+  /** A formula off the answer area: a hard problem, retried. */
+  const OFF_AREA: Sketch = {
+    narration: "[[c]]A first try.",
+    objects: [
+      VALID.objects[0],
+      { kind: "latex", id: "f", x: 1560, y: 450, tex: "x" },
+    ],
+    actions: VALID.actions,
+  };
+  const fresh = { description: "why", fresh: true, board: EMPTY };
+
+  /** A Claude whose one answer streams its text at once, then waits for `release`. */
+  function gatedClaude(message: Anthropic.Message) {
+    let release: () => void = () => {};
+    const done = new Promise<void>((r) => (release = r));
+    const text = (message.content[0] as Anthropic.TextBlock).text;
+    claude.current = {
+      calls: [],
+      stream() {
+        let listener: (delta: string, snapshot: string) => void = () => {};
+        return {
+          on(_event, l) {
+            listener = l;
+            return this;
+          },
+          async finalMessage() {
+            listener(text, text);
+            await done;
+            return message;
+          },
+        };
+      },
+    };
+    return release;
+  }
+
+  it("the narration is voiced as soon as it has streamed, before Claude has finished the sketch", async () => {
+    const release = gatedClaude(reply(VALID));
+    const pending = post(fresh);
+    await vi.waitFor(() => expect(voice.narrated).toEqual([VALID.narration]));
+    release();
+    const res = await pending;
+    expect(res.status).toBe(200);
+    expect(voice.narrated).toEqual([VALID.narration]);
+    expect(SketchResponse.parse(await res.json()).sketch).toEqual(VALID);
+  });
+
+  it("a stream with no text events: the narration is voiced once the sketch is in, as before", async () => {
+    const message = reply(VALID);
+    claude.current = {
+      calls: [],
+      stream: () => ({ finalMessage: async () => message }),
+    };
+    const res = await post(fresh);
+    expect(res.status).toBe(200);
+    expect(voice.narrated).toEqual([VALID.narration]);
+  });
+
+  it("rejected, then a retry with a new narration: both are voiced, and the answer is the retry's", async () => {
+    quietLogs();
+    script(reply(OFF_AREA), reply(VALID));
+    const res = await post(fresh);
+    expect(res.status).toBe(200);
+    expect(voice.narrated).toEqual([OFF_AREA.narration, VALID.narration]);
+    const body = SketchResponse.parse(await res.json());
+    expect(body.sketch).toEqual(VALID);
+    const record: unknown = JSON.parse(
+      await readFile(
+        path.join(
+          voice.runs,
+          LESSON,
+          ANSWERS_DIR,
+          path.basename(body.audioUrl).replace(/\.mp3$/, ".json"),
+        ),
+        "utf8",
+      ),
+    );
+    expect(record).toMatchObject({ sketch: { narration: VALID.narration } });
+  });
+
+  it("rejected, then a retry with the same narration: voiced once, and its voicing reused", async () => {
+    quietLogs();
+    script(reply({ ...OFF_AREA, narration: VALID.narration }), reply(VALID));
+    const res = await post(fresh);
+    expect(res.status).toBe(200);
+    expect(voice.narrated).toEqual([VALID.narration]);
+  });
+
+  it("a rejected attempt's voicing fails: the retry's narration is voiced, 200", async () => {
+    quietLogs();
+    voice.failing.add(OFF_AREA.narration);
+    script(reply(OFF_AREA), reply(VALID));
+    const res = await post(fresh);
+    expect(res.status).toBe(200);
+    expect(SketchResponse.parse(await res.json()).sketch).toEqual(VALID);
+  });
+
+  it("a rejected attempt's voicing fails once, and the retry keeps its narration: voiced again, 200", async () => {
+    quietLogs();
+    voice.failingOnce.add(VALID.narration);
+    script(reply({ ...OFF_AREA, narration: VALID.narration }), reply(VALID));
+    const res = await post(fresh);
+    expect(res.status).toBe(200);
+    expect(voice.narrated).toEqual([VALID.narration, VALID.narration]);
+  });
+
+  it("the voicing of the narration used fails: 502 Couldn't draw that, logged", async () => {
+    const logs = quietLogs();
+    voice.failing.add(VALID.narration);
+    script(reply(VALID));
+    await expectFailed(await post(fresh), 502);
+    expect(logs.logged()).toContain(`voicing failed: ${VALID.narration}`);
+  });
+
+  it("rejected twice after both narrations were voiced: 502 Couldn't draw that for the sketch, not the voicing, nothing saved", async () => {
+    const logs = quietLogs();
+    voice.failing.add(OFF_AREA.narration);
+    script(reply(OFF_AREA), reply({ ...OFF_AREA, narration: "[[c]]Again." }));
+    await expectFailed(await post(fresh), 502);
+    expect(voice.narrated).toEqual([OFF_AREA.narration, "[[c]]Again."]);
+    expect(logs.logged()).toContain("rejected twice");
+    expect(logs.logged()).not.toContain("voicing failed");
+    await expect(
+      readdir(path.join(voice.runs, LESSON, ANSWERS_DIR)),
+    ).rejects.toThrow();
   });
 });
 

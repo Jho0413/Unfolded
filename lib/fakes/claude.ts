@@ -38,17 +38,33 @@ export function fakeClaude(
       // Copied, so a test sees the request as it was sent even if the caller reuses objects.
       calls.push({ body: structuredClone(body), options });
       const i = calls.length - 1;
+      const listeners: ((delta: string, snapshot: string) => void)[] = [];
+      const reply = async (): Promise<Anthropic.Message> => {
+        if (replies === undefined)
+          return readFixture<Anthropic.Message>(fixture);
+        const scripted = replies[i];
+        if (scripted === undefined)
+          throw new Error(
+            `fakeClaude: request ${i + 1}, but only ${replies.length} replies scripted`,
+          );
+        if (scripted instanceof Error) throw scripted;
+        return scripted;
+      };
       return {
+        // The answer's text streams in one piece, before the message is final, as the SDK's
+        // "text" events would (a sketch voices its narration from them).
+        on(_event, listener) {
+          listeners.push(listener);
+          return this;
+        },
         async finalMessage() {
-          if (replies === undefined)
-            return readFixture<Anthropic.Message>(fixture);
-          const reply = replies[i];
-          if (reply === undefined)
-            throw new Error(
-              `fakeClaude: request ${i + 1}, but only ${replies.length} replies scripted`,
-            );
-          if (reply instanceof Error) throw reply;
-          return reply;
+          const message = await reply();
+          const text = message.content
+            .filter((b): b is Anthropic.TextBlock => b.type === "text")
+            .map((b) => b.text)
+            .join("");
+          for (const listener of listeners) listener(text, text);
+          return message;
         },
       };
     },
