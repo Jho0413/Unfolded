@@ -170,6 +170,36 @@ Example, a curve drawn on, then one point highlighted:
 ${exampleLines(VIZ_EXAMPLES.plot)}`;
 
 /**
+ * The prompt's example of an illustration (E1, #152): generic on purpose, checked against the
+ * wire's image object in tests/unit/lib/pipeline/prompts-step.test.ts. 16:9, like fal's image
+ * (config.fal.imageSize), so it fills its box.
+ */
+export const IMAGE_EXAMPLE = {
+  kind: "image",
+  id: "scene",
+  x: 1060,
+  y: 560,
+  w: 480,
+  h: 270,
+  hidden: true,
+  prompt:
+    "A simple flat illustration on a plain white background: two children on a seesaw in a park, one sitting near the middle and one far out on the other end, the seesaw level. Soft colours, clean outlines. No text, letters, numbers, labels or symbols anywhere in the image.",
+} as const;
+
+/** Illustrations (E1, #152): at most one per step, an image object in objectsJson. */
+const IMAGE_PROMPT = `# Illustrations
+
+A step may also draw one image: an illustration an image model paints from your prompt. Use it only where a picture explains better than boxes and text: a physical setup, an everyday analogy, or a scene the paper describes. Most steps need none. Never use one for a formula, a chart, a diagram of boxes and arrows, or anything the learner has to read.
+
+It goes in objectsJson, like a heatmap or plot: kind "image", id, x, y, w, h (the top-left corner and size, inside the canvas), prompt, and optionally hidden. Make the box 16:9, between 400 by 225 and 640 by 360. Give it its own region of the board, clear of every other object, label and arrow. Start it hidden and show it on the cue where the narration turns to the picture, then talk about what it shows.
+
+The prompt is two or three sentences describing one concrete visual metaphor for the idea: the things in the picture, how they are arranged and what is happening. Ask for a simple flat illustration on a plain white background, with soft colours. The image must contain no text: no letters, words, numbers, labels, symbols or equations, and the prompt says so. Describe what to draw, not the paper or its terms.
+
+Example:
+objectsJson: ${JSON.stringify(JSON.stringify([IMAGE_EXAMPLE]))}
+action: ${JSON.stringify({ cue: "seesaw", do: "show", target: { id: "scene" }, durationMs: 600 })}`;
+
+/**
  * The prompt's examples of widgetJson (#110, after docs/snippets/widgets.md). Generic on
  * purpose, and checked against the contract in tests/unit/lib/pipeline/prompts-step.test.ts.
  */
@@ -239,6 +269,8 @@ ${NARRATION_RULES_PROMPT}
 ${BOARD_OBJECTS_PROMPT}
 
 ${VIZ_PROMPT}
+
+${IMAGE_PROMPT}
 
 An object with hidden: true is on the board from the start but not drawn until a show action. Use hidden objects for anything that appears partway through the step.
 
