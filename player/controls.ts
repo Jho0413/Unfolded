@@ -13,6 +13,68 @@ import {
   transition,
 } from "./machine";
 
+/**
+ * Every keyboard shortcut, in the order the help overlay (#131) lists them. The handlers read
+ * their keys from here (Space: `isPlayPauseKey`; arrows and R: `shortcutEvent`; ?: `isHelpKey`),
+ * so the help can't drift from what the keys do. `A` and Escape are the Ask panel's
+ * (qa/AskPanel.tsx; a test checks it handles these keys); Escape closes the help too.
+ */
+export const SHORTCUTS = [
+  { id: "playPause", keys: [" "], label: "Space", does: "Hold on / go on" },
+  {
+    id: "next",
+    keys: ["ArrowRight"],
+    label: "→",
+    does: "Next idea",
+    event: { type: "next" },
+  },
+  {
+    id: "back",
+    keys: ["ArrowLeft"],
+    label: "←",
+    does: "Back to the previous idea",
+    event: { type: "back" },
+  },
+  {
+    id: "replay",
+    keys: ["r", "R"],
+    label: "R",
+    does: "Say that again",
+    event: { type: "replay" },
+  },
+  {
+    id: "ask",
+    keys: ["a", "A"],
+    label: "A",
+    does: "Ask a question, by voice or typing",
+  },
+  {
+    id: "close",
+    keys: ["Escape"],
+    label: "Esc",
+    does: "Close Ask, or this help",
+  },
+  { id: "help", keys: ["?"], label: "?", does: "Show this help" },
+] as const satisfies readonly {
+  id: string;
+  keys: readonly string[];
+  label: string;
+  does: string;
+  event?: PlayerEvent;
+}[];
+
+export type Shortcut = (typeof SHORTCUTS)[number];
+
+/** The shortcut with this id. */
+export function shortcut<I extends Shortcut["id"]>(
+  id: I,
+): Extract<Shortcut, { id: I }> {
+  return SHORTCUTS.find((s) => s.id === id) as Extract<Shortcut, { id: I }>;
+}
+
+const hasKey = (s: Shortcut, key: string) =>
+  (s.keys as readonly string[]).includes(key);
+
 /** The step whose board and audio are on screen (Ask shows the step it was opened from). */
 export function stepOnScreen(state: PlayerState): number {
   return state.kind === "asking" ? state.from.step : state.step;
@@ -60,7 +122,8 @@ export function isPlayPauseKey(key: {
   modified: boolean;
   target: { tagName: string; isContentEditable: boolean } | null;
 }): boolean {
-  if (key.key !== " " || key.repeat || key.modified) return false;
+  if (!hasKey(shortcut("playPause"), key.key) || key.repeat || key.modified)
+    return false;
   if (key.target === null) return true;
   if (key.target.isContentEditable) return false;
   return !INTERACTIVE_TAGS.has(key.target.tagName.toUpperCase());
@@ -111,17 +174,28 @@ export function shortcutEvent(key: {
   target: { tagName: string; isContentEditable: boolean } | null;
 }): PlayerEvent | null {
   if (key.repeat || key.modified || isTextEntry(key.target)) return null;
-  switch (key.key) {
-    case "ArrowRight":
-      return { type: "next" };
-    case "ArrowLeft":
-      return { type: "back" };
-    case "r":
-    case "R":
-      return { type: "replay" };
-    default:
-      return null;
-  }
+  for (const s of SHORTCUTS)
+    if ("event" in s && hasKey(s, key.key)) return s.event;
+  return null;
+}
+
+/**
+ * Whether a key press opens the help overlay (#131): `?`, which takes Shift on most layouts,
+ * so only Ctrl, Alt and Meta count as modifiers. Not on key repeat, not while typing.
+ */
+export function isHelpKey(key: {
+  key: string;
+  repeat: boolean;
+  /** Ctrl, Alt or Meta (Shift is how `?` is typed). */
+  modified: boolean;
+  target: { tagName: string; isContentEditable: boolean } | null;
+}): boolean {
+  return (
+    hasKey(shortcut("help"), key.key) &&
+    !key.repeat &&
+    !key.modified &&
+    !isTextEntry(key.target)
+  );
 }
 
 /**
