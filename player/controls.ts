@@ -148,6 +148,34 @@ export function playRejectionEvent(error: unknown): PlayerEvent | null {
   return null;
 }
 
+/** What the audio element is doing when one of its events is handled. */
+export type MediaNow = { paused: boolean; ended: boolean };
+
+/**
+ * The machine event for the element's `pause` event: a pause from outside the page (a media
+ * key) while playing pauses the machine too. Not the pause that comes with the end of the
+ * audio, and not a late event: media events are queued, so when it's handled the element may
+ * be playing again (the learner pressed Space twice quickly). Acting on that stale event
+ * paused the machine again, and the play/pause effect and these handlers then chased each
+ * other without end (the flaky "keys" e2e test, #139).
+ */
+export function outsidePauseEvent(
+  media: MediaNow,
+  state: PlayerState,
+): PlayerEvent | null {
+  if (media.ended || !media.paused) return null;
+  return state.kind === "playing" ? { type: "pause" } : null;
+}
+
+/**
+ * Whether the element's `play` event is a play from outside the page for the machine to
+ * resume with (if it can't, usePlayer pauses the element again). Not while the machine is
+ * already playing, and not a late event whose element has paused again since.
+ */
+export function isOutsidePlay(media: MediaNow, state: PlayerState): boolean {
+  return !media.paused && state.kind !== "playing";
+}
+
 /**
  * Whether a key press is the Space play/pause shortcut. Not with a modifier
  * (Shift+Space and friends belong to the browser), not on key repeat (so

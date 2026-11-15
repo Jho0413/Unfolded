@@ -24,8 +24,10 @@ import type { StepResponse } from "@/shared/lesson";
 import { type BoardState, EMPTY_BOARD } from "@/shared/scene";
 import {
   canSend,
+  isOutsidePlay,
   isPlayPauseKey,
   lastFiredCue,
+  outsidePauseEvent,
   playPauseEvent,
   playRejectionEvent,
   stepOnScreen,
@@ -238,19 +240,20 @@ export function usePlayer({
   }, [send]);
 
   // A pause from outside the page (media key) while playing: the machine
-  // pauses too. The pause that comes with the end of the audio isn't one.
+  // pauses too (controls.ts outsidePauseEvent; late events are ignored).
   const onPause = useCallback(() => {
     const audio = audioRef.current;
-    if (audio === null || audio.ended) return;
-    if (stateRef.current.kind === "playing") send({ type: "pause" });
+    if (audio === null) return;
+    const event = outsidePauseEvent(audio, stateRef.current);
+    if (event !== null) send(event);
   }, [send]);
 
   // A play from outside the page: the machine resumes if it can, and
   // otherwise the audio stops again (no narration over Ask or an ended step).
   const onPlay = useCallback(() => {
-    if (stateRef.current.kind === "playing") return;
-    if (send({ type: "resume" }).outcome !== "changed")
-      audioRef.current?.pause();
+    const audio = audioRef.current;
+    if (audio === null || !isOutsidePlay(audio, stateRef.current)) return;
+    if (send({ type: "resume" }).outcome !== "changed") audio.pause();
   }, [send]);
 
   const step = stepOnScreen(view.state);

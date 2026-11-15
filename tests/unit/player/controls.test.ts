@@ -9,7 +9,9 @@ import {
   type AskClose,
   isTextEntry,
   isPlayPauseKey,
+  isOutsidePlay,
   lastFiredCue,
+  outsidePauseEvent,
   playPauseEvent,
   playRejectionEvent,
   shortcutEvent,
@@ -101,6 +103,46 @@ describe("playRejectionEvent", () => {
   it("anything else → nothing", () => {
     expect(playRejectionEvent(new Error("NotAllowedError"))).toBeNull();
     expect(playRejectionEvent(undefined)).toBeNull();
+  });
+});
+
+describe("the element's pause and play events (a media key, or a late event, #139)", () => {
+  const playing: PlayerState = { kind: "playing", step: 0 };
+  const paused: PlayerState = { kind: "paused", step: 0 };
+  const stopped = { paused: true, ended: false };
+  const running = { paused: false, ended: false };
+  const ended = { paused: true, ended: true };
+
+  it.each([
+    [
+      "a media key pause while explaining: pause",
+      stopped,
+      playing,
+      { type: "pause" },
+    ],
+    ["the pause at the end of the audio: nothing", ended, playing, null],
+    [
+      "a late pause, the element playing again (Space twice quickly): nothing",
+      running,
+      playing,
+      null,
+    ],
+    ["a pause while held on already: nothing", stopped, paused, null],
+  ] as const)("outsidePauseEvent: %s", (_, media, state, event) => {
+    expect(outsidePauseEvent(media, state)).toEqual(event);
+  });
+
+  it.each([
+    ["a media key play while held on: resume", running, paused, true],
+    ["a play while already explaining: nothing", running, playing, false],
+    [
+      "a late play, the element paused again since: nothing",
+      stopped,
+      paused,
+      false,
+    ],
+  ] as const)("isOutsidePlay: %s", (_, media, state, outside) => {
+    expect(isOutsidePlay(media, state)).toBe(outside);
   });
 });
 
