@@ -136,8 +136,7 @@ async function resolveStep(
     signals = await lessonSignals(lessonId);
     const played = playedVersion(signals.signals, n);
     // started: the played version is served, in replay mode too, and never regenerated.
-    const playing =
-      played === undefined ? undefined : await savedStep(lessonId, n, played);
+    const playing = await playedStep(lessonId, n, signals);
     if (playing) return { kind: "ok", response: playing };
 
     const saved = await latestSavedStep(lessonId, n);
@@ -175,7 +174,9 @@ async function resolveStep(
         `${where}: failed (${event?.type ?? "internal"}), keeping v${replacing.version}`,
         err,
       );
-      return { kind: "ok", response: replacing };
+      // If a version started playing meanwhile, that one is the step now (started x failure).
+      const playing = await playedStep(lessonId, n).catch(() => undefined);
+      return { kind: "ok", response: playing ?? replacing };
     }
     // A failure outside the table (a bug, a failed save) fails the step too.
     if (event === undefined) failedSteps.add(key);
@@ -213,8 +214,13 @@ async function generate(
   const paper = await readRunJson(lessonId, PAPER_FILE, SavedPaper);
   if (paper === undefined)
     throw new Error(`no ${PAPER_FILE}: the lesson's paper was never uploaded`);
-  // After a jump the previous step may not exist yet: the prompt then uses its goal.
-  const previous = n > 0 ? await latestSavedStep(lessonId, n - 1) : undefined;
+  // The previous step as the learner heard it (its played version, else its latest). After a
+  // jump it may not exist yet: the prompt then uses its goal.
+  const previous =
+    n > 0
+      ? ((await playedStep(lessonId, n - 1, signals)) ??
+        (await latestSavedStep(lessonId, n - 1)))
+      : undefined;
   const newer = signalsSince(signals.signals, replacing?.signalsVersion ?? 0);
   const step = await generateStep({
     paperFileId: paper.fileId,
@@ -234,13 +240,12 @@ async function generate(
   });
   if (replacing !== undefined) {
     // generating x started n: an older version started playing while this one was made, so
-    // this one is discarded and the played version served.
-    const played = playedVersion((await lessonSignals(lessonId)).signals, n);
-    const playing =
-      played === undefined ? undefined : await savedStep(lessonId, n, played);
+    // this one is discarded and the played version served. (A started signal arriving between
+    // this check and the save lets the new version be saved; requests still get the played one.)
+    const playing = await playedStep(lessonId, n);
     if (playing) {
       console.info(
-        `${TAG} ${lessonId} step ${n}: v${played} started while regenerating; discarded`,
+        `${TAG} ${lessonId} step ${n}: v${playing.version} started while regenerating; discarded`,
       );
       return playing;
     }
@@ -278,6 +283,22 @@ async function savedStep(
     return undefined;
   }
   return saved && stepResponse(lessonId, n, version, saved);
+}
+
+/**
+ * The version of step n that started playing last, as the route answers it; undefined if none
+ * started or its file is missing or damaged. Reads signals.json unless it's given.
+ */
+async function playedStep(
+  lessonId: string,
+  n: number,
+  signals?: SignalsFile,
+): Promise<StepResponse | undefined> {
+  const played = playedVersion(
+    (signals ?? (await lessonSignals(lessonId))).signals,
+    n,
+  );
+  return played === undefined ? undefined : savedStep(lessonId, n, played);
 }
 
 /**

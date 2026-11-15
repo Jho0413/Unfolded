@@ -1,6 +1,7 @@
 // POST /api/lessons/<lessonId>/steps/<n> (ROADMAP G2 and A1, ARCHITECTURE.md sections 5.1, 5.4,
-// 6.2 and 7). One test per cell of the section 6.2 table, named "<state> x <event>", run through
-// the route, plus the route's rejections (a bad lessonId or n) and adaptation's rows (A1). Nothing real is called:
+// 6.2 and 7). One test per cell of the section 6.2 table except the A1 ones, named "<state> x
+// <event>", run through the route, plus the route's rejections (a bad lessonId or n), and one
+// test per row of adaptation's table (A1, section 5.4) with the A1 cells it covers. Nothing real is called:
 // Claude is lib/fakes/claude.ts (scripted per test) and TTS is its FAKE_APIS=1 fake, and runs go
 // to a temp runs dir.
 import { mkdtemp, readdir, rm } from "node:fs/promises";
@@ -764,6 +765,56 @@ describe("adaptation (A1, section 5.4): a question makes a step that hasn't star
     expect(body.version).toBe(2);
     expect(body.adaptedFrom?.text).toBe("and the softmax?");
     expect(sentToClaude(claude, 1)).toContain(`- Asked: ${QUESTION.question}`);
+  });
+
+  it("a regeneration rejected twice keeps the old version too", async () => {
+    const logs = quietLogs();
+    await saveVersion(1, 0);
+    await appendSignal(LESSON, QUESTION);
+    script(invalidReply(), invalidReply());
+    const res = await post(LESSON, "1");
+    expect(res.status).toBe(200);
+    expect(StepResponse.parse(await res.json()).version).toBe(1);
+    expect(logs.logged()).toContain("failed (rejected), keeping v1");
+  });
+
+  it("a regeneration that fails after an older version started: the played version is answered", async () => {
+    quietLogs();
+    await saveVersion(1, 0);
+    await saveVersion(1, 0);
+    await appendSignal(LESSON, QUESTION);
+    const { release, firstCall } = gatedClaude(fakeMessage("", "refusal"));
+    const regenerating = post(LESSON, "1");
+    await firstCall;
+    await appendSignal(LESSON, { started: 1, version: 1 });
+    release();
+    expect(StepResponse.parse(await (await regenerating).json()).version).toBe(
+      1,
+    );
+  });
+
+  it("the previous step's narration in the prompt is its played version's, not a newer one", async () => {
+    const heard = Step.parse(await readFixture("demo-m1.step.json"));
+    await saveStepVersion(
+      LESSON,
+      0,
+      { step: heard, cueTimes: {} },
+      new Uint8Array([1]),
+    );
+    const unheard = { ...heard, narration: "A version nobody heard." };
+    await saveStepVersion(
+      LESSON,
+      0,
+      { step: unheard, cueTimes: {} },
+      new Uint8Array([2]),
+    );
+    await appendSignal(LESSON, { started: 0, version: 1 });
+    const claude = script(validReply);
+    expect((await post(LESSON, "1")).status).toBe(200);
+    expect(sentToClaude(claude)).toContain(
+      JSON.stringify(stripMarkers(heard.narration).text).slice(1, -1),
+    );
+    expect(sentToClaude(claude)).not.toContain("A version nobody heard.");
   });
 
   it("a regeneration whose TTS fails keeps the old version too", async () => {

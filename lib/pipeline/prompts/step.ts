@@ -49,8 +49,9 @@ export interface StepPromptInput {
   /** The previous step's narration, if it has been generated. */
   previousNarration?: string;
   /**
-   * The learner's signals this step adapts to (section 5.4): those the version it replaces
-   * didn't see. Only questions and simplify requests are used.
+   * The learner's signals this step adapts to (section 5.4): for a first version, every one in
+   * the lesson so far; for a regeneration, only those the version it replaces didn't see (the
+   * older ones were that version's to adapt to). Only questions and simplify requests are used.
    */
   signals: readonly Signal[];
 }
