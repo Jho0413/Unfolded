@@ -1,6 +1,7 @@
 // lib/pipeline/prompts/step.ts (ARCHITECTURE.md section 5.1): what a step prompt receives.
 import { describe, expect, it } from "vitest";
 import { config } from "@/lib/config";
+import { validateWireStep } from "@/lib/pipeline/outputFormat";
 import {
   PAPER_REFS_PROMPT,
   paperContextPrompt,
@@ -9,9 +10,10 @@ import {
   retryPrompt,
   STEP_SYSTEM_PROMPT,
   stepContextPrompt,
+  VIZ_EXAMPLES,
 } from "@/lib/pipeline/prompts/step";
 import type { LessonPlanOutput } from "@/shared/lesson";
-import { MAX_PAPER_QUOTE_CHARS } from "@/shared/scene";
+import { MAX_PAPER_QUOTE_CHARS, VIZ_LIMITS } from "@/shared/scene";
 
 const PLAN: LessonPlanOutput = {
   title: "A lesson",
@@ -117,6 +119,50 @@ describe("STEP_SYSTEM_PROMPT", () => {
     );
     expect(PAPER_REFS_PROMPT).toContain("counting the PDF's first page as 1");
     expect(PAPER_REFS_PROMPT).toContain("cue: optional");
+  });
+
+  it("offers heatmaps and plots in objectsJson, with the contract's limits (#103)", () => {
+    expect(STEP_SYSTEM_PROMPT).toContain("# Heatmaps and plots");
+    expect(STEP_SYSTEM_PROMPT).toContain(
+      'objectsJson is a string holding a JSON array of them, or "[]"',
+    );
+    for (const limit of [
+      `1 to ${VIZ_LIMITS.maxHeatmapDim} rows`,
+      `at most ${VIZ_LIMITS.maxPoints}`,
+      `at least ${VIZ_LIMITS.minSize}`,
+    ])
+      expect(STEP_SYSTEM_PROMPT).toContain(limit);
+  });
+
+  it("shows each example's objectsJson as the JSON string Claude writes, and its actions", () => {
+    for (const example of Object.values(VIZ_EXAMPLES)) {
+      expect(STEP_SYSTEM_PROMPT).toContain(
+        `objectsJson: ${JSON.stringify(JSON.stringify(example.objects))}`,
+      );
+      for (const action of example.actions)
+        expect(STEP_SYSTEM_PROMPT).toContain(
+          `action: ${JSON.stringify(action)}`,
+        );
+    }
+  });
+});
+
+describe("VIZ_EXAMPLES", () => {
+  it("each example is a valid wire step with a narration that has its cues", () => {
+    for (const example of Object.values(VIZ_EXAMPLES)) {
+      const cues = [...new Set(example.actions.map((a) => a.cue))];
+      const result = validateWireStep(
+        {
+          title: "An example",
+          narration: cues.map((c) => `Look [[${c}]]here.`).join(" "),
+          objects: [],
+          objectsJson: JSON.stringify(example.objects),
+          actions: example.actions,
+        },
+        { maxNarrationChars: config.maxNarrationChars },
+      );
+      expect(result).toMatchObject({ ok: true });
+    }
   });
 });
 
