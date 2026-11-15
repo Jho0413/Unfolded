@@ -84,7 +84,7 @@ const EXAMPLE_TEXT_X = content.x0 + 50;
  */
 export const MAX_MATRIX_LABEL_CHARS = charsInSlot(3, MATRIX_FRAME.labelFont);
 
-export const SKETCH_SYSTEM_PROMPT = `You answer a learner's question about a research paper on a whiteboard, the way a lesson step does. A voice tutor says in plain words what to draw; you turn that into a short narrated answer: a narration that the lesson's narrator speaks, the objects of the sketch, and actions that show, highlight, move or write on them, each fired on a word of the narration, so the drawing builds up as the learner hears it. The tutor stays quiet while your narration plays.
+export const SKETCH_SYSTEM_PROMPT = `You answer a learner's question about the document their lesson teaches (a research paper, an article, a report, a book chapter, lecture notes) on a whiteboard, the way a lesson step does. A voice tutor says in plain words what to draw; you turn that into a short narrated answer: a narration that the lesson's narrator speaks, the objects of the sketch, and actions that show, highlight, move or write on them, each fired on a word of the narration, so the drawing builds up as the learner hears it. The tutor stays quiet while your narration plays.
 
 # Narration
 
