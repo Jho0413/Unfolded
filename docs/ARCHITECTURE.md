@@ -69,6 +69,7 @@ app/
   lesson/[lessonId]/page.tsx        player page
   lesson/[lessonId]/LessonView.tsx  the page: the outline, then the stage (PlayerStage) with the top bar's toggles; one usePlayer
   lesson/[lessonId]/Outline.tsx, outlineRows.ts   the lesson outline, and its rows (pure, section 5.6)
+  lesson/[lessonId]/recap.ts, useLessonRecap.ts, LessonRecap.tsx   the end-of-lesson recap (pure view, its data, the card; section 5.6)
   lesson/[lessonId]/Toggles.tsx     the top bar's Captions and light / dark toggles
   lesson/[lessonId]/LessonAsk.tsx   the Ask panel and the Ask board, mounted through the stage's renderAsk / renderBoard
   lesson/[lessonId]/AnswerView.tsx, boardView.ts   a drawn answer on its own board, and when it shows (pure, section 5.6)
@@ -623,6 +624,13 @@ The agent is told what's showing through `qa/answerContext.ts` (contextual updat
 | Escape, or the agent ending the session | anything, after a `go_to_step` jump | loading (no autoplay) | nothing |
 
 **The Ask box** is always there, under the card: "Ask anything, or just press the mic and talk", an `A` hint and the mic. Typing a question and pressing Enter opens Ask (`ask`) if it's closed and sends the question at once: it's queued until the session connects, which makes it a text-only session (section 8), so it never waits on the mic. The mic button (or `A`) opens Ask by voice; in a text-only session that may use the mic, it's **Use the mic**. While the lesson's always-on voice session is listening (section 8), the mic button is its mute switch instead (**Mute the mic** / **Unmute the mic**, struck through when muted), and the box shows "Listening" or "Mic muted"; `A` still opens Ask. While Ask can't open (a failed step), the closed box is off.
+
+**The recap** (issue #130; `app/lesson/[lessonId]/recap.ts` pure, `useLessonRecap.ts`, `LessonRecap.tsx`). Once the last step ends (`stepEnded` on the last step, or `finished`; not while asking), a card at the top of the tutor dock (`PlayerStage`'s `dockTop`) lists three things, each row with a **Replay** link:
+- the ideas covered: the steps that started playing this session, in plan order ("all n", or "k of n");
+- the learner's questions: the question signals posted (section 5.4, so a message the agent took as a command never shows), with the idea each was asked on;
+- the steps adapted for them: the steps whose last-played version had `adaptedFrom`, worded as the marker words them.
+
+It's built in the browser only, from the plan, the signals the page posts and the versions played; the generator and the routes are unchanged. Replay on the step on screen sends `replay`; on any other step it sends `goToStep`. Close hides the card until the end is reached again. On phones it is at most 42vh and scrolls.
 
 **The outline** (`app/lesson/[lessonId]/outlineRows.ts`; one test per row). A row's request status comes from `player/prefetch.ts` (`statuses()` and `subscribe`): not started, generating (a request in flight, the prefetch included), ready, or failed; only a step's latest request sets it.
 
