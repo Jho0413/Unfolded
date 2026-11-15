@@ -20,7 +20,15 @@ import {
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { z } from "zod";
-import { LessonId, RUN_FILE_RE, RunFileName } from "@/shared/lesson";
+import {
+  EMPTY_SIGNALS,
+  LessonId,
+  RUN_FILE_RE,
+  RunFileName,
+  type Signal,
+  SignalsFile,
+  signalsVersion,
+} from "@/shared/lesson";
 import { config } from "@/lib/config";
 
 /** What the route may serve, by extension. Anything else is never served. */
@@ -56,6 +64,8 @@ export const PAPER_FILE = "paper.json";
  * by GET /api/runs/<lessonId>/paper.pdf.
  */
 export const PAPER_PDF_FILE = "paper.pdf";
+/** The learner's signals (shared/lesson.ts SignalsFile), appended by the signals route (section 5.4). */
+export const SIGNALS_FILE = "signals.json";
 
 // ---------------------------------------------------------------- versioned step files
 
@@ -348,4 +358,54 @@ export async function readRunJson<T>(
   if (result.kind === "refused")
     throw new RunNameError(`can't read ${lessonId}/${file}: ${result.reason}`);
   return schema.parse(JSON.parse(result.data.toString("utf8")));
+}
+
+// ---------------------------------------------------------------- signals.json
+
+/** Reads signals.json: EMPTY_SIGNALS when it's missing; throws when it isn't a SignalsFile. */
+export async function readSignals(lessonId: string): Promise<SignalsFile> {
+  return (
+    (await readRunJson(lessonId, SIGNALS_FILE, SignalsFile)) ?? EMPTY_SIGNALS
+  );
+}
+
+/**
+ * lessonId -> the end of its queue of appends. Each append reads, adds and writes signals.json
+ * in turn, so two signals arriving together are both kept. One server process (section 1)
+ * makes an in-memory lock enough.
+ */
+const signalAppends = new Map<string, Promise<unknown>>();
+
+/**
+ * Appends a signal to runs/<lessonId>/signals.json with the server's time, under the lesson's
+ * lock and with an atomic write, and returns the signals version after it. Throws, writing
+ * nothing, when the existing file isn't a SignalsFile: it is never overwritten.
+ */
+export function appendSignal(
+  lessonId: string,
+  signal: Signal,
+  at: Date = new Date(),
+): Promise<number> {
+  const previous = signalAppends.get(lessonId) ?? Promise.resolve();
+  const append = previous
+    .catch(() => {})
+    .then(async () => {
+      const file = await readSignals(lessonId);
+      const signals = [...file.signals, { ...signal, at: at.toISOString() }];
+      const next = SignalsFile.parse({
+        version: signalsVersion(signals),
+        signals,
+      });
+      await writeRunJson(lessonId, SIGNALS_FILE, next);
+      return next.version;
+    });
+  signalAppends.set(lessonId, append);
+  // The queue forgets a lesson once its last append is done.
+  void append
+    .catch(() => {})
+    .then(() => {
+      if (signalAppends.get(lessonId) === append)
+        signalAppends.delete(lessonId);
+    });
+  return append;
 }
