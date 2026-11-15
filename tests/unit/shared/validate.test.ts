@@ -792,22 +792,31 @@ describe("validate: a fresh sketch's answer template (#90)", () => {
     );
   });
 
-  it('Two objects closer than 40 (or overlapping): rejected: "a" and "b" are too close', () => {
+  it('Two objects closer than 40 (or overlapping): soft: "a" and "b" are too close, still drawable', () => {
     const near: BoardObject = { ...f, x: 480, id: "near" };
-    expectErrors(
-      validateSketch(answer(a, near), FRESH),
-      errors.tooClose("a", "near", ANSWER_TEMPLATE.gap),
-    );
+    const r = validateSketch(answer(a, near), FRESH);
+    expectErrors(r, errors.tooClose("a", "near", ANSWER_TEMPLATE.gap));
+    expect(r.ok === false && r.softOnly).toEqual({
+      value: answer(a, near),
+      count: 1,
+    });
   });
 
-  it("Two objects an arrow joins, closer than 80: rejected: too close (leave 80)", () => {
-    // About 60 apart: enough for two objects, not for an arrow between them.
+  it("Two objects an arrow joins, 40 or more apart: valid (the arrow shows in the gap)", () => {
+    // About 60 apart.
     const close: BoardObject = { ...f, x: 530 };
-    expectValid(validateSketch(answer(a, close), FRESH));
+    expectValid(validateSketch(answer(a, close, join), FRESH));
+  });
+
+  it("A spacing problem with a hard one: not drawable (no softOnly)", () => {
+    const near: BoardObject = { ...f, x: 480, id: "near", tex: "x" };
+    const r = validateSketch(answer(a, near, { ...title, text: "d_k" }), FRESH);
     expectErrors(
-      validateSketch(answer(a, close, join), FRESH),
-      errors.tooClose("a", "f", ANSWER_TEMPLATE.arrowGap),
+      r,
+      errors.tooClose("a", "near", ANSWER_TEMPLATE.gap),
+      errors.mathsInPlainText("title"),
     );
+    expect(r.ok === false && r.softOnly).toBeUndefined();
   });
 
   it('"_" or "^" in a text, an arrow or matrix label, a matrix cell or a written value: rejected', () => {
@@ -852,7 +861,7 @@ describe("validate: a fresh sketch's answer template (#90)", () => {
 
 describe("validate: the answer template (property, #90)", () => {
   const FRESH = { board: lessonBoard, fresh: true };
-  const { area, content, title, takeaway, gap, arrowGap } = ANSWER_TEMPLATE;
+  const { area, content, title, takeaway, gap } = ANSWER_TEMPLATE;
   /** A plain word or number, never "_" or "^". */
   const word = fc.stringMatching(/^[a-z0-9 .]{1,12}$/);
   const cellValue = fc.stringMatching(/^[0-9.]{1,3}$/);
@@ -912,7 +921,7 @@ describe("validate: the answer template (property, #90)", () => {
 
   /**
    * What the prompt asks for: the title and takeaway at their spots, and the content in one
-   * row or column inside the content area, `arrowGap` apart, pushed to its edges. Null when
+   * row or column inside the content area, `gap` apart, pushed to its edges. Null when
    * the content doesn't fit in one row or column.
    */
   const layout = fc
@@ -930,8 +939,7 @@ describe("validate: the answer template (property, #90)", () => {
       const along = (s: { w: number; h: number }) =>
         spec.direction === "row" ? s.w : s.h;
       const total =
-        sizes.reduce((sum, s) => sum + along(s), 0) +
-        arrowGap * (sizes.length - 1);
+        sizes.reduce((sum, s) => sum + along(s), 0) + gap * (sizes.length - 1);
       const room =
         spec.direction === "row"
           ? content.x1 - content.x0
@@ -964,7 +972,7 @@ describe("validate: the answer template (property, #90)", () => {
           spec.direction === "row"
             ? placeAt(item, at, side)
             : placeAt(item, side, at);
-        at += along(s) + arrowGap;
+        at += along(s) + gap;
         return { ...placed, id: `c${i}` };
       });
       const lines: BoardObject[] = [

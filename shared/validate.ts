@@ -27,7 +27,16 @@ import {
 } from "./scene";
 
 export type ValidationResult<T> =
-  { ok: true; value: T } | { ok: false; errors: string[] };
+  | { ok: true; value: T }
+  | {
+      ok: false;
+      errors: string[];
+      /**
+       * Present when every error is soft (a sketch's spacing, ARCHITECTURE.md section 4): the
+       * value can still be drawn, and `count` is how many soft errors it has.
+       */
+      softOnly?: { value: T; count: number };
+    };
 
 export interface StepLimits {
   /** `config.maxNarrationChars`, passed in so this file stays out of server-only lib/. */
@@ -115,10 +124,11 @@ const halfLine = (line: TemplateLine) =>
  * content in one row or column inside the content area, an optional one-line takeaway under
  * it. The content area is the space the title and takeaway leave with `gap` around them, so
  * a layout that follows the template always passes. The prompt describes it from these
- * numbers, and checkSketch holds a fresh sketch to the counts, `area` and the gaps (every
- * object's estimated box, shared/boxes.ts): `gap` between any two objects, `arrowGap` between
- * two an arrow joins, so the arrow shows. The area keeps clear of the Answer view's tag and
- * chip above it (app/lesson/[lessonId]/AnswerView.module.css).
+ * numbers, and checkSketch holds a fresh sketch to the counts and `area`, and asks for `gap`
+ * between any two objects' estimated boxes (shared/boxes.ts; an arrow shows in it too). The
+ * gap is soft: a sketch with only spacing problems can still be drawn (validateSketch's
+ * `softOnly`). The area keeps clear of the Answer view's tag and chip above it
+ * (app/lesson/[lessonId]/AnswerView.module.css).
  */
 export const ANSWER_TEMPLATE = {
   /** Objects other than arrows: texts, formulas and matrices, the title and takeaway included. */
@@ -134,12 +144,10 @@ export const ANSWER_TEMPLATE = {
   },
   takeaway: TAKEAWAY,
   gap: GAP,
-  arrowGap: 80,
 } as const satisfies {
   maxContent: number;
   maxArrows: number;
   gap: number;
-  arrowGap: number;
   area: Box;
   content: Box;
   title: TemplateLine;
@@ -367,10 +375,14 @@ export function validateStep(
 // ---------------------------------------------------------------- sketch
 
 /**
- * The rules zod can't express, for a sketch that already passed the schema.
- * Known ids are the sketch's own objects plus the board's (none if `fresh`).
+ * The rules zod can't express, for a sketch that already passed the schema, as hard errors
+ * (the sketch can't be drawn) and soft ones (a fresh sketch's spacing: it can, if no better
+ * one comes). Known ids are the sketch's own objects plus the board's (none if `fresh`).
  */
-export function checkSketch(sketch: Sketch, ctx: SketchContext): string[] {
+export function sketchProblems(
+  sketch: Sketch,
+  ctx: SketchContext,
+): { hard: string[]; soft: string[] } {
   const out: string[] = ctx.fresh ? checkAnswerLayout(sketch) : [];
   const boardObjects = ctx.fresh ? [] : ctx.board.objects.map((s) => s.object);
   const objects = byId(sketch.objects, boardObjects);
@@ -382,7 +394,16 @@ export function checkSketch(sketch: Sketch, ctx: SketchContext): string[] {
   );
   for (const action of sketch.actions)
     out.push(...checkAction(action, objects));
-  return unique(out);
+  return {
+    hard: unique(out),
+    soft: ctx.fresh ? unique(checkGaps(sketch.objects)) : [],
+  };
+}
+
+/** Every rule zod can't express, hard and soft, for a sketch that passed the schema. */
+export function checkSketch(sketch: Sketch, ctx: SketchContext): string[] {
+  const { hard, soft } = sketchProblems(sketch, ctx);
+  return [...hard, ...soft];
 }
 
 /** Underscores and carets are maths, which plain text shows raw ("d_k"). */
@@ -403,7 +424,6 @@ function checkAnswerLayout(sketch: Sketch): string[] {
   if (arrows > maxArrows) out.push(errors.tooManyArrows(arrows));
   const inArea = (p: { x: number; y: number }) =>
     boxInside({ x0: p.x, y0: p.y, x1: p.x, y1: p.y }, area);
-  out.push(...checkGaps(sketch.objects));
   for (const obj of sketch.objects) {
     const box = objectBox(obj);
     const inside =
@@ -423,17 +443,9 @@ function checkAnswerLayout(sketch: Sketch): string[] {
   return out;
 }
 
-/**
- * Every two boxed objects at least `gap` apart, and two that an arrow joins (whole objects or
- * their parts) at least `arrowGap`, so the arrow has room to show between them.
- */
+/** Every two boxed objects at least `gap` apart (soft: spacing never stops a drawing alone). */
 function checkGaps(objects: readonly BoardObject[]): string[] {
-  const { gap, arrowGap } = ANSWER_TEMPLATE;
-  const joined = new Set<string>();
-  const pair = (a: string, b: string) => [a, b].sort().join(" ");
-  for (const obj of objects)
-    if (obj.kind === "arrow" && !isPoint(obj.from) && !isPoint(obj.to))
-      joined.add(pair(obj.from.id, obj.to.id));
+  const { gap } = ANSWER_TEMPLATE;
   const boxed = objects.flatMap((obj) => {
     const box = objectBox(obj);
     return box === undefined ? [] : [{ id: obj.id, box }];
@@ -441,10 +453,9 @@ function checkGaps(objects: readonly BoardObject[]): string[] {
   const out: string[] = [];
   boxed.forEach((a, i) => {
     for (const b of boxed.slice(0, i)) {
-      const need = joined.has(pair(a.id, b.id)) ? arrowGap : gap;
       // Estimated boxes are fractional: a gap a rounding error short still counts.
-      if (boxGap(a.box, b.box) < need - 1e-6)
-        out.push(errors.tooClose(b.id, a.id, need));
+      if (boxGap(a.box, b.box) < gap - 1e-6)
+        out.push(errors.tooClose(b.id, a.id, gap));
     }
   });
   return out;
@@ -471,8 +482,14 @@ export function validateSketch(
 ): ValidationResult<Sketch> {
   const parsed = Sketch.safeParse(input);
   if (!parsed.success) return { ok: false, errors: schemaErrors(parsed.error) };
-  const errs = checkSketch(parsed.data, ctx);
-  return errs.length
-    ? { ok: false, errors: errs }
-    : { ok: true, value: parsed.data };
+  const { hard, soft } = sketchProblems(parsed.data, ctx);
+  if (hard.length === 0 && soft.length === 0)
+    return { ok: true, value: parsed.data };
+  return {
+    ok: false,
+    errors: [...hard, ...soft],
+    ...(hard.length === 0 && {
+      softOnly: { value: parsed.data, count: soft.length },
+    }),
+  };
 }
