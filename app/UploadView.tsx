@@ -160,7 +160,6 @@ export function UploadView({ samples }: { samples: SampleLesson[] }) {
                   data-testid="upload-error"
                   className={styles.error}
                 >
-                  <span aria-hidden>⚠</span>
                   {state.kind === "failed" ? state.message : state.notice}
                 </p>
               )}
