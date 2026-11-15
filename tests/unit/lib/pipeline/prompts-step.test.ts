@@ -173,6 +173,7 @@ describe("the widget section (#110)", () => {
       `at most ${WIDGET_LIMITS.maxExprChars} characters`,
       `0 to ${WIDGET_LIMITS.maxParams} sliders`,
       `1 to ${WIDGET_LIMITS.maxHeatmapDim} rows`,
+      `is at most ${WIDGET_LIMITS.maxLabelChars} characters`,
     ])
       expect(STEP_SYSTEM_PROMPT).toContain(limit);
   });
