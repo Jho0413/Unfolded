@@ -2,6 +2,7 @@
 // whole-object highlight. The tex is model output, so it only reaches the page
 // as KaTeX's own escaped HTML (KATEX_OPTIONS: trust off, sizes and macro
 // expansion capped), and tex KaTeX can't render shows as an error, never a throw.
+// It rises and fades in while shown (./motion.ts); a new highlight pulses once.
 import "katex/dist/katex.min.css";
 import type { ActiveAction, LatexObject, ObjectState } from "@/shared/scene";
 import { renderLatex } from "./katex";
@@ -16,6 +17,8 @@ import {
   objectProgress,
   opacityAttr,
 } from "./style";
+import { appearance, highlightLook, useReducedMotion } from "./motion";
+import { PULSE_GROW } from "./Pulse";
 
 export function Latex({
   latex,
@@ -31,6 +34,15 @@ export function Latex({
   const hl = state.highlight;
   const hlProgress = objectProgress(active, "highlight", latex.id, hl);
   const { html } = renderLatex(latex.tex);
+  const reduced = useReducedMotion();
+  const look = appearance(
+    active,
+    { id: latex.id },
+    state.visible,
+    "text",
+    reduced,
+  );
+  const hlLook = highlightLook(hlProgress, reduced);
   return (
     <g
       data-object-id={latex.id}
@@ -42,8 +54,9 @@ export function Latex({
       data-tex={latex.tex}
       data-cx={latex.x}
       data-cy={latex.y}
-      opacity={opacity}
+      opacity={look.opacity}
       visibility={state.visible ? undefined : "hidden"}
+      transform={look.rise > 0 ? `translate(0 ${look.rise})` : undefined}
     >
       <foreignObject
         x={latex.x - LATEX_BOX.w / 2}
@@ -77,10 +90,19 @@ export function Latex({
                 style={{
                   position: "absolute",
                   inset: 0,
-                  borderRadius: 8,
+                  borderRadius: 10,
                   background: HIGHLIGHT[hl].fill,
-                  border: `2px solid ${HIGHLIGHT[hl].stroke}`,
-                  opacity: hlProgress,
+                  border: `1.75px solid ${HIGHLIGHT[hl].stroke}`,
+                  opacity: hlLook.opacity,
+                  // The glow, and the once-only pulse ring (./Pulse.tsx), as box shadows.
+                  boxShadow: [
+                    `0 0 6px color-mix(in srgb, ${HIGHLIGHT[hl].stroke} var(--wb-glow-mix), transparent)`,
+                    ...(hlLook.pulse > 0
+                      ? [
+                          `0 0 0 ${(PULSE_GROW * hlLook.pulse).toFixed(2)}px color-mix(in srgb, ${HIGHLIGHT[hl].stroke} ${Math.round(45 * hlLook.pulse)}%, transparent)`,
+                        ]
+                      : []),
+                  ].join(", "),
                 }}
               />
             )}

@@ -1,4 +1,5 @@
 // A text object, centred on (x, y), with an optional whole-object highlight.
+// It rises and fades in while shown (./motion.ts); a new highlight pulses once.
 import type { ActiveAction, ObjectState, TextObject } from "@/shared/scene";
 import { TEXT_SIZE, textBox } from "@/shared/boxes";
 import {
@@ -9,6 +10,13 @@ import {
   objectProgress,
   opacityAttr,
 } from "./style";
+import {
+  appearance,
+  highlightLook,
+  useReducedMotion,
+  writeOpacity,
+} from "./motion";
+import { PulseRing } from "./Pulse";
 
 export function Text({
   text,
@@ -27,6 +35,16 @@ export function Text({
   const { w: boxW, h: boxH } = textBox(text.text, fontSize);
   const hlProgress = objectProgress(active, "highlight", text.id, hl);
   const writeProgress = objectProgress(active, "write", text.id, text.text);
+  const reduced = useReducedMotion();
+  const look = appearance(
+    active,
+    { id: text.id },
+    state.visible,
+    "text",
+    reduced,
+  );
+  const hlLook = highlightLook(hlProgress, reduced);
+  const box = { x: text.x - boxW / 2, y: text.y - boxH / 2, w: boxW, h: boxH };
   return (
     <g
       data-object-id={text.id}
@@ -40,21 +58,32 @@ export function Text({
       data-value-opacity={opacityAttr(writeProgress)}
       data-cx={text.x}
       data-cy={text.y}
-      opacity={opacity}
+      opacity={look.opacity}
       visibility={state.visible ? undefined : "hidden"}
+      transform={look.rise > 0 ? `translate(0 ${look.rise})` : undefined}
     >
       {hl && (
-        <rect
-          x={text.x - boxW / 2}
-          y={text.y - boxH / 2}
-          width={boxW}
-          height={boxH}
-          rx={8}
-          fill={HIGHLIGHT[hl].fill}
-          stroke={HIGHLIGHT[hl].stroke}
-          strokeWidth={2}
-          opacity={hlProgress}
-        />
+        <>
+          <rect
+            className="wb-glow"
+            style={{ ["--hl" as string]: HIGHLIGHT[hl].stroke }}
+            x={box.x}
+            y={box.y}
+            width={box.w}
+            height={box.h}
+            rx={10}
+            fill={HIGHLIGHT[hl].fill}
+            stroke={HIGHLIGHT[hl].stroke}
+            strokeWidth={1.75}
+            opacity={hlLook.opacity}
+          />
+          <PulseRing
+            {...box}
+            rx={10}
+            color={HIGHLIGHT[hl].stroke}
+            pulse={hlLook.pulse}
+          />
+        </>
       )}
       <text
         x={text.x}
@@ -63,7 +92,7 @@ export function Text({
         dominantBaseline="central"
         fontSize={fontSize}
         fill={INK}
-        opacity={writeProgress}
+        opacity={writeOpacity(writeProgress, reduced)}
       >
         {text.text}
       </text>
