@@ -694,6 +694,16 @@ describe("widgetJson (#110): one test per row", () => {
     }
   });
 
+  it("a heatmap widget with no rows: rejected with its widgetJson path, not thrown", () => {
+    const { value, errors: errs } = wireToStep(
+      withWidget(JSON.stringify({ ...HEATMAP_WIDGET, values: [] })),
+    );
+    expect(value).not.toHaveProperty("widget");
+    expect(errs).toEqual([
+      expect.stringMatching(/^widgetJson: could not be read \(.+\)$/),
+    ]);
+  });
+
   it("a widget the contract rejects (an expr with an unknown name): validateStep's named error, for the retry", () => {
     const result = validateWireStep(
       withWidget(JSON.stringify({ ...PLOT_WIDGET, expr: "a * y" })),
@@ -920,6 +930,16 @@ describe("objectsJson: one test per row", () => {
     expect(errs).toEqual([
       expect.stringMatching(/^objectsJson\.0\.kind: /),
       expect.stringMatching(/^objectsJson\.2\.values: /),
+    ]);
+  });
+
+  it("a heatmap with no rows is dropped with its objectsJson path, not thrown; the rest are kept", () => {
+    const { value, errors: errs } = wireToStep(
+      withJson(JSON.stringify([{ ...HEATMAP, values: [] }, PLOT])),
+    );
+    expect(value.objects.map((o) => o.id)).toEqual(["p", "a"]);
+    expect(errs).toEqual([
+      expect.stringMatching(/^objectsJson\.0: could not be read \(.+\)$/),
     ]);
   });
 
@@ -1366,6 +1386,8 @@ describe("the recorded step response (lib/fakes)", () => {
     const message = await readFixture<Anthropic.Message>(config.step.fixture);
     expect(message.stop_reason).toBe("end_turn");
     const text = message.content.find((b) => b.type === "text");
-    expect(validateWireStep(JSON.parse(text!.text), LIMITS).ok).toBe(true);
+    const result = validateWireStep(JSON.parse(text!.text), LIMITS);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.widget?.kind).toBe("heatmap");
   });
 });

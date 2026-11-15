@@ -164,6 +164,9 @@ export const SKETCH_OUTPUT_FORMAT: Anthropic.JSONOutputFormat = {
   schema: zodOutputFormat(WireSketch).schema,
 };
 
+/** The wire fields that carry JSON in a string. */
+type JsonField = "objectsJson" | "widgetJson";
+
 /** Rejections only the wire format can have, in validate.ts's style (with the target's id). */
 export const wireErrors = {
   moveNeedsTo: (id: string) => `move needs to "${id}"`,
@@ -171,8 +174,10 @@ export const wireErrors = {
   /** Not a rejection: the ref is dropped and this is logged (#98). */
   badPaperRef: (i: number, problems: readonly string[]) =>
     `paperRefs.${i} dropped: ${problems.join("; ")}`,
-  notJson: (field: "objectsJson" | "widgetJson", reason: string) =>
+  notJson: (field: JsonField, reason: string) =>
     `${field}: not valid JSON (${reason})`,
+  unreadable: (path: string, reason: string) =>
+    `${path}: could not be read (${reason})`,
   objectsJsonNotArray:
     "objectsJson: must be a JSON array of heatmap, plot and image objects",
 } as const;
@@ -240,9 +245,9 @@ function parseObjectsJson(text: string): Converted<JsonStepObject[]> {
   const value: JsonStepObject[] = [];
   const errors: string[] = [];
   read.json.forEach((item: unknown, i) => {
-    const parsed = JsonStepObject.safeParse(item);
-    if (parsed.success) value.push(parsed.data);
-    else errors.push(...schemaErrors(parsed.error, ["objectsJson", `${i}`]));
+    const parsed = parseAt(JsonStepObject, item, ["objectsJson", `${i}`]);
+    if ("data" in parsed) value.push(parsed.data);
+    else errors.push(...parsed.errors);
   });
   return { value, errors };
 }
@@ -256,15 +261,37 @@ function parseWidgetJson(
 ): Converted<Widget | undefined> {
   const read = readJson("widgetJson", text ?? "");
   if (read.json === undefined) return { value: undefined, errors: read.errors };
-  const parsed = JsonWidget.safeParse(read.json);
-  return parsed.success
+  const parsed = parseAt(JsonWidget, read.json, ["widgetJson"]);
+  return "data" in parsed
     ? { value: parsed.data, errors: [] }
-    : { value: undefined, errors: schemaErrors(parsed.error, ["widgetJson"]) };
+    : { value: undefined, errors: parsed.errors };
+}
+
+/**
+ * Model output read with a contract schema, its errors at the wire's path. A contract refine can
+ * throw on input its own checks already rejected (a heatmap with no rows reads `values[0]`), so a
+ * throw is an error for the retry too, not a crash of the step.
+ */
+function parseAt<T>(
+  schema: z.ZodType<T>,
+  input: unknown,
+  at: readonly string[],
+): { data: T } | { errors: string[] } {
+  try {
+    const parsed = schema.safeParse(input);
+    return parsed.success
+      ? { data: parsed.data }
+      : { errors: schemaErrors(parsed.error, at) };
+  } catch (err) {
+    return {
+      errors: [wireErrors.unreadable(at.join("."), (err as Error).message)],
+    };
+  }
 }
 
 /** A wire field's JSON text: its value, nothing when blank, or why it isn't JSON. */
 function readJson(
-  field: "objectsJson" | "widgetJson",
+  field: JsonField,
   text: string,
 ): { json?: unknown; errors: string[] } {
   if (text.trim() === "") return { errors: [] };
