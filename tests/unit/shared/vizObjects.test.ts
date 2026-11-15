@@ -91,6 +91,11 @@ describe("heatmap and plot schema", () => {
     );
   });
 
+  it("heatmap: empty values is an issue, not a TypeError", () => {
+    expect(() => schemaError(heatmap({ values: [] }))).not.toThrow();
+    expect(schemaError(heatmap({ values: [] })).length).toBeGreaterThan(0);
+  });
+
   it(`heatmap: more than ${VIZ_LIMITS.maxHeatmapDim} rows or columns is rejected`, () => {
     const big = VIZ_LIMITS.maxHeatmapDim + 1;
     expect(

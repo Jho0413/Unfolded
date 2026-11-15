@@ -4,11 +4,6 @@ For the step prompt (`lib/pipeline`, Jason's side) to adopt. The contract is `Wi
 `shared/widget.ts`, on `Step.widget` (ARCHITECTURE.md §4). Both examples below are full
 `Step`s, and `tests/unit/shared/widgetSnippet.test.ts` checks that they pass `validateStep`.
 
-**Not on the wire yet.** `WireStep` has no `widget` field. It comes next as a JSON string,
-`widgetJson`, like #119's `objectsJson` (ARCHITECTURE.md §4, "Heatmaps and plots on the
-wire"), in Jason's #110 work; until then the `widget` exception in `outputFormat.test.ts`'s
-top-level-fields test stays.
-
 ## When to add one
 
 At most one per step, and only where playing with it teaches something the narration
