@@ -110,7 +110,12 @@ export const ArrowObject = z.object({
   hidden,
 });
 
-/** A fal illustration. The server adds `mediaUrl` later (E1); a model never writes it. */
+/**
+ * A fal illustration (E1, issue #152), drawn fitted inside its box (x, y the top left).
+ * `mediaUrl` is set by the server once the image is saved (e.g.
+ * `/api/runs/<id>/img-<step>-<objId>.jpg`); a model never writes it. Without it, the image
+ * isn't drawn.
+ */
 export const ImageObject = z.object({
   kind: z.literal("image"),
   id: ObjectId,
@@ -119,6 +124,7 @@ export const ImageObject = z.object({
   w: z.number().positive(),
   h: z.number().positive(),
   prompt: z.string().min(1),
+  mediaUrl: z.string().optional(),
   hidden,
 });
 

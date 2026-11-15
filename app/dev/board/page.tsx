@@ -6,6 +6,7 @@
 //   /dev/board?scene=m1-late-highlight&t=…  demo-m1 with a highlight after the slide
 //   /dev/board?scene=arrows&t=…             arrows following moving objects
 //   /dev/board?scene=viz&t=…                heatmap rows revealed, plot series drawn on
+//   /dev/board?scene=image&t=…              illustrations fading in (E1)
 //
 // Production servers answer 404 unless in fake mode (app/dev/devOnly.ts).
 import type { Metadata } from "next";

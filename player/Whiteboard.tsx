@@ -12,6 +12,7 @@ import { CANVAS } from "@/shared/scene";
 import { partKey } from "./sceneAt";
 import { Arrow } from "./primitives/Arrow";
 import { Heatmap } from "./primitives/Heatmap";
+import { BoardImage } from "./primitives/Image";
 import { Latex } from "./primitives/Latex";
 import { Copy, Matrix } from "./primitives/Matrix";
 import { Plot } from "./primitives/Plot";
@@ -88,7 +89,14 @@ function Layer({
           case "arrow":
             return null; // drawn last, below
           case "image":
-            return null; // arrives with E1
+            return (
+              <BoardImage
+                key={object.id}
+                image={object}
+                state={s}
+                active={active}
+              />
+            );
           case "heatmap":
             return (
               <Heatmap

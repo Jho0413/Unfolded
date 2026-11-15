@@ -8,6 +8,7 @@ import {
   Step,
 } from "@/shared/scene";
 import { sceneAt, type TimedAction, timeline } from "@/player/sceneAt";
+import { IMAGE_CUE_TIMES, IMAGE_STEP } from "./imageStep";
 import { VIZ_CUE_TIMES, VIZ_STEP } from "./vizStep";
 
 /**
@@ -322,12 +323,15 @@ const arrowTimed = timeline(arrowActions, ARROW_TIMES);
 
 const vizTimed = timeline(VIZ_STEP.actions, VIZ_CUE_TIMES);
 
+const imageTimed = timeline(IMAGE_STEP.actions, IMAGE_CUE_TIMES);
+
 export const SCENES = [
   "fixed",
   "m1",
   "m1-late-highlight",
   "arrows",
   "viz",
+  "image",
 ] as const;
 export type SceneName = (typeof SCENES)[number];
 
@@ -337,6 +341,7 @@ export const SCENE_TIMES: Record<Exclude<SceneName, "fixed">, CueTimes> = {
   "m1-late-highlight": M1_CUE_TIMES,
   arrows: ARROW_TIMES,
   viz: VIZ_CUE_TIMES,
+  image: IMAGE_CUE_TIMES,
 };
 
 export function isScene(name: string): name is SceneName {
@@ -356,5 +361,7 @@ export function sceneState(name: SceneName, tMs: number): BoardState {
       return sceneAt(ARROW_OBJECTS, arrowTimed, tMs);
     case "viz":
       return sceneAt(VIZ_STEP.objects, vizTimed, tMs);
+    case "image":
+      return sceneAt(IMAGE_STEP.objects, imageTimed, tMs);
   }
 }
