@@ -10,6 +10,7 @@ import {
   transition,
 } from "@/player/machine";
 import {
+  ANSWER_SHOWING,
   ASK_CLOSED,
   createClientTools,
   type HighlightAction,
@@ -98,6 +99,14 @@ const asking: PlayerState = {
 };
 
 describe("highlight", () => {
+  it(`while the Answer view is up: a no-op, "${ANSWER_SHOWING}"`, async () => {
+    const h = harness(asking, { answerShowing: () => true });
+    expect(await h.tools.highlight?.({ target_id: "label" })).toBe(
+      ANSWER_SHOWING,
+    );
+    expect(h.highlights).toEqual([]);
+  });
+
   it("highlights a whole object: ok", async () => {
     const h = harness(asking);
     expect(await h.tools.highlight?.({ target_id: "label" })).toBe("ok");
@@ -254,6 +263,27 @@ describe("draw_scene", () => {
       fresh: false,
     });
     expect(result).toBeUndefined();
+  });
+
+  it("asks for a fresh answer board even when the agent passed fresh: false", () => {
+    const fetch = vi.fn(() => new Promise<Response>(() => {}));
+    const tools = createClientTools({
+      board: () => board,
+      highlight: () => {},
+      send: () => ({ outcome: "ignored", state: asking }),
+      isAsking: () => true,
+      askId: () => 1,
+      drawSketch: () => {},
+      showNotice: () => {},
+      tellAgent: () => {},
+      fetch,
+    });
+    tools.draw_scene?.({ description: "a box", fresh: false });
+    const init = (fetch.mock.calls[0] as unknown[])[1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      fresh: true,
+      board: { objects: [] },
+    });
   });
 });
 

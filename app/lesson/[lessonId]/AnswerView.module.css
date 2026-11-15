@@ -1,0 +1,20 @@
+/* The Answer view (./AnswerView.tsx): the tag and chip sit in the board's top corners, which
+   the answer template keeps clear (shared/validate.ts ANSWER_TEMPLATE.area). */
+.view {
+  position: relative;
+}
+
+.tag {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+}
+
+.back {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  min-height: 28px;
+  padding: 3px 10px;
+  font-size: 12.5px;
+}

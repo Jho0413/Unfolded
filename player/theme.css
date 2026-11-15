@@ -4,8 +4,8 @@
  * the app uses is defined here once; player/primitives/style.ts names the board's tokens
  * (INK = "var(--wb-ink)", ...), so the board follows the theme with no React state.
  *
- * Lesson highlights use the accent (yellow / amber); anything from a question (a sketch, the
- * answer tag) uses the answer blue.
+ * Highlights use the accent (yellow / amber), in a drawn answer too; the answer blue marks
+ * what comes from a question around the board (the card's and the Answer view's tags).
  */
 :root,
 [data-theme="dark"] {
@@ -59,7 +59,7 @@
   color-scheme: light;
 }
 
-/* The board's tokens (player/primitives/style.ts). A sketch layer re-points them at the answer blue. */
+/* The board's tokens (player/primitives/style.ts). A drawn answer uses them too: it looks like the lesson. */
 :root {
   --wb-ink: var(--ink);
   --wb-muted: var(--muted);
@@ -74,21 +74,6 @@
   --wb-font: var(--font-stix), "STIX Two Text", Georgia, serif;
   --ui-font: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
   --mono-font: var(--font-geist-mono), ui-monospace, monospace;
-}
-
-[data-layer="sketch"] {
-  --wb-ink: var(--answer);
-  --wb-muted: var(--answer);
-  --wb-accent: var(--answer);
-  --wb-accent-fill: var(--answer-fill);
-}
-
-/* While a sketch is on the board, the lesson underneath steps back. */
-[data-layer="main"] {
-  transition: opacity 0.4s;
-}
-[data-sketching="true"] [data-layer="main"] {
-  opacity: 0.3;
 }
 
 html,

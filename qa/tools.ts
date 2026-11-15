@@ -3,6 +3,7 @@
 // has already checked each call's parameters against shared/tools.ts.
 //
 //   highlight          checked against the board on screen; "ok" or the error
+//                      (a no-op while the Answer view is up)
 //   go_to_step         goToStep(step - 1); "ok" or "no step n"
 //   simplify_upcoming  stub until A1 (returns nothing)
 //   draw_scene         no wait: returns nothing, the sketch is drawn when it arrives (qa/drawScene.ts)
@@ -42,6 +43,11 @@ export type ClientToolDeps = {
    * (AskApi.afterAgentSpeaks). Defaults to at once.
    */
   afterAgentSpeaks?: (fn: () => void) => void;
+  /**
+   * True while a drawn answer is on screen instead of the lesson (the Answer view, section
+   * 5.6): `highlight` has nothing to point at. Absent: never.
+   */
+  answerShowing?: () => boolean;
 } & Pick<
   DrawSceneDeps,
   "askId" | "drawSketch" | "showNotice" | "tellAgent" | "fetch" | "timeoutMs"
@@ -50,10 +56,16 @@ export type ClientToolDeps = {
 /** What a tool that changes the board or the step returns after Ask closed. */
 export const ASK_CLOSED = "Ask is closed";
 
+/** What `highlight` returns while the Answer view is up. */
+export const ANSWER_SHOWING =
+  "The answer board is showing; the lesson isn't visible.";
+
 export function createClientTools(deps: ClientToolDeps): QaTools {
   return {
     highlight: ({ target_id, row, col }) => {
       if (!deps.isAsking()) return ASK_CLOSED;
+      // A no-op while a drawn answer hides the lesson (section 5.6).
+      if (deps.answerShowing?.()) return ANSWER_SHOWING;
       const action: HighlightAction = {
         do: "highlight",
         target: { id: target_id, row, col },
@@ -73,9 +85,10 @@ export function createClientTools(deps: ClientToolDeps): QaTools {
       return result.outcome === "rejected" ? result.message : "ok";
     },
     // Doesn't wait: the agent keeps talking while the sketch is made.
-    draw_scene: ({ description, fresh }) => {
+    // Always a clean board of its own (drawScene ignores the agent's `fresh`).
+    draw_scene: ({ description }) => {
       if (!deps.isAsking()) return;
-      void drawScene(deps, description, fresh);
+      void drawScene(deps, description);
     },
     resume_lesson: () => command(deps, "resume"),
     pause_lesson: () => command(deps, "pause"),

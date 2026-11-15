@@ -5,8 +5,9 @@
 // - LessonAsk: the panel, wired to the machine (ask, closeAsk,
 //   agentDisconnected), the client tools of qa/tools.ts (draw_scene included)
 //   and the context of qa/context.ts.
-// - LessonBoard: while asking, the frozen board with Ask's highlights and
-//   sketches on top, redrawn every frame; otherwise the player's board.
+// - LessonBoard: while asking, the frozen board with Ask's highlights on top,
+//   or once a draw_scene answer arrives, the Answer view (./AnswerView.tsx)
+//   instead of the lesson, redrawn every frame; otherwise the player's board.
 //
 // Both share one AskSession (qa/askSession.ts), created by LessonView.
 import {
@@ -16,15 +17,19 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { type AskClose, afterAskEvent } from "@/player/controls";
+import type { AskClose } from "@/player/controls";
+import type { PlayerState } from "@/player/machine";
 import type { Player } from "@/player/usePlayer";
 import { Whiteboard } from "@/player/Whiteboard";
+import { tellAnswerContext } from "@/qa/answerContext";
 import { AskPanel } from "@/qa/AskPanel";
 import { type AskSession, frozenBoard } from "@/qa/askSession";
 import { narrationUpTo } from "@/qa/context";
 import { createClientTools } from "@/qa/tools";
 import type { AskApi } from "@/qa/types";
 import type { LessonPlan } from "@/shared/lesson";
+import { AnswerView } from "./AnswerView";
+import { afterLeavingAsk, boardView, type LeaveAsk } from "./boardView";
 import { useLessonVoice } from "./useLessonVoice";
 
 /** Keeps the session's frozen board and open/closed state in step with the player. */
@@ -63,24 +68,33 @@ export function LessonAsk({
   // The always-on mic (issue #93): the lesson's voice session and spoken commands.
   const voice = useLessonVoice({ player, session });
 
+  // The panel's tellAgent, once it has made the tools: the Answer view's updates use it.
+  const tellRef = useRef<AskApi["tellAgent"] | null>(null);
   const tools = useCallback(
-    (ask: AskApi) =>
-      createClientTools({
+    (ask: AskApi) => {
+      tellRef.current = ask.tellAgent;
+      return createClientTools({
         ...ask,
         board: session.board,
         highlight: session.addAction,
-        // A sketch that reaches the board tags its answer "Drawing on the board".
-        drawSketch: (sketch, fresh) => {
+        // A sketch that reaches the board opens (or replaces) the Answer view, tags its
+        // answer "Drawing on the board" and tells the agent what's showing.
+        drawSketch: (sketch, fresh, description) => {
+          const was = answerShowing(session);
           session.addSketch(sketch, fresh);
           ask.sketchDrawn();
+          tellAnswerContext(ask.tellAgent, was, { kind: "drawn", description });
         },
         send,
         isAsking: session.isAsking,
         askId: session.askId,
         control: voice.control,
-      }),
+        answerShowing: () => answerShowing(session),
+      });
+    },
     [session, send, voice.control],
   );
+  useBackOnLesson(session, tellRef);
 
   // Open and close the session with the machine, not an effect later, so a
   // tool call can never act on a closed Ask (e.g. a late go_to_step).
@@ -93,16 +107,10 @@ export function LessonAsk({
     stateRef.current = state;
   });
   // Closing Ask (ARCHITECTURE.md section 5.6): "Got it, carry on" resumes a lesson stopped
-  // mid-step; Escape or the agent ending goes back to how it was before Ask.
+  // mid-step; Escape or the agent ending goes back to how it was before Ask (from the
+  // Answer view: paused where the learner was).
   const onClose = useCallback(
-    (how: AskClose) => {
-      const before = stateRef.current;
-      session.close();
-      const closed = send({ type: "closeAsk" });
-      if (closed.outcome !== "changed" || before.kind !== "asking") return;
-      const next = afterAskEvent(how, before.from, closed.state);
-      if (next !== null) send(next);
-    },
+    (how: AskClose) => leaveAsk(send, session, how, stateRef.current),
     [send, session],
   );
   const onDropped = useCallback(() => {
@@ -140,7 +148,54 @@ export function LessonAsk({
   );
 }
 
-/** The board: the player's, or while asking, the frozen board plus Ask's drawing. */
+/** Whether the Answer view is up: Ask is open with a drawing on its layer. */
+function answerShowing(session: AskSession): boolean {
+  return boardView(session.isAsking(), session.layer()) === "answer";
+}
+
+/**
+ * Closes Ask, as the machine's closeAsk, then what ./boardView.ts afterLeavingAsk decides
+ * from how it was left and whether the Answer view was up. `before` is the player's state
+ * before closing (what Ask was opened from).
+ */
+function leaveAsk(
+  send: Player["send"],
+  session: AskSession,
+  how: LeaveAsk,
+  before: PlayerState,
+): void {
+  const view = boardView(session.isAsking(), session.layer());
+  session.close();
+  const closed = send({ type: "closeAsk" });
+  if (closed.outcome !== "changed" || before.kind !== "asking") return;
+  const next = afterLeavingAsk(how, view, before.from, closed.state);
+  if (next !== null) send(next);
+}
+
+/**
+ * Tells the agent "Back on the lesson." when the Answer view goes away, however Ask closed.
+ * The session's listeners run as it closes, before the machine's closeAsk ends the
+ * conversation, so the update still reaches the agent.
+ */
+function useBackOnLesson(
+  session: AskSession,
+  tellRef: { readonly current: AskApi["tellAgent"] | null },
+) {
+  useEffect(() => {
+    let was = answerShowing(session);
+    return session.subscribe(() => {
+      const now = answerShowing(session);
+      if (was && !now && tellRef.current)
+        tellAnswerContext(tellRef.current, was, { kind: "closed" });
+      was = now;
+    });
+  }, [session, tellRef]);
+}
+
+/**
+ * The board: the player's; while asking, the frozen board plus Ask's highlights; or, once
+ * Ask has drawn an answer, the Answer view instead of the lesson.
+ */
 export function LessonBoard({
   player,
   session,
@@ -149,11 +204,9 @@ export function LessonBoard({
   session: AskSession;
 }) {
   useSyncExternalStore(session.subscribe, session.version, session.version);
-  const asking = player.state.kind === "asking" && session.isAsking();
-  // A sketch's own objects: drawn in the answer blue, the lesson dimmed under them.
-  const sketchIds = asking
-    ? new Set(session.layer().objects.map((o) => o.id))
-    : undefined;
+  const { state, send } = player;
+  const asking = state.kind === "asking" && session.isAsking();
+  const view = boardView(asking, session.layer());
   // Redraw every frame while asking, so sketch actions play from arrival.
   const [, setFrame] = useState(0);
   useEffect(() => {
@@ -164,10 +217,13 @@ export function LessonBoard({
     });
     return () => cancelAnimationFrame(id);
   }, [asking]);
-  return (
-    <Whiteboard
-      state={asking ? session.board() : player.board}
-      sketchIds={sketchIds}
-    />
-  );
+  if (view === "answer" && state.kind === "asking")
+    return (
+      <AnswerView
+        board={session.board()}
+        backTo={state.goTo ?? state.from.step}
+        onBack={() => leaveAsk(send, session, "back", state)}
+      />
+    );
+  return <Whiteboard state={asking ? session.board() : player.board} />;
 }

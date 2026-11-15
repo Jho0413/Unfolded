@@ -1,41 +1,24 @@
-// The draw_scene tool (ARCHITECTURE.md sections 7 and 8, ROADMAP Q5).
+// The draw_scene tool (ARCHITECTURE.md sections 7 and 8, ROADMAP Q5): always a fresh answer
+// board (#90).
 import { describe, expect, it, vi } from "vitest";
 import { config } from "@/lib/config";
 import { SKETCH_FAILED } from "@/shared/lesson";
 import {
-  boardToSend,
   drawScene,
   type DrawSceneDeps,
-  MAX_BOARD_OBJECTS,
   SKETCH_FETCH_TIMEOUT_MS,
   sketchFailedUpdate,
 } from "@/qa/drawScene";
-import type { BoardObject, BoardState, ObjectState } from "@/shared/scene";
 
-const q: BoardObject = {
-  kind: "matrix",
-  id: "q",
-  x: 100,
-  y: 100,
-  rows: [
-    ["1", "2"],
-    ["3", "4"],
-  ],
-};
-const state = (object: BoardObject, visible = true): ObjectState => ({
-  object,
-  visible,
-  highlight: null,
-});
-const board: BoardState = { objects: [state(q)], copies: [], active: [] };
-
-const onBoard = {
-  objects: [{ kind: "text", id: "note", x: 600, y: 400, text: "row 1" }],
-  actions: [{ do: "highlight", target: { id: "q", row: 0 }, atMs: 0 }],
-};
-const freshOnly = {
-  objects: [{ kind: "text", id: "note", x: 600, y: 400, text: "hi" }],
+/** Valid on a fresh board: its own objects only. */
+const fresh = {
+  objects: [{ kind: "text", id: "note", x: 800, y: 400, text: "row 1" }],
   actions: [{ do: "highlight", target: { id: "note" }, atMs: 200 }],
+};
+/** Names a lesson object, which a fresh board doesn't have. */
+const onLesson = {
+  objects: [{ kind: "text", id: "note", x: 800, y: 400, text: "row 1" }],
+  actions: [{ do: "highlight", target: { id: "q", row: 0 }, atMs: 0 }],
 };
 
 function json(body: unknown, status = 200): Response {
@@ -53,7 +36,6 @@ function setup(
     (url: string, init?: RequestInit) => Promise<Response>
   >(() => reply());
   const deps = {
-    board: over.board ?? (() => board),
     isAsking: vi.fn(() => true),
     askId: vi.fn(() => 1),
     drawSketch: vi.fn<DrawSceneDeps["drawSketch"]>(),
@@ -93,76 +75,65 @@ function expectSilent(deps: ReturnType<typeof setup>["deps"]) {
 const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
 describe("drawScene", () => {
-  it("posts { description, fresh, board } and draws a valid sketch on the board", async () => {
-    const { deps, fetchMock } = setup(async () => json({ sketch: onBoard }));
-    await drawScene(deps, "circle the first row", false);
+  it("always posts { description, fresh: true, an empty board } and draws the sketch fresh, with its description", async () => {
+    const { deps, fetchMock } = setup(async () => json({ sketch: fresh }));
+    await drawScene(deps, "circle the first row");
     expect(sentBody(fetchMock)).toEqual({
       description: "circle the first row",
-      fresh: false,
-      board,
+      fresh: true,
+      board: { objects: [], copies: [], active: [] },
     });
     expect(deps.drawSketch).toHaveBeenCalledOnce();
-    const [sketch, fresh] = deps.drawSketch.mock.calls[0];
-    expect(fresh).toBe(false);
+    const [sketch, isFresh, description] = deps.drawSketch.mock.calls[0];
+    expect(isFresh).toBe(true);
+    expect(description).toBe("circle the first row");
     expect(sketch.objects[0].id).toBe("note");
     expect(sketch.actions[0].durationMs).toBe(400);
     expect(deps.showNotice).toHaveBeenCalledWith(null); // a success clears an earlier failure
     expectSilent(deps);
   });
 
-  it("fresh: sends an empty board and validates without the board's ids", async () => {
-    const { deps, fetchMock } = setup(async () => json({ sketch: freshOnly }));
-    await drawScene(deps, "start over", true);
-    expect(sentBody(fetchMock).board).toEqual({
-      objects: [],
-      copies: [],
-      active: [],
-    });
-    expect(deps.drawSketch).toHaveBeenCalledWith(expect.anything(), true);
-  });
-
-  it("fresh: a sketch naming a board id fails", async () => {
-    const { deps } = setup(async () => json({ sketch: onBoard }));
-    await drawScene(deps, "start over", true);
-    expect(deps.drawSketch).not.toHaveBeenCalled();
+  it("a sketch naming a lesson object fails: the answer board is empty", async () => {
+    const { deps } = setup(async () => json({ sketch: onLesson }));
+    await drawScene(deps, "circle it");
     expectFailed(
       deps,
-      "start over",
+      "circle it",
       expect.stringContaining('unknown object "q"'),
+    );
+  });
+
+  it("a sketch breaking the answer template fails in the browser too", async () => {
+    const offArea = {
+      objects: [{ kind: "text", id: "note", x: 20, y: 400, text: "far left" }],
+      actions: [],
+    };
+    const { deps } = setup(async () => json({ sketch: offArea }));
+    await drawScene(deps, "x");
+    expectFailed(
+      deps,
+      "x",
+      expect.stringContaining('outside the answer area "note"'),
     );
   });
 
   it("an { error } response fails: Couldn't draw that", async () => {
     const { deps } = setup(async () => json({ error: SKETCH_FAILED }, 502));
-    await drawScene(deps, "x", false);
+    await drawScene(deps, "x");
     expectFailed(deps, "x", "HTTP 502");
-    expect(deps.drawSketch).not.toHaveBeenCalled();
   });
 
   it("a malformed 200 response fails", async () => {
     const { deps } = setup(async () => json({ nope: true }));
-    await drawScene(deps, "x", false);
+    await drawScene(deps, "x");
     expectFailed(deps, "x", "bad response");
-  });
-
-  it("a sketch invalid on the board as it is when it arrives fails", async () => {
-    let current = board;
-    const { deps } = setup(
-      async () => {
-        current = { objects: [], copies: [], active: [] }; // board changed meanwhile
-        return json({ sketch: onBoard });
-      },
-      { board: () => current },
-    );
-    await drawScene(deps, "x", false);
-    expectFailed(deps, "x", expect.stringContaining('unknown object "q"'));
   });
 
   it("a timeout fails", async () => {
     const { deps } = setup(() =>
       Promise.reject(new DOMException("timed out", "TimeoutError")),
     );
-    await drawScene(deps, "x", false);
+    await drawScene(deps, "x");
     expectFailed(deps, "x", expect.stringContaining("TimeoutError"));
   });
 
@@ -176,18 +147,18 @@ describe("drawScene", () => {
           reject(init.signal?.reason),
         ),
       )) as typeof fetch;
-    await drawScene(deps, "x", false);
+    await drawScene(deps, "x");
     expect(deps.showNotice).toHaveBeenCalledWith(SKETCH_FAILED);
     expect(deps.tellAgent).toHaveBeenCalledOnce();
   });
 
   it("drops a sketch, or a failure, that arrives after Ask closed", async () => {
-    const ok = setup(async () => json({ sketch: onBoard }));
+    const ok = setup(async () => json({ sketch: fresh }));
     ok.deps.isAsking.mockReturnValue(false);
-    await drawScene(ok.deps, "x", false);
+    await drawScene(ok.deps, "x");
     const bad = setup(async () => json({ error: SKETCH_FAILED }, 502));
     bad.deps.isAsking.mockReturnValue(false);
-    await drawScene(bad.deps, "x", false);
+    await drawScene(bad.deps, "x");
     for (const d of [ok.deps, bad.deps]) {
       expect(d.drawSketch).not.toHaveBeenCalled();
       expectSilent(d);
@@ -196,7 +167,7 @@ describe("drawScene", () => {
 
   it("drops a sketch, or a failure, from an earlier Ask session after Ask reopened", async () => {
     for (const reply of [
-      async () => json({ sketch: onBoard }),
+      async () => json({ sketch: fresh }),
       async () => json({ error: SKETCH_FAILED }, 502),
     ]) {
       let session = 1;
@@ -205,7 +176,7 @@ describe("drawScene", () => {
         return reply();
       });
       deps.askId.mockImplementation(() => session);
-      await drawScene(deps, "x", false);
+      await drawScene(deps, "x");
       expect(deps.drawSketch).not.toHaveBeenCalled();
       expectSilent(deps);
     }
@@ -217,43 +188,7 @@ describe("drawScene", () => {
   });
 });
 
-describe("boardToSend (config.maxBoardObjects)", () => {
-  const many = (n: number, visible: boolean) =>
-    Array.from({ length: n }, (_, i) =>
-      state({ kind: "text", id: `t${i}`, x: 10, y: 10, text: "" }, visible),
-    );
-
-  it("sends the board as is within the cap", () => {
-    const b = { ...board, objects: many(MAX_BOARD_OBJECTS, true) };
-    expect(boardToSend(b, false)).toBe(b);
-  });
-
-  it("over the cap, leaves hidden objects out", () => {
-    const b = {
-      ...board,
-      objects: [...many(5, true), ...many(MAX_BOARD_OBJECTS, false)],
-    };
-    expect(boardToSend(b, false)?.objects).toHaveLength(5);
-  });
-
-  it("over the cap with visible objects alone fails without a request", async () => {
-    const b = { ...board, objects: many(MAX_BOARD_OBJECTS + 1, true) };
-    expect(boardToSend(b, false)).toBeNull();
-    const { deps, fetchMock } = setup(async () => json({ sketch: onBoard }), {
-      board: () => b,
-    });
-    await drawScene(deps, "x", false);
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(deps.showNotice).toHaveBeenCalledWith(SKETCH_FAILED);
-    expect(deps.tellAgent).toHaveBeenCalledOnce();
-  });
-});
-
 describe("browser constants match the server config", () => {
-  it("MAX_BOARD_OBJECTS equals config.maxBoardObjects", () => {
-    expect(MAX_BOARD_OBJECTS).toBe(config.maxBoardObjects);
-  });
-
   it("the fetch timeout is longer than SK1's two attempts", () => {
     expect(SKETCH_FETCH_TIMEOUT_MS).toBeGreaterThan(
       2 * config.sketch.timeoutMs,
