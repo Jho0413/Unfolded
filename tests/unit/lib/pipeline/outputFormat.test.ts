@@ -23,6 +23,7 @@ import {
   type BoardState,
   CuedAction,
   MAX_DURATION_MS,
+  MAX_PAPER_QUOTE_CHARS,
   Sketch,
   Step,
   TimedSketchAction,
@@ -158,17 +159,35 @@ const action = fc.oneof(
   }),
 );
 
-/** Schema-valid contract steps, as Step.parse returns them (defaults filled in). */
+/** A contract paper ref (#98), with or without its optional fields. */
+const paperRef = fc.record(
+  {
+    page: fc.integer({ min: 1, max: 600 }),
+    quote: fc.string({ minLength: 1, maxLength: MAX_PAPER_QUOTE_CHARS }),
+    label: fc.string({ minLength: 1 }),
+    cue,
+  },
+  { requiredKeys: ["page", "quote"] },
+);
+
+/**
+ * Schema-valid contract steps, as Step.parse returns them (defaults filled in). paperRefs is
+ * absent or non-empty: an empty list isn't kept (wireToStep).
+ */
 const step = fc
-  .record({
-    title: fc.string({ minLength: 1 }),
-    narration: fc.string({ minLength: 1 }),
-    objects: fc.array(boardObject, { maxLength: 5 }),
-    actions: fc.array(
-      action.chain((a) => cue.map((c) => ({ ...a, cue: c }))),
-      { maxLength: 8 },
-    ),
-  })
+  .record(
+    {
+      title: fc.string({ minLength: 1 }),
+      narration: fc.string({ minLength: 1 }),
+      objects: fc.array(boardObject, { maxLength: 5 }),
+      actions: fc.array(
+        action.chain((a) => cue.map((c) => ({ ...a, cue: c }))),
+        { maxLength: 8 },
+      ),
+      paperRefs: fc.array(paperRef, { minLength: 1, maxLength: 3 }),
+    },
+    { requiredKeys: ["title", "narration", "objects", "actions"] },
+  )
   .map((s) => Step.parse(s));
 
 const sketch = fc
@@ -367,11 +386,10 @@ describe("field coverage: the wire has every contract action field and kind", ()
   });
 
   it("the wire step and sketch have the contract's top-level fields", () => {
-    // paperRefs (#98) isn't on the wire yet: Jason removes this exception once WireStep has it.
     expect(Object.keys(WireStep.shape).sort()).toEqual(
       Object.keys(Step.shape)
-        // widget (#110) isn't on the wire yet either (S3: no grammar headroom); same for Jason.
-        .filter((k) => k !== "paperRefs" && k !== "widget")
+        // widget (#110) isn't on the wire yet (S3: no grammar headroom); same for Jason.
+        .filter((k) => k !== "widget")
         .sort(),
     );
     expect(Object.keys(WireSketch.shape).sort()).toEqual(
@@ -381,6 +399,64 @@ describe("field coverage: the wire has every contract action field and kind", ()
 });
 
 // ------------------------------------------------------------ conversion rows
+
+describe("wireToStep: paperRefs (#98), one test per row", () => {
+  const REF = { page: 2, quote: "A sentence.", label: "Eq. 1", cue: "go" };
+
+  it("present: kept as they are", () => {
+    const { value, errors: errs } = wireToStep({
+      ...wireStepWith(),
+      paperRefs: [REF],
+    });
+    expect(value.paperRefs).toEqual([REF]);
+    expect(errs).toEqual([]);
+  });
+
+  it("an empty list: not kept, so the step has no paperRefs", () => {
+    const { value } = wireToStep({ ...wireStepWith(), paperRefs: [] });
+    expect(value).not.toHaveProperty("paperRefs");
+  });
+
+  it("absent: still absent", () => {
+    expect(wireToStep(wireStepWith()).value).not.toHaveProperty("paperRefs");
+  });
+
+  it("a malformed ref (an empty or over-long quote, page 0, an empty label, a bad cue): dropped with a warning naming it, not an error", () => {
+    const bad = [
+      { page: 2, quote: "" },
+      { page: 2, quote: "x".repeat(MAX_PAPER_QUOTE_CHARS + 1) },
+      { page: 0, quote: "A sentence." },
+      { page: 2, quote: "A sentence.", label: "" },
+      { page: 2, quote: "A sentence.", cue: "Not A Cue" },
+    ];
+    const converted = wireToStep({
+      ...wireStepWith(),
+      paperRefs: [REF, ...bad],
+    });
+    expect(converted.value.paperRefs).toEqual([REF]);
+    expect(converted.errors).toEqual([]);
+    expect(converted.warnings).toHaveLength(bad.length);
+    bad.forEach((_, i) =>
+      expect(converted.warnings?.[i]).toMatch(
+        new RegExp(`^paperRefs\\.${i + 1} dropped: `),
+      ),
+    );
+  });
+
+  it("validateWireStep: a malformed ref leaves the step valid, its warning to log", () => {
+    const result = validateWireStep(
+      { ...wireStepWith(), paperRefs: [REF, { page: 0, quote: "x" }] },
+      LIMITS,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.paperRefs).toEqual([REF]);
+      expect(result.warnings).toEqual([
+        expect.stringMatching(/^paperRefs\.1 dropped: /),
+      ]);
+    }
+  });
+});
 
 describe("wireToStep / wireToSketch: one test per row", () => {
   it('move needs to: a move without to is dropped and rejected with move needs to "x"', () => {
@@ -637,11 +713,13 @@ describe("validateWireStep / validateWireSketch", () => {
 /**
  * The API compiles each schema into a grammar and rejects one that is too large (#27). Its
  * limit isn't documented, so these are the measured sizes of the schemas a real request
- * accepted (2026-11-14), with a little room. One more object kind on top of them was
- * rejected (S3), and is about 280 bytes, so it fails here first: probe a bigger schema with a
- * real request before raising the budget.
+ * accepted, with a little room: 3864 bytes for the step with paperRefs (#98, 2026-11-15).
+ * Size isn't the whole story: one more object kind on top of the 2026-11-14 schemas (about
+ * 280 bytes, a member of the object union) was rejected (S3), while paperRefs (about 420
+ * bytes, no union) was accepted. Probe a bigger schema with a real request before raising
+ * the budget.
  */
-const SCHEMA_BUDGET_BYTES = 3600;
+const SCHEMA_BUDGET_BYTES = 4000;
 /** The documented cap on optional properties across a request's strict schemas. */
 const MAX_OPTIONAL_PROPERTIES = 24;
 
@@ -729,6 +807,8 @@ describe("output format size guard (#27)", () => {
 // ------------------------------------------------------------ recorded response
 
 describe("the recorded step response (lib/fakes)", () => {
+  // Its paperRefs were added by hand (#98): two real sentences from page 4 of the Attention
+  // paper, so FAKE_APIS=1 on the seeded m2-attention highlights them.
   it("is a real Sonnet 5.5 wire step that converts and passes validateStep", async () => {
     const message = await readFixture<Anthropic.Message>(config.step.fixture);
     expect(message.stop_reason).toBe("end_turn");

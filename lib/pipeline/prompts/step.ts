@@ -13,6 +13,10 @@ import {
   BOARD_ACTIONS_PROMPT,
   BOARD_OBJECTS_PROMPT,
 } from "@/lib/pipeline/prompts/board";
+import {
+  PAPER_REFS_PROMPT,
+  paperContextPrompt,
+} from "@/lib/pipeline/prompts/paper";
 import { retryPromptFor } from "@/lib/pipeline/prompts/retry";
 
 export const STEP_SYSTEM_PROMPT = `You are a tutor who teaches a research paper one step at a time, speaking over a whiteboard. For each step you write a short spoken narration and the whiteboard that goes with it. Every visual change is tied to a word of the narration, so the board moves exactly as the learner hears it.
@@ -35,6 +39,8 @@ Each action has a cue (a marker name from the narration), a target and a duratio
 
 Several actions may share a cue; they run in the order listed.
 
+${PAPER_REFS_PROMPT}
+
 # The step
 
 Teach only this step's goal, building on what came before; don't repeat earlier steps or run ahead. Start the board with what the learner needs to see first, reveal the rest as you speak, and keep the board uncluttered. Give the step a short title.
@@ -54,6 +60,8 @@ export interface StepPromptInput {
    * older ones were that version's to adapt to). Only questions and simplify requests are used.
    */
   signals: readonly Signal[];
+  /** The paper's page count when its quotes can be checked (#98); undefined: ask for none. */
+  paperPageCount?: number;
 }
 
 export function stepContextPrompt({
@@ -61,6 +69,7 @@ export function stepContextPrompt({
   n,
   previousNarration,
   signals,
+  paperPageCount,
 }: StepPromptInput): string {
   const step = plan.steps[n];
   const outline = plan.steps
@@ -87,6 +96,8 @@ export function stepContextPrompt({
       `The previous step hasn't been written yet (the learner jumped here). Its goal was: ${plan.steps[n - 1].goal}`,
     );
   }
+
+  parts.push(paperContextPrompt(paperPageCount));
 
   const learner = signals.flatMap((s) =>
     "question" in s
