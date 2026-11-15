@@ -77,6 +77,37 @@ describe("BargeIn", () => {
     expect(onBargeIn).toHaveBeenCalledOnce();
   });
 
+  it("after a command (QA A2): the agent speaking about it doesn't fire, until the learner's next turn", () => {
+    const { b, onBargeIn, at } = setup();
+    b.quietAgent(); // resume_lesson ran (Ask closing), then the panel re-arms
+    b.arm();
+    at(3000); // the agent's "Sure." starts well after ACK_WAIT_MS
+    b.agentSpeaking(true);
+    b.agentSpeaking(false);
+    expect(onBargeIn).not.toHaveBeenCalled();
+    expect(b.isArmed).toBe(true);
+    // The learner's own voice still counts at once.
+    b.vad(0.95);
+    at(3000 + VAD_HOLD_MS);
+    b.vad(0.95);
+    expect(onBargeIn).toHaveBeenCalledExactlyOnceWith("vad");
+  });
+
+  it("after a command, the learner's next transcript fires and ends the quiet", () => {
+    const { b, onBargeIn } = setup();
+    b.quietAgent();
+    b.arm();
+    b.transcript(" ");
+    b.agentSpeaking(true);
+    expect(onBargeIn).not.toHaveBeenCalled(); // empty transcripts are noise, still quiet
+    b.transcript("wait, what's a logit?");
+    expect(onBargeIn).toHaveBeenCalledExactlyOnceWith("transcript");
+    b.arm();
+    b.agentSpeaking(true);
+    expect(onBargeIn).toHaveBeenLastCalledWith("agentSpeaking");
+    expect(onBargeIn).toHaveBeenCalledTimes(2);
+  });
+
   it("re-arming forgets a run of loud frames from before", () => {
     const { b, onBargeIn, at } = setup();
     b.arm();

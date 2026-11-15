@@ -208,6 +208,20 @@ export class FakeConversation {
     await this.answer(text);
   }
 
+  /**
+   * Test hook: the agent speaks with no learner turn before it, e.g. its "Sure." after a
+   * control tool, as a second LLM turn that starts seconds later (QA A2).
+   */
+  async agentSays(text: string): Promise<void> {
+    if (this.status !== "connected") return;
+    this.callbacks.onAgentSpeaking?.(true);
+    await tick();
+    if (this.status !== "connected") return;
+    this.emit({ role: "agent", text });
+    await tick();
+    if (this.status === "connected") this.callbacks.onAgentSpeaking?.(false);
+  }
+
   /** Test hook: one VAD score (e.g. the narration leaking into the mic, scored low). */
   vad(score: number): void {
     if (this.status === "connected") this.callbacks.onVadScore?.(score);

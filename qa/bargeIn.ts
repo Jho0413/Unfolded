@@ -11,6 +11,12 @@
 // - the agent starting to speak (it only speaks after a learner turn, so the narration must
 //   never play over it).
 // It fires once per arming: the panel re-arms it when Ask closes again.
+//
+// After a spoken command runs (resume, next, back, go to step...), the agent may still speak
+// about it: its "Sure." is often a second LLM turn that starts more than ACK_WAIT_MS after the
+// tool (QA A2). That speech isn't the learner, so the agent speaking doesn't count again until
+// the learner's next turn (`quietAgent`, cleared by their next transcript). The learner's own
+// voice (VAD, transcripts) still counts at once.
 
 /** VAD score (0 to 1) from which a frame counts as speech. */
 export const VAD_THRESHOLD = 0.8;
@@ -23,6 +29,8 @@ export class BargeIn {
   private armed = false;
   /** When the score first reached the threshold in the current run, or null. */
   private loudSince: number | null = null;
+  /** A command ran and the learner hasn't spoken since: the agent speaking doesn't count. */
+  private agentQuiet = false;
 
   constructor(
     /** What barge-in does (the panel sets it with setHandler once it can open Ask). */
@@ -50,6 +58,14 @@ export class BargeIn {
     return this.armed;
   }
 
+  /**
+   * A spoken command just ran: until the learner's next turn (a non-empty transcript), the
+   * agent speaking (about the command) doesn't count. Kept across arm and disarm.
+   */
+  quietAgent(): void {
+    this.agentQuiet = true;
+  }
+
   vad(score: number): void {
     if (!this.armed) return;
     if (score < VAD_THRESHOLD) {
@@ -63,11 +79,13 @@ export class BargeIn {
 
   /** A final transcript of the learner's words. Empty ones (noise) don't count. */
   transcript(text: string): void {
-    if (text.trim() !== "") this.fire("transcript");
+    if (text.trim() === "") return;
+    this.agentQuiet = false;
+    this.fire("transcript");
   }
 
   agentSpeaking(speaking: boolean): void {
-    if (speaking) this.fire("agentSpeaking");
+    if (speaking && !this.agentQuiet) this.fire("agentSpeaking");
   }
 
   private fire(signal: BargeInSignal): void {
