@@ -1,0 +1,162 @@
+{
+  "title": "Defining Perfect Calibration",
+  "narration": "Now let us make honest confidence precise. The paper defines perfect calibration with one equation, shown on the board. In words: among all predictions that come with confidence [[eq]]p, the fraction that are correct should equal p, for every p between zero and one. You asked where the paper says this: it is equation one in Section 2, Definitions. Let us work a tiny case. Take [[ten]]ten predictions, each with confidence zero point eight. A calibrated model should get eight of them right. Here are the ten, with eight marked correct and two wrong. The accuracy is eight out of ten, which is [[match]]zero point eight, matching the confidence. Now compare a second model with the same confidence of zero point eight, but only [[five]]five of the ten are correct. Its accuracy is zero point five, so it claims more than it delivers. That gap of zero point three is what we call [[over]]overconfidence. One practical note: confidence is a continuous number, so we cannot check this exactly with finite data. That is why the next step groups predictions into bins.",
+  "objects": [
+    {
+      "kind": "latex",
+      "id": "eq",
+      "x": 800,
+      "y": 130,
+      "tex": "\\mathbb{P}\\big(\\hat Y = Y \\mid \\hat P = p\\big) = p,\\quad \\forall p \\in [0,1]"
+    },
+    {
+      "kind": "text",
+      "id": "t_a",
+      "x": 800,
+      "y": 250,
+      "text": "Model A: ten predictions, confidence 0.8, correct = 1",
+      "size": "m",
+      "hidden": true
+    },
+    {
+      "kind": "matrix",
+      "id": "mat_a",
+      "x": 480,
+      "y": 290,
+      "rows": [["1", "1", "1", "1", "1", "1", "1", "1", "0", "0"]],
+      "hidden": true
+    },
+    {
+      "kind": "latex",
+      "id": "res_a",
+      "x": 800,
+      "y": 400,
+      "tex": "\\text{accuracy} = 8/10 = 0.8 = \\text{confidence}",
+      "hidden": true
+    },
+    {
+      "kind": "text",
+      "id": "t_b",
+      "x": 800,
+      "y": 520,
+      "text": "Model B: ten predictions, confidence 0.8, correct = 1",
+      "size": "m",
+      "hidden": true
+    },
+    {
+      "kind": "matrix",
+      "id": "mat_b",
+      "x": 480,
+      "y": 560,
+      "rows": [["1", "1", "1", "1", "1", "0", "0", "0", "0", "0"]],
+      "hidden": true
+    },
+    {
+      "kind": "latex",
+      "id": "res_b",
+      "x": 800,
+      "y": 690,
+      "tex": "\\text{accuracy} = 5/10 = 0.5 < 0.8 \\Rightarrow \\text{overconfident}",
+      "hidden": true
+    },
+    {
+      "kind": "text",
+      "id": "gap",
+      "x": 800,
+      "y": 780,
+      "text": "Gap = 0.8 - 0.5 = 0.3",
+      "size": "l",
+      "hidden": true
+    }
+  ],
+  "objectsJson": "[]",
+  "actions": [
+    {
+      "do": "highlight",
+      "target": {
+        "id": "eq"
+      },
+      "durationMs": 500,
+      "cue": "eq"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "t_a"
+      },
+      "durationMs": 400,
+      "cue": "ten"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "mat_a"
+      },
+      "durationMs": 400,
+      "cue": "ten"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "res_a"
+      },
+      "durationMs": 400,
+      "cue": "match"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "t_b"
+      },
+      "durationMs": 400,
+      "cue": "five"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "mat_b"
+      },
+      "durationMs": 400,
+      "cue": "five"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "res_b"
+      },
+      "durationMs": 400,
+      "cue": "five"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "gap"
+      },
+      "durationMs": 400,
+      "cue": "over"
+    },
+    {
+      "do": "highlight",
+      "target": {
+        "id": "gap"
+      },
+      "durationMs": 400,
+      "cue": "over",
+      "color": "warn"
+    }
+  ],
+  "paperRefs": [
+    {
+      "page": 2,
+      "quote": "More formally, we define perfect calibration as",
+      "label": "Eq. 1",
+      "cue": "eq"
+    },
+    {
+      "page": 2,
+      "quote": "For example, given 100 predictions, each with confidence of 0.8, we expect that 80 should be correctly classified.",
+      "label": "Section 2",
+      "cue": "ten"
+    }
+  ]
+}

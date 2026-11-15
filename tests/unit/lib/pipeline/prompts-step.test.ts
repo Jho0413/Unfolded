@@ -2,7 +2,11 @@
 import { describe, expect, it } from "vitest";
 import { config } from "@/lib/config";
 import { validateWireStep } from "@/lib/pipeline/outputFormat";
-import { MATRIX_CELL_MAX_CHARS } from "@/lib/pipeline/prompts/board";
+import {
+  ID_EXAMPLE,
+  MATRIX_CELL_MAX_CHARS,
+  MATRIX_SPLIT_EXAMPLE,
+} from "@/lib/pipeline/prompts/board";
 import {
   PAPER_REFS_PROMPT,
   paperContextPrompt,
@@ -16,7 +20,12 @@ import {
 } from "@/lib/pipeline/prompts/step";
 import { PARAM_NAME_RE, WIDGET_LIMITS } from "@/shared/widget";
 import type { LessonPlanOutput } from "@/shared/lesson";
-import { MAX_PAPER_QUOTE_CHARS, VIZ_LIMITS } from "@/shared/scene";
+import {
+  MAX_MATRIX_DIM,
+  MAX_PAPER_QUOTE_CHARS,
+  OBJECT_ID_RE,
+  VIZ_LIMITS,
+} from "@/shared/scene";
 
 const PLAN: LessonPlanOutput = {
   title: "A lesson",
@@ -137,6 +146,28 @@ describe("STEP_SYSTEM_PROMPT", () => {
     );
     expect(STEP_SYSTEM_PROMPT).toContain("round numbers to fit");
     expect(STEP_SYSTEM_PROMPT).toContain("Words don't fit in cells");
+  });
+
+  // The grammar can't hold a matrix's 8-cell bound, and real first attempts wrote a plan's
+  // "10 predictions" as one 10-cell row (2 of 10 steps), so the prompt states it with a split.
+  it("states a matrix row's cell bound, with an example split over rows that fits it", () => {
+    const { items, rows } = MATRIX_SPLIT_EXAMPLE;
+    expect(STEP_SYSTEM_PROMPT).toContain(
+      `Never more than ${MAX_MATRIX_DIM} cells in a row, even when the step counts more items: lay them out over several rows (${items} items as ${rows} rows of ${items / rows})`,
+    );
+    expect(items).toBeGreaterThan(MAX_MATRIX_DIM);
+    expect(Number.isInteger(items / rows)).toBe(true);
+    expect(items / rows).toBeLessThanOrEqual(MAX_MATRIX_DIM);
+    expect(rows).toBeLessThanOrEqual(MAX_MATRIX_DIM);
+  });
+
+  // A real step named two objects calA and calB: the grammar can't enforce the id pattern either.
+  it("states the id rule with an example without capitals, and the example fits the rule", () => {
+    expect(STEP_SYSTEM_PROMPT).toContain(
+      `no capitals: ${ID_EXAMPLE.good}, not ${ID_EXAMPLE.bad}`,
+    );
+    expect(OBJECT_ID_RE.test(ID_EXAMPLE.good)).toBe(true);
+    expect(OBJECT_ID_RE.test(ID_EXAMPLE.bad)).toBe(false);
   });
 
   it("offers heatmaps and plots in objectsJson, with the contract's limits (#103)", () => {

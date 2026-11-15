@@ -104,8 +104,16 @@ const WireCuedAction = z.object({
   ...wireOptional,
 });
 
-/** The objects a step's grammar carries, with the contract's own schemas. */
-export const WireStepObject = z.union([
+/**
+ * The objects a step's grammar carries, with the contract's own schemas. A discriminated union
+ * (#157): zod writes it as `oneOf`, which structured output doesn't take, but the SDK's
+ * zodOutputFormat rewrites `oneOf` as `anyOf`, so the grammar is the same as a plain union's (a
+ * test compares the bytes). An error then names the object's own field and rule. A plain union's
+ * is only `objects.2: Invalid input`, and with that a retry wrote the same 10-cell matrix row
+ * again (twice in 10 real steps), so the step failed: the grammar can't hold a matrix's 8-cell
+ * bound.
+ */
+export const WireStepObject = z.discriminatedUnion("kind", [
   MatrixObject,
   TextObject,
   LatexObject,
@@ -115,7 +123,7 @@ export type WireStepObject = z.infer<typeof WireStepObject>;
 
 /**
  * The objects that come as JSON text in `objectsJson`, checked with the contract's own schemas.
- * Never sent as a JSON schema, so a discriminated union: an error names the object's own field.
+ * A discriminated union, as WireStepObject is: an error names the object's own field.
  */
 export const JsonStepObject = z.discriminatedUnion("kind", [
   HeatmapObject,
@@ -147,9 +155,15 @@ export const WireStep = z.object({
 });
 export type WireStep = z.infer<typeof WireStep>;
 
+/** A sketch's objects: the contract's BoardObject kinds, by kind (#157, see WireStepObject). */
+export const WireSketchObject = z.discriminatedUnion(
+  "kind",
+  BoardObject.options,
+);
+
 export const WireSketch = z.object({
   narration: z.string(),
-  objects: z.array(BoardObject),
+  objects: z.array(WireSketchObject),
   actions: z.array(WireCuedAction),
 });
 export type WireSketch = z.infer<typeof WireSketch>;

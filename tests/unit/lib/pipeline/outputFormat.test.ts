@@ -6,6 +6,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import fc from "fast-check";
 import { beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { config } from "@/lib/config";
 import { readFixture } from "@/lib/fakes";
 import {
@@ -16,6 +17,7 @@ import {
   validateWireSketch,
   validateWireStep,
   WireSketch,
+  WireSketchObject,
   WireStep,
   WireStepObject,
   wireErrors,
@@ -23,10 +25,12 @@ import {
   wireToStep,
 } from "@/lib/pipeline/outputFormat";
 import {
+  BoardObject,
   type BoardState,
   CuedAction,
   MAX_DURATION_MS,
   MAX_PAPER_QUOTE_CHARS,
+  OBJECT_ID_RE,
   SceneObject,
   Sketch,
   Step,
@@ -1389,5 +1393,144 @@ describe("the recorded step response (lib/fakes)", () => {
     const result = validateWireStep(JSON.parse(text!.text), LIMITS);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.value.widget?.kind).toBe("heatmap");
+  });
+});
+
+// ------------------------------------------------------------ object errors
+
+/**
+ * A wire object that fails its kind's schema is reported with its own field and rule, not a
+ * union's bare "Invalid input", so the one retry can fix it. Measured on 10 real steps
+ * (2026-11-15): 2 first attempts wrote a plan's "10 predictions" as a 10-cell matrix row, the
+ * retry was told only `objects.2: Invalid input`, wrote the same row again, and the step failed.
+ * Another first attempt (after the fix) named two objects calA and calB.
+ */
+describe("wire object errors name the field and the rule", () => {
+  const TOO_WIDE = "Too big: expected array to have <=8 items";
+  const wideRow = {
+    kind: "matrix",
+    id: "m",
+    x: 100,
+    y: 100,
+    rows: [["1", "1", "1", "1", "1", "1", "1", "1", "0", "0"]],
+  };
+
+  it("a recorded step with two 10-cell matrix rows: rejected with each matrix's rows.0 bound", async () => {
+    const recorded = await readFixture("claude-step-wide-matrix.wire.json");
+    expect(validateWireStep(recorded, LIMITS)).toStrictEqual({
+      ok: false,
+      errors: [
+        `objects.2.rows.0: ${TOO_WIDE}`,
+        `objects.5.rows.0: ${TOO_WIDE}`,
+      ],
+    });
+  });
+
+  it("a recorded step's matrices split into 2 rows of 5: no object errors", async () => {
+    const recorded = await readFixture<WireStep>(
+      "claude-step-wide-matrix.wire.json",
+    );
+    const split = recorded.objects.map((o) =>
+      o.kind === "matrix"
+        ? { ...o, rows: [o.rows[0].slice(0, 5), o.rows[0].slice(5)] }
+        : o,
+    );
+    const result = validateWireStep({ ...recorded, objects: split }, LIMITS);
+    if (!result.ok) expect(result.errors).toEqual([]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("a recorded step with capitals in two ids: rejected with each object's id rule, and each action's", async () => {
+    const recorded = await readFixture("claude-step-capital-ids.wire.json");
+    const ID_RULE = `Invalid string: must match pattern ${OBJECT_ID_RE}`;
+    expect(validateWireStep(recorded, LIMITS)).toStrictEqual({
+      ok: false,
+      errors: [
+        `objects.6.id: ${ID_RULE}`,
+        `objects.7.id: ${ID_RULE}`,
+        `actions.4.target.id: ${ID_RULE}`,
+        `actions.7.target.id: ${ID_RULE}`,
+        `actions.8.target.id: ${ID_RULE}`,
+      ],
+    });
+  });
+
+  it("a recorded step's capital ids written in lowercase: valid", async () => {
+    const recorded = await readFixture<WireStep>(
+      "claude-step-capital-ids.wire.json",
+    );
+    const lower = JSON.parse(
+      JSON.stringify(recorded).replace(
+        /"cal([AB])"/g,
+        (_, c: string) => `"cal_${c.toLowerCase()}"`,
+      ),
+    );
+    const result = validateWireStep(lower, LIMITS);
+    if (!result.ok) expect(result.errors).toEqual([]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("a step object with a bad field of its kind: that field's error, under the object", () => {
+    const result = validateWireStep(
+      {
+        ...wireStepWith(),
+        objects: [
+          { kind: "text", id: "t", x: 1, y: 1, text: "hi", size: "xl" },
+          { kind: "arrow", id: "a", from: { id: "t" } },
+        ],
+      },
+      LIMITS,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok)
+      expect(result.errors).toEqual([
+        expect.stringMatching(/^objects\.0\.size: /),
+        expect.stringMatching(/^objects\.1\.to: /),
+      ]);
+  });
+
+  it("a step object of a kind the grammar doesn't carry: rejected naming kind", () => {
+    const result = validateWireStep(
+      { ...wireStepWith(), objects: [{ ...wideRow, kind: "heatmap" }] },
+      LIMITS,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok)
+      expect(result.errors).toEqual([
+        expect.stringMatching(/^objects\.0\.kind: /),
+      ]);
+  });
+
+  it("a sketch object that fails its kind's schema: its field and rule, as a step's", () => {
+    expect(
+      validateWireSketch(
+        { narration: SAID, objects: [wideRow], actions: [] },
+        { board: EMPTY_BOARD },
+      ),
+    ).toStrictEqual({ ok: false, errors: [`objects.0.rows.0: ${TOO_WIDE}`] });
+  });
+
+  // zod writes a discriminated union as oneOf; the SDK's zodOutputFormat rewrites it as anyOf.
+  // Byte-identical, key order included: the grammar has almost no headroom (#103).
+  it("the step and sketch formats are byte-identical to the same wire with a plain object union", () => {
+    const plain = (union: { options: readonly z.ZodType[] }) =>
+      z.array(z.union(union.options));
+    const sent = (format: Anthropic.JSONOutputFormat) =>
+      JSON.stringify(format.schema);
+    const asPlain = (schema: z.ZodType) =>
+      JSON.stringify(zodOutputFormat(schema).schema);
+    expect(sent(STEP_OUTPUT_FORMAT)).toBe(
+      asPlain(WireStep.extend({ objects: plain(WireStepObject) })),
+    );
+    expect(sent(SKETCH_OUTPUT_FORMAT)).toBe(
+      asPlain(WireSketch.extend({ objects: plain(BoardObject) })),
+    );
+  });
+
+  it("the sketch's objects are the contract's BoardObject kinds, the contract's own schemas", () => {
+    expect(WireSketchObject.options).toHaveLength(BoardObject.options.length);
+    WireSketchObject.options.forEach((o, i) =>
+      expect(o).toBe(BoardObject.options[i]),
+    );
   });
 });

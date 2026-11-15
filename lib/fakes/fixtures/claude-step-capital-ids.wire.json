@@ -1,0 +1,164 @@
+{
+  "title": "Defining Perfect Calibration",
+  "narration": "Now let us make honest confidence precise. The paper defines [[perfect]]perfect calibration with one equation: the probability that the prediction is correct, given that the confidence equals p, is exactly p, for every p between zero and one. You can find it as equation one on page two, right after the sentence about one hundred predictions. Let us test it with ten predictions, each with confidence zero point eight. Here are [[ten]]ten predictions, one box each. In the first model, [[eight]]eight are correct and two are wrong. Accuracy is eight tenths, which matches the confidence, so this model is calibrated. In the second model, only [[five]]five are correct. Accuracy is zero point five, but the confidence still says zero point eight. That model is overconfident, and the [[gap]]gap of zero point three is its miscalibration. About your question on temperature: that is a later step, where we will see how to shrink such a gap. For now, hold on to the idea that confidence should equal accuracy.",
+  "objects": [
+    {
+      "kind": "latex",
+      "id": "eq",
+      "x": 800,
+      "y": 130,
+      "tex": "\\mathbb{P}(\\hat Y = Y \\mid \\hat P = p) = p,\\quad \\forall p\\in[0,1]"
+    },
+    {
+      "kind": "text",
+      "id": "cap",
+      "x": 800,
+      "y": 220,
+      "text": "Ten predictions, each with confidence 0.8 (1 = correct, 0 = wrong)",
+      "size": "m",
+      "hidden": true
+    },
+    {
+      "kind": "matrix",
+      "id": "good",
+      "x": 240,
+      "y": 330,
+      "rows": [
+        ["1", "1", "1", "1", "1"],
+        ["1", "1", "1", "0", "0"]
+      ],
+      "label": "Model A: 8 of 10 correct",
+      "hidden": true
+    },
+    {
+      "kind": "matrix",
+      "id": "bad",
+      "x": 1040,
+      "y": 330,
+      "rows": [
+        ["1", "1", "1", "1", "1"],
+        ["0", "0", "0", "0", "0"]
+      ],
+      "label": "Model B: 5 of 10 correct",
+      "hidden": true
+    },
+    {
+      "kind": "latex",
+      "id": "acca",
+      "x": 400,
+      "y": 600,
+      "tex": "\\text{acc}=0.8=\\text{conf}",
+      "hidden": true
+    },
+    {
+      "kind": "latex",
+      "id": "accb",
+      "x": 1200,
+      "y": 600,
+      "tex": "\\text{acc}=0.5<0.8=\\text{conf}",
+      "hidden": true
+    },
+    {
+      "kind": "text",
+      "id": "calA",
+      "x": 400,
+      "y": 700,
+      "text": "Calibrated",
+      "size": "l",
+      "hidden": true
+    },
+    {
+      "kind": "text",
+      "id": "calB",
+      "x": 1200,
+      "y": 700,
+      "text": "Overconfident: gap 0.3",
+      "size": "l",
+      "hidden": true
+    }
+  ],
+  "objectsJson": "[]",
+  "actions": [
+    {
+      "do": "highlight",
+      "target": {
+        "id": "eq"
+      },
+      "durationMs": 500,
+      "cue": "perfect"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "cap"
+      },
+      "durationMs": 400,
+      "cue": "ten"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "good"
+      },
+      "durationMs": 400,
+      "cue": "eight"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "acca"
+      },
+      "durationMs": 400,
+      "cue": "eight"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "calA"
+      },
+      "durationMs": 400,
+      "cue": "eight"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "bad"
+      },
+      "durationMs": 400,
+      "cue": "five"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "accb"
+      },
+      "durationMs": 400,
+      "cue": "five"
+    },
+    {
+      "do": "show",
+      "target": {
+        "id": "calB"
+      },
+      "durationMs": 400,
+      "cue": "gap"
+    },
+    {
+      "do": "highlight",
+      "target": {
+        "id": "calB"
+      },
+      "durationMs": 400,
+      "cue": "gap",
+      "color": "warn"
+    }
+  ],
+  "paperRefs": [
+    {
+      "page": 2,
+      "quote": "For example, given 100 predictions, each with confidence of 0.8, we expect that 80 should be correctly classified.",
+      "label": "Perfect calibration, Eq. 1",
+      "cue": "perfect"
+    }
+  ]
+}

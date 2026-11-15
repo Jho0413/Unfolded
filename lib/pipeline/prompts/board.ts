@@ -12,12 +12,26 @@ import { CANVAS, CELL, MAX_MATRIX_DIM } from "@/shared/scene";
  */
 export const MATRIX_CELL_MAX_CHARS = 4;
 
+/**
+ * The prompt's example of a matrix split over rows (#157). Real steps wrote 10 items (a plan's "10
+ * predictions") as one 10-cell row: structured output can't enforce the 8-cell bound, so only
+ * the prompt can stop it: 2 of 10 real first attempts were rejected for it.
+ */
+export const MATRIX_SPLIT_EXAMPLE = { items: 10, rows: 2 } as const;
+
+/**
+ * The prompt's example of an id without capitals (#157). A real step named two objects calA and calB:
+ * the grammar can't enforce OBJECT_ID_RE (the SDK sends a pattern as a description), so the
+ * prompt has to.
+ */
+export const ID_EXAMPLE = { good: "cal_a", bad: "calA" } as const;
+
 /** The "# The whiteboard" section: the canvas and the kinds of object. */
 export const BOARD_OBJECTS_PROMPT = `# The whiteboard
 
-The canvas is ${CANVAS.w} wide and ${CANVAS.h} high, origin at the top left. Every object needs a unique id (lowercase letters, digits and underscores, starting with a letter, at most 32 characters). In objects, use only these kinds of object (there are no images):
+The canvas is ${CANVAS.w} wide and ${CANVAS.h} high, origin at the top left. Every object needs a unique id (lowercase letters, digits and underscores, starting with a letter, at most 32 characters; no capitals: ${ID_EXAMPLE.good}, not ${ID_EXAMPLE.bad}). In objects, use only these kinds of object (there are no images):
 
-- matrix: x, y is the top-left corner. rows is 1 to ${MAX_MATRIX_DIM} rows of 1 to ${MAX_MATRIX_DIM} cells, all the same length; "" is an empty cell. Every cell is ${CELL.w} wide and ${CELL.h} high, so cell (r, c) has its centre at (x + ${CELL.w}c + ${CELL.w / 2}, y + ${CELL.h}r + ${CELL.h / 2}) and the whole matrix fits in its cell box. Optional label, drawn outside the box. A cell holds at most ${MATRIX_CELL_MAX_CHARS} characters, such as 0.98, 1e-3, -2.5 or 128: round numbers to fit, since a longer value is drawn smaller than the rest. Words don't fit in cells: put names such as class labels in the label or in text objects beside the matrix.
+- matrix: x, y is the top-left corner. rows is 1 to ${MAX_MATRIX_DIM} rows of 1 to ${MAX_MATRIX_DIM} cells, all the same length; "" is an empty cell. Never more than ${MAX_MATRIX_DIM} cells in a row, even when the step counts more items: lay them out over several rows (${MATRIX_SPLIT_EXAMPLE.items} items as ${MATRIX_SPLIT_EXAMPLE.rows} rows of ${MATRIX_SPLIT_EXAMPLE.items / MATRIX_SPLIT_EXAMPLE.rows}). Every cell is ${CELL.w} wide and ${CELL.h} high, so cell (r, c) has its centre at (x + ${CELL.w}c + ${CELL.w / 2}, y + ${CELL.h}r + ${CELL.h / 2}) and the whole matrix fits in its cell box. Optional label, drawn outside the box. A cell holds at most ${MATRIX_CELL_MAX_CHARS} characters, such as 0.98, 1e-3, -2.5 or 128: round numbers to fit, since a longer value is drawn smaller than the rest. Words don't fit in cells: put names such as class labels in the label or in text objects beside the matrix.
 - text: x, y is the centre. size is "s", "m" or "l".
 - latex: x, y is the centre. tex is KaTeX math (no \\href, \\url or other links).
 - arrow: from and to are each an object (its centre), a matrix row, column or cell, or a point {x, y}. Never another arrow. Optional label.
