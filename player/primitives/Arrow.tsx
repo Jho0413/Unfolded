@@ -9,6 +9,7 @@ import type {
 } from "@/shared/scene";
 import { resolveAnchor } from "@/player/sceneAt";
 import { type ArrowGeometry, arrowGeometry, targetBox } from "./arrowGeometry";
+import { textBox } from "@/shared/boxes";
 import {
   ARROW,
   BOARD_BG,
@@ -18,7 +19,6 @@ import {
   highlightAttr,
   objectProgress,
   opacityAttr,
-  textBox,
 } from "./style";
 
 export function Arrow({

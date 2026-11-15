@@ -1,7 +1,9 @@
 // One test per row of the ARCHITECTURE.md section 4 validation table, named
 // after the row, plus the M1 demo fixture as the contract's acceptance test.
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import demoM1 from "@/lib/fakes/fixtures/demo-m1.step.json";
+import { type Box, boxGap, objectBox } from "@/shared/boxes";
 import {
   type BoardObject,
   type BoardState,
@@ -10,6 +12,8 @@ import {
   type Step,
 } from "@/shared/scene";
 import {
+  ANSWER_TEMPLATE,
+  errors,
   validateSketch,
   validateStep,
   type ValidationResult,
@@ -642,6 +646,531 @@ describe("validate: ARCHITECTURE.md section 4 table", () => {
         },
         { board: lessonBoard, fresh: true },
       ),
+    );
+  });
+});
+
+// The answer template's rows (ARCHITECTURE.md section 4): only a fresh sketch, the Answer
+// view's drawing, is held to them.
+describe("validate: a fresh sketch's answer template (#90)", () => {
+  const FRESH = { board: lessonBoard, fresh: true };
+  const title: BoardObject = {
+    kind: "text",
+    id: "title",
+    x: 800,
+    y: 110,
+    text: "Why scale?",
+  };
+  const a: BoardObject = {
+    kind: "matrix",
+    id: "a",
+    x: 300,
+    y: 400,
+    rows: [["1", "2"]],
+    label: "raw",
+  };
+  const f: BoardObject = {
+    kind: "latex",
+    id: "f",
+    x: 1100,
+    y: 424,
+    tex: "d_k",
+  };
+  const join: BoardObject = {
+    kind: "arrow",
+    id: "j",
+    from: { id: "a" },
+    to: { id: "f" },
+    label: "divide",
+  };
+  const answer = (...objects: BoardObject[]): Sketch => ({
+    objects,
+    actions: [],
+  });
+
+  it("A fresh sketch laid out from the template: valid", () => {
+    expectValid(validateSketch(answer(title, a, f, join), FRESH));
+  });
+
+  describe("counts: at most 10 objects besides arrows, and at most 6 arrows", () => {
+    /** Small texts on a 3-wide grid, well apart. */
+    const texts = (n: number) =>
+      Array.from({ length: n }, (_, i): BoardObject => ({
+        kind: "text",
+        id: `t${i}`,
+        x: 200 + (i % 3) * 500,
+        y: 200 + Math.floor(i / 3) * 200,
+        text: "x",
+        size: "s",
+      }));
+    const arrow = (from: number, to: number): BoardObject => ({
+      kind: "arrow",
+      id: `r${from}_${to}`,
+      from: { id: `t${from}` },
+      to: { id: `t${to}` },
+    });
+    const sixArrows = [
+      arrow(0, 1),
+      arrow(1, 2),
+      arrow(3, 4),
+      arrow(4, 5),
+      arrow(6, 7),
+      arrow(0, 3),
+    ];
+
+    it("10 objects and 6 arrows: valid", () => {
+      expectValid(validateSketch(answer(...texts(10), ...sixArrows), FRESH));
+    });
+
+    it("11 objects besides arrows: rejected: too many objects", () => {
+      expectErrors(
+        validateSketch(answer(...texts(11)), FRESH),
+        errors.tooManyObjects(ANSWER_TEMPLATE.maxContent + 1),
+      );
+    });
+
+    it("7 arrows: rejected: too many arrows", () => {
+      expectErrors(
+        validateSketch(answer(...texts(8), ...sixArrows, arrow(1, 4)), FRESH),
+        errors.tooManyArrows(ANSWER_TEMPLATE.maxArrows + 1),
+      );
+    });
+  });
+
+  it('An object whose estimated box leaves the answer area: rejected: outside the answer area "x"', () => {
+    // On the canvas (its centre is), but its box runs past the area's right edge.
+    const wide: BoardObject = {
+      kind: "text",
+      id: "wide",
+      x: 1450,
+      y: 450,
+      text: "a long line of words",
+    };
+    expectErrors(
+      validateSketch(answer(wide), FRESH),
+      errors.outsideAnswerArea("wide"),
+    );
+  });
+
+  it('A matrix whose label rises out of the area: rejected: outside the answer area "x"', () => {
+    const high: BoardObject = { ...a, y: ANSWER_TEMPLATE.area.y0 + 10 };
+    expectErrors(
+      validateSketch(answer(high), FRESH),
+      errors.outsideAnswerArea("a"),
+    );
+    // Without the label, the cells and brackets fit.
+    const bare = { ...high, label: undefined };
+    expectValid(validateSketch(answer(bare), FRESH));
+  });
+
+  it('An arrow point, or a move to a point, outside the area: rejected: outside the answer area "x"', () => {
+    const toEdge: BoardObject = {
+      kind: "arrow",
+      id: "edge",
+      from: { id: "a" },
+      to: { x: 1550, y: 450 },
+    };
+    expectErrors(
+      validateSketch(answer(a, toEdge), FRESH),
+      errors.outsideAnswerArea("edge"),
+    );
+    const moved: Sketch = {
+      objects: [title],
+      actions: [
+        {
+          atMs: 0,
+          do: "move",
+          target: { id: "title" },
+          to: { x: 40, y: 450 },
+          durationMs: 400,
+        },
+      ],
+    };
+    expectErrors(
+      validateSketch(moved, FRESH),
+      errors.outsideAnswerArea("title"),
+    );
+  });
+
+  it('Two objects whose boxes overlap (or touch): soft, retried: "a" and "b" overlap, still drawable', () => {
+    // a's box ends at x 434; this formula's starts left of it.
+    const over: BoardObject = { ...f, x: 420, id: "over" };
+    const r = validateSketch(answer(a, over), FRESH);
+    expectErrors(r, errors.overlap("a", "over", ANSWER_TEMPLATE.gap));
+    expect(r.ok === false && r.softOnly).toEqual({
+      value: answer(a, over),
+      count: 1,
+    });
+  });
+
+  it('Two objects closer than 40 without touching: valid, with the warning "a" and "b" are too close', () => {
+    // About 20 apart.
+    const near: BoardObject = { ...f, x: 480, id: "near" };
+    expect(validateSketch(answer(a, near), FRESH)).toEqual({
+      ok: true,
+      value: answer(a, near),
+      warnings: [errors.tooClose("a", "near", ANSWER_TEMPLATE.gap)],
+    });
+  });
+
+  it("Two objects an arrow joins, 40 or more apart: valid, no warning (the arrow shows in the gap)", () => {
+    // About 60 apart.
+    const close: BoardObject = { ...f, x: 530 };
+    expect(validateSketch(answer(a, close, join), FRESH)).toEqual({
+      ok: true,
+      value: answer(a, close, join),
+    });
+  });
+
+  it("An overlap with a hard problem: not drawable (no softOnly)", () => {
+    const over: BoardObject = { ...f, x: 420, id: "over", tex: "x" };
+    const r = validateSketch(answer(a, over, { ...title, text: "d_k" }), FRESH);
+    expectErrors(
+      r,
+      errors.overlap("a", "over", ANSWER_TEMPLATE.gap),
+      errors.mathsInPlainText("title"),
+    );
+    expect(r.ok === false && r.softOnly).toBeUndefined();
+  });
+
+  it('"_" or "^" in a text, an arrow or matrix label, a matrix cell or a written value: rejected', () => {
+    const cases: [Sketch, string][] = [
+      [answer({ ...title, text: "d_k grows" }), "title"],
+      [answer(a, f, { ...join, label: "x^2" }), "j"],
+      [answer({ ...a, label: "W_Q" }), "a"],
+      [answer({ ...a, rows: [["q_1", "2"]] }), "a"],
+      [
+        {
+          objects: [title],
+          actions: [
+            {
+              atMs: 0,
+              do: "write",
+              target: { id: "title" },
+              value: "x^2",
+              durationMs: 400,
+            },
+          ],
+        },
+        "title",
+      ],
+    ];
+    for (const [sketch, id] of cases)
+      expectErrors(validateSketch(sketch, FRESH), errors.mathsInPlainText(id));
+    // Maths in a latex object is what the rule asks for.
+    expectValid(validateSketch(answer(f), FRESH));
+  });
+
+  it("A sketch on the lesson board (not fresh) isn't held to the template", () => {
+    const wide: BoardObject = {
+      kind: "text",
+      id: "wide",
+      x: 1580,
+      y: 20,
+      text: "d_k",
+    };
+    expectValid(validateSketch(answer(wide), { board: lessonBoard }));
+  });
+});
+
+describe("validate: the answer template (property, #90)", () => {
+  const FRESH = { board: lessonBoard, fresh: true };
+  const { area, content, title, takeaway, gap } = ANSWER_TEMPLATE;
+  /** A plain word or number, never "_" or "^". */
+  const word = fc.stringMatching(/^[a-z0-9 .]{1,12}$/);
+  const cellValue = fc.stringMatching(/^[0-9.]{1,3}$/);
+  const FORMULAS = [
+    "x",
+    "\\frac{a}{b}",
+    "q\\cdot k=\\sum q_i k_i",
+    "\\sqrt{d_k}",
+    "e^{s_i}",
+    "\\begin{bmatrix}1&2\\\\3&4\\end{bmatrix}",
+  ];
+  type Placed = Exclude<BoardObject, { kind: "arrow" | "image" }>;
+
+  /** A text, formula or matrix of any size, at the origin (`id` is set when placed). */
+  const contentObject: fc.Arbitrary<Placed> = fc.oneof(
+    fc.record({
+      kind: fc.constant("text" as const),
+      id: fc.constant(""),
+      x: fc.constant(0),
+      y: fc.constant(0),
+      text: word,
+      size: fc.constantFrom("s" as const, "m" as const),
+    }),
+    fc.record({
+      kind: fc.constant("latex" as const),
+      id: fc.constant(""),
+      x: fc.constant(0),
+      y: fc.constant(0),
+      tex: fc.constantFrom(...FORMULAS),
+    }),
+    fc
+      .tuple(fc.integer({ min: 1, max: 3 }), fc.integer({ min: 1, max: 4 }))
+      .chain(([r, c]) =>
+        fc.record({
+          kind: fc.constant("matrix" as const),
+          id: fc.constant(""),
+          x: fc.constant(0),
+          y: fc.constant(0),
+          rows: fc.array(fc.array(cellValue, { minLength: c, maxLength: c }), {
+            minLength: r,
+            maxLength: r,
+          }),
+          label: fc.option(word, { nil: undefined }),
+        }),
+      ),
+  );
+
+  /** Moves an object so its estimated box's top-left corner is at (x0, y0). */
+  function placeAt<T extends Placed>(obj: T, x0: number, y0: number): T {
+    const box = objectBox(obj)!;
+    return { ...obj, x: obj.x + x0 - box.x0, y: obj.y + y0 - box.y0 };
+  }
+  const size = (obj: Placed) => {
+    const b = objectBox(obj)!;
+    return { w: b.x1 - b.x0, h: b.y1 - b.y0 };
+  };
+
+  /**
+   * What the prompt asks for: the title and takeaway at their spots, and the content in one
+   * row or column inside the content area, `gap` apart, pushed to its edges. Null when
+   * the content doesn't fit in one row or column.
+   */
+  const layout = fc
+    .record({
+      items: fc.array(contentObject, { minLength: 1, maxLength: 4 }),
+      titleText: word,
+      takeawayText: fc.option(word, { nil: undefined }),
+      direction: fc.constantFrom("row" as const, "column" as const),
+      start: fc.boolean(),
+      edge: fc.boolean(),
+      arrows: fc.boolean(),
+    })
+    .map((spec): Sketch | null => {
+      const sizes = spec.items.map(size);
+      const along = (s: { w: number; h: number }) =>
+        spec.direction === "row" ? s.w : s.h;
+      const total =
+        sizes.reduce((sum, s) => sum + along(s), 0) + gap * (sizes.length - 1);
+      const room =
+        spec.direction === "row"
+          ? content.x1 - content.x0
+          : content.y1 - content.y0;
+      const across =
+        spec.direction === "row"
+          ? content.y1 - content.y0
+          : content.x1 - content.x0;
+      if (
+        total > room ||
+        sizes.some((s) => (spec.direction === "row" ? s.h : s.w) > across)
+      )
+        return null;
+      // From the content area's start edge, or ending on its far edge.
+      let at =
+        (spec.direction === "row" ? content.x0 : content.y0) +
+        (spec.start ? 0 : room - total);
+      const items = spec.items.map((item, i) => {
+        const s = sizes[i];
+        // Each pushed to one side of the area, across the row or column.
+        const side =
+          spec.direction === "row"
+            ? spec.edge
+              ? content.y0
+              : content.y1 - s.h
+            : spec.edge
+              ? content.x0
+              : content.x1 - s.w;
+        const placed =
+          spec.direction === "row"
+            ? placeAt(item, at, side)
+            : placeAt(item, side, at);
+        at += along(s) + gap;
+        return { ...placed, id: `c${i}` };
+      });
+      const lines: BoardObject[] = [
+        { kind: "text", id: "title", ...title, text: spec.titleText },
+        ...(spec.takeawayText === undefined
+          ? []
+          : [
+              {
+                kind: "text" as const,
+                id: "takeaway",
+                ...takeaway,
+                text: spec.takeawayText,
+              },
+            ]),
+      ];
+      const arrows: BoardObject[] = spec.arrows
+        ? items.slice(1).map((item, i) => ({
+            kind: "arrow",
+            id: `r${i}`,
+            from: { id: items[i].id },
+            to: { id: item.id },
+          }))
+        : [];
+      return { objects: [...lines, ...items, ...arrows], actions: [] };
+    });
+
+  it("a layout that follows the template, any kinds and sizes pushed to the content area's edges, is valid", () => {
+    fc.assert(
+      fc.property(layout, (sketch) => {
+        fc.pre(sketch !== null);
+        expectValid(validateSketch(sketch!, FRESH));
+      }),
+    );
+  });
+
+  it("pushing any content object past the answer area is rejected, naming it", () => {
+    fc.assert(
+      fc.property(
+        layout,
+        fc.nat(),
+        fc.constantFrom("left", "right", "up", "down"),
+        fc.integer({ min: 1, max: 300 }),
+        (sketch, pick, side, by) => {
+          fc.pre(sketch !== null);
+          const items = sketch!.objects.filter((o): o is Placed =>
+            o.id.startsWith("c"),
+          );
+          const moved = items[pick % items.length];
+          const s = size(moved);
+          const x0 =
+            side === "left"
+              ? area.x0 - by
+              : side === "right"
+                ? area.x1 + by - s.w
+                : objectBox(moved)!.x0;
+          const y0 =
+            side === "up"
+              ? area.y0 - by
+              : side === "down"
+                ? area.y1 + by - s.h
+                : objectBox(moved)!.y0;
+          const objects = sketch!.objects.map((o) =>
+            o.id === moved.id ? placeAt(moved, x0, y0) : o,
+          );
+          expectErrors(
+            validateSketch({ ...sketch!, objects }, FRESH),
+            errors.outsideAnswerArea(moved.id),
+          );
+        },
+      ),
+    );
+  });
+
+  it("two objects whose estimated boxes overlap always overlap (retried)", () => {
+    fc.assert(
+      fc.property(
+        contentObject,
+        contentObject,
+        fc.double({ min: 0, max: 0.99, noNaN: true }),
+        fc.double({ min: 0, max: 0.99, noNaN: true }),
+        (p, q, fx, fy) => {
+          const first = { ...placeAt(p, 500, 400), id: "p" };
+          const box = objectBox(first)!;
+          const second = {
+            ...placeAt(
+              q,
+              box.x0 + fx * (box.x1 - box.x0),
+              box.y0 + fy * (box.y1 - box.y0),
+            ),
+            id: "q",
+          };
+          expectErrors(
+            validateSketch({ objects: [first, second], actions: [] }, FRESH),
+            errors.overlap("p", "q", gap),
+          );
+        },
+      ),
+    );
+  });
+
+  it("two objects side by side, 1 to 39 apart, are always drawn, with a tight-spacing warning", () => {
+    fc.assert(
+      fc.property(
+        contentObject,
+        contentObject,
+        fc.double({ min: 0.5, max: gap - 0.5, noNaN: true }),
+        (p, q, apart) => {
+          const first = { ...placeAt(p, area.x0 + 1, 400), id: "p" };
+          const second = {
+            ...placeAt(q, objectBox(first)!.x1 + apart, 400),
+            id: "q",
+          };
+          fc.pre(objectBox(second)!.x1 <= area.x1);
+          const r = validateSketch(
+            { objects: [first, second], actions: [] },
+            FRESH,
+          );
+          expect(r).toMatchObject({
+            ok: true,
+            warnings: [errors.tooClose("p", "q", gap)],
+          });
+        },
+      ),
+    );
+  });
+
+  it('any text with "_" or "^" in it is always rejected', () => {
+    fc.assert(
+      fc.property(
+        word,
+        fc.constantFrom("_", "^"),
+        word,
+        (before, mark, after) => {
+          const sketch = answer(`${before}${mark}${after}`);
+          expectErrors(
+            validateSketch(sketch, FRESH),
+            errors.mathsInPlainText("t"),
+          );
+        },
+      ),
+    );
+    function answer(text: string): Sketch {
+      return {
+        objects: [{ kind: "text", id: "t", x: 800, y: 450, text, size: "s" }],
+        actions: [],
+      };
+    }
+  });
+});
+
+describe("boxGap (property)", () => {
+  const box = fc
+    .record({
+      x0: fc.integer({ min: -500, max: 2000 }),
+      y0: fc.integer({ min: -500, max: 2000 }),
+      w: fc.integer({ min: 1, max: 800 }),
+      h: fc.integer({ min: 1, max: 800 }),
+    })
+    .map(({ x0, y0, w, h }) => ({ x0, y0, x1: x0 + w, y1: y0 + h }));
+  const overlap = (a: Box, b: Box) =>
+    a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+
+  it("is symmetric", () => {
+    fc.assert(
+      fc.property(box, box, (a, b) => {
+        expect(boxGap(a, b)).toBe(boxGap(b, a));
+      }),
+    );
+  });
+
+  it("is at least 0 exactly when the boxes don't overlap", () => {
+    fc.assert(
+      fc.property(box, box, (a, b) => {
+        expect(boxGap(a, b) >= 0).toBe(!overlap(a, b));
+      }),
+    );
+  });
+
+  it("is the distance between two boxes side by side", () => {
+    fc.assert(
+      fc.property(box, fc.integer({ min: 0, max: 500 }), (a, d) => {
+        const b = { ...a, x0: a.x1 + d, x1: a.x1 + d + (a.x1 - a.x0) };
+        expect(boxGap(a, b)).toBe(d);
+      }),
     );
   });
 });

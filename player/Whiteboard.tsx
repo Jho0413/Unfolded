@@ -5,8 +5,8 @@
 // Moves are already interpolated by sceneAt, and arrows resolve their ends
 // on the state, so they follow what they point at.
 //
-// A Q&A sketch's objects (`sketchIds`) go in their own layer, drawn in the
-// answer blue; while there are any, the lesson's layer dims (player/theme.css).
+// A Q&A sketch is drawn the same way, in the lesson's own look, on a board of
+// its own (the Answer view, app/lesson/[lessonId]/AnswerView.tsx).
 import type { BoardState } from "@/shared/scene";
 import { CANVAS } from "@/shared/scene";
 import { partKey } from "./sceneAt";
@@ -21,21 +21,15 @@ type ObjectState = BoardState["objects"][number];
 export function Whiteboard({
   state,
   className,
-  sketchIds,
 }: {
   state: BoardState;
   className?: string;
-  /** Objects a Q&A sketch drew (ARCHITECTURE.md section 8). */
-  sketchIds?: ReadonlySet<string>;
 }) {
   const { objects, copies } = state;
   const byId = new Map(objects.map((s) => [s.object.id, s]));
-  const inSketch = (id: string) => sketchIds?.has(id) ?? false;
-  const sketching = objects.some((s) => inSketch(s.object.id));
   return (
     <svg
       data-testid="whiteboard"
-      data-sketching={sketching}
       className={className}
       viewBox={`0 0 ${CANVAS.w} ${CANVAS.h}`}
       role="img"
@@ -44,29 +38,12 @@ export function Whiteboard({
       fontFamily={FONT}
     >
       <rect width={CANVAS.w} height={CANVAS.h} fill={BOARD_BG} />
-      <g data-layer="main">
-        <Layer
-          state={state}
-          byId={byId}
-          objects={objects.filter((s) => !inSketch(s.object.id))}
-          copies={copies.filter((c) => !inSketch(c.source.id))}
-        />
-      </g>
-      {sketching && (
-        <g data-layer="sketch">
-          <Layer
-            state={state}
-            byId={byId}
-            objects={objects.filter((s) => inSketch(s.object.id))}
-            copies={copies.filter((c) => inSketch(c.source.id))}
-          />
-        </g>
-      )}
+      <Layer state={state} byId={byId} objects={objects} copies={copies} />
     </svg>
   );
 }
 
-/** One layer: its objects, then their moved copies, then their arrows. */
+/** The objects, then their moved copies, then their arrows. */
 function Layer({
   state,
   byId,

@@ -26,6 +26,11 @@ export type FakeTurn = {
   /** Called before the reply; its result is recorded in `toolCalls`. */
   tool?: { name: ClientToolName; params: Record<string, unknown> };
   reply: string;
+  /**
+   * Speak the reply first, then call the tool and wait for it, as the real agent does with
+   * draw_scene ("Let me sketch that." while the sketch is made, ARCHITECTURE.md section 8).
+   */
+  speakFirst?: boolean;
 };
 
 export const FAKE_GREETING = "Hi! What would you like to know?";
@@ -74,6 +79,7 @@ export const DEFAULT_SCRIPT: readonly FakeTurn[] = [
       params: { description: "Circle the first row of q", fresh: false },
     },
     reply: "Let me sketch that while I explain.",
+    speakFirst: true,
   },
   {
     match: /.*/,
@@ -194,15 +200,20 @@ export class FakeConversation {
     if (!turn) return;
     // The agent speaks its reply; a no-wait tool is called during it, as the real agent does.
     this.callbacks.onAgentSpeaking?.(true);
+    const speak = async () => {
+      await tick();
+      if (this.status !== "connected") return false;
+      this.emit({ role: "agent", text: turn.reply });
+      return true;
+    };
+    if (turn.speakFirst && !(await speak())) return;
     if (turn.tool) {
       const { name } = turn.tool;
       const params = toolParams(turn, text, this.contextUpdates.at(-1));
       const result = await callTool(this.tools, name, params);
       this.toolCalls.push({ name, params, result });
     }
-    await tick();
-    if (this.status !== "connected") return;
-    this.emit({ role: "agent", text: turn.reply });
+    if (!turn.speakFirst && !(await speak())) return;
     await tick();
     if (this.status === "connected") this.callbacks.onAgentSpeaking?.(false);
   }

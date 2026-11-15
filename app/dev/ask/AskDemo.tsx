@@ -177,7 +177,8 @@ export function AskDemo({ replay }: { replay: boolean }) {
           machine.addAction(a);
           setHighlights((h) => [...h, a]);
         },
-        drawSketch: machine.addSketch,
+        // Every drawn answer is fresh (qa/drawScene.ts).
+        drawSketch: (sketch) => machine.addSketch(sketch, true),
         ...ask,
         send,
         isAsking: () => machine.get().state.kind === "asking",

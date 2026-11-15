@@ -8,6 +8,7 @@ import {
   type ObjectState,
   type PartCopy,
 } from "@/shared/scene";
+import { MATRIX_FRAME } from "@/shared/boxes";
 import { partKey } from "@/player/sceneAt";
 import {
   CELL_FONT,
@@ -22,9 +23,12 @@ import {
   opacityAttr,
 } from "./style";
 
-const BRACKET_GAP = 6;
-const BRACKET_SERIF = 10;
-const LABEL_FONT = 28;
+const {
+  bracketGap: BRACKET_GAP,
+  bracketSerif: BRACKET_SERIF,
+  labelFont: LABEL_FONT,
+  labelLift: LABEL_LIFT,
+} = MATRIX_FRAME;
 
 interface CellProps {
   matrix: MatrixObject;
@@ -147,7 +151,7 @@ export function Matrix({
         <text
           data-label
           x={matrix.x + w / 2}
-          y={matrix.y - BRACKET_GAP - 18}
+          y={matrix.y - BRACKET_GAP - LABEL_LIFT}
           textAnchor="middle"
           fontSize={LABEL_FONT}
           fontWeight={600}

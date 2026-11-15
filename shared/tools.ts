@@ -68,8 +68,8 @@ export const CLIENT_TOOLS = [
   {
     name: "draw_scene",
     description:
-      "Sketch something on the board. Returns nothing: describe it aloud while it appears.",
-    expectsResponse: false,
+      "Sketch an answer on a clean answer board. Waits until it is drawn, then returns what is on the board (or why it couldn't be drawn): explain the drawing only after that.",
+    expectsResponse: true,
     parameters: DrawSceneParams,
   },
   {

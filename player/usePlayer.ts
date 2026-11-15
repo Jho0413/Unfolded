@@ -21,7 +21,7 @@ import {
   useState,
 } from "react";
 import type { StepResponse } from "@/shared/lesson";
-import type { BoardState } from "@/shared/scene";
+import { type BoardState, EMPTY_BOARD } from "@/shared/scene";
 import {
   canSend,
   isPlayPauseKey,
@@ -53,7 +53,6 @@ interface Clock {
   tMs: number;
 }
 
-const EMPTY_BOARD: BoardState = { objects: [], copies: [], active: [] };
 const NO_TIMED: readonly TimedAction[] = [];
 
 export interface Player {

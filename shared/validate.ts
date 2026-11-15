@@ -3,6 +3,14 @@
 // draws, so it must stay free of node-only imports.
 import katex from "katex";
 import type { z } from "zod";
+import {
+  type Box,
+  boxGap,
+  boxInside,
+  objectBox,
+  TEXT_SIZE,
+  textBox,
+} from "./boxes";
 import { KATEX_OPTIONS } from "./latex";
 import {
   type Action,
@@ -19,7 +27,21 @@ import {
 } from "./scene";
 
 export type ValidationResult<T> =
-  { ok: true; value: T } | { ok: false; errors: string[] };
+  | {
+      ok: true;
+      value: T;
+      /** Problems that don't stop it (a sketch's tight spacing, section 4), for the log. */
+      warnings?: string[];
+    }
+  | {
+      ok: false;
+      errors: string[];
+      /**
+       * Present when no error is hard, only overlaps (a sketch's, ARCHITECTURE.md section 4):
+       * the value can still be drawn, and `count` is how many overlaps it has.
+       */
+      softOnly?: { value: T; count: number };
+    };
 
 export interface StepLimits {
   /** `config.maxNarrationChars`, passed in so this file stays out of server-only lib/. */
@@ -80,7 +102,68 @@ export const errors = {
   narrationTooLong: () => "narration too long",
   narrationEmpty: () => "narration empty",
   cantAnchorToArrow: (id: string) => `can't anchor to "${id}"`,
+  tooManyObjects: (n: number) =>
+    `too many objects (${n}; an answer board takes at most ${ANSWER_TEMPLATE.maxContent} besides its arrows)`,
+  tooManyArrows: (n: number) =>
+    `too many arrows (${n}; an answer board takes at most ${ANSWER_TEMPLATE.maxArrows})`,
+  outsideAnswerArea: (id: string) => `outside the answer area "${id}"`,
+  tooClose: (a: string, b: string, gap: number) =>
+    `"${a}" and "${b}" are too close (leave ${gap} between them)`,
+  overlap: (a: string, b: string, gap: number) =>
+    `"${a}" and "${b}" overlap (leave ${gap} between them)`,
+  mathsInPlainText: (id: string) =>
+    `"_" or "^" in plain text "${id}" (write maths as a latex object)`,
 } as const;
+
+/** One line of text, a title or a takeaway, centred at x, y in a text size. */
+type TemplateLine = { x: number; y: number; size: keyof typeof TEXT_SIZE };
+
+const TITLE: TemplateLine = { x: 800, y: 110, size: "m" };
+const TAKEAWAY: TemplateLine = { x: 800, y: 810, size: "s" };
+const GAP = 40;
+/** Half a line of text in `size`: how far a line's box reaches above and below its y. */
+const halfLine = (line: TemplateLine) =>
+  textBox("", TEXT_SIZE[line.size]).h / 2;
+
+/**
+ * A fresh sketch is a drawn answer on its own clean board, the Answer view (ARCHITECTURE.md
+ * sections 5.6 and 8), laid out from one template: a short title at the top centre, the
+ * content in one row or column inside the content area, an optional one-line takeaway under
+ * it. The content area is the space the title and takeaway leave with `gap` around them, so
+ * a layout that follows the template always passes. The prompt describes it from these
+ * numbers, and checkSketch holds a fresh sketch to the counts and `area`, and asks for `gap`
+ * between any two objects' estimated boxes (shared/boxes.ts; an arrow shows in it too). The
+ * gap is soft: boxes that overlap are retried, and drawn anyway if the retry is no better
+ * (validateSketch's `softOnly`); boxes closer than `gap` without touching are only a warning. The area keeps clear of the Answer view's tag and chip above it
+ * (app/lesson/[lessonId]/AnswerView.module.css).
+ */
+export const ANSWER_TEMPLATE = {
+  /** Objects other than arrows: texts, formulas and matrices, the title and takeaway included. */
+  maxContent: 10,
+  maxArrows: 6,
+  /**
+   * Starts 70 down, leaving the Answer view's tag and chip a strip above it, and a title
+   * nudged up from its spot (a real one sat at y 100) still inside.
+   */
+  area: { x0: 120, y0: 70, x1: 1480, y1: 860 },
+  title: TITLE,
+  content: {
+    x0: 200,
+    y0: Math.ceil(TITLE.y + halfLine(TITLE) + GAP),
+    x1: 1400,
+    y1: Math.floor(TAKEAWAY.y - halfLine(TAKEAWAY) - GAP),
+  },
+  takeaway: TAKEAWAY,
+  gap: GAP,
+} as const satisfies {
+  maxContent: number;
+  maxArrows: number;
+  gap: number;
+  area: Box;
+  content: Box;
+  title: TemplateLine;
+  takeaway: TemplateLine;
+};
 
 function schemaErrors(error: z.ZodError): string[] {
   return error.issues.map((issue) => {
@@ -303,11 +386,17 @@ export function validateStep(
 // ---------------------------------------------------------------- sketch
 
 /**
- * The rules zod can't express, for a sketch that already passed the schema.
- * Known ids are the sketch's own objects plus the board's (none if `fresh`).
+ * The rules zod can't express, for a sketch that already passed the schema: hard errors (the
+ * sketch can't be drawn), and a fresh sketch's spacing, `overlap` (boxes that touch or
+ * intersect: retried, but drawable if no better one comes) and `tight` (closer than the gap
+ * without touching: drawn, with a warning). Known ids are the sketch's own objects plus the
+ * board's (none if `fresh`).
  */
-export function checkSketch(sketch: Sketch, ctx: SketchContext): string[] {
-  const out: string[] = [];
+export function sketchProblems(
+  sketch: Sketch,
+  ctx: SketchContext,
+): { hard: string[]; overlap: string[]; tight: string[] } {
+  const out: string[] = ctx.fresh ? checkAnswerLayout(sketch) : [];
   const boardObjects = ctx.fresh ? [] : ctx.board.objects.map((s) => s.object);
   const objects = byId(sketch.objects, boardObjects);
   checkObjects(
@@ -318,7 +407,95 @@ export function checkSketch(sketch: Sketch, ctx: SketchContext): string[] {
   );
   for (const action of sketch.actions)
     out.push(...checkAction(action, objects));
-  return unique(out);
+  const gaps = ctx.fresh
+    ? checkGaps(sketch.objects)
+    : { overlap: [], tight: [] };
+  return { hard: unique(out), ...gaps };
+}
+
+/** Every rule zod can't express, hard and soft, for a sketch that passed the schema. */
+export function checkSketch(sketch: Sketch, ctx: SketchContext): string[] {
+  const { hard, overlap, tight } = sketchProblems(sketch, ctx);
+  return [...hard, ...overlap, ...tight];
+}
+
+/** Underscores and carets are maths, which plain text shows raw ("d_k"). */
+const PLAIN_MATHS_RE = /[_^]/;
+
+/**
+ * The answer template's rules for a fresh sketch: at most `maxContent` objects besides at
+ * most `maxArrows` arrows, each one's
+ * estimated box (and an arrow's point ends) inside `area` with room around it, and no maths
+ * in plain text (text, labels, matrix cells, and the values written into them).
+ */
+function checkAnswerLayout(sketch: Sketch): string[] {
+  const out: string[] = [];
+  const { maxContent, maxArrows, area } = ANSWER_TEMPLATE;
+  const arrows = sketch.objects.filter((o) => o.kind === "arrow").length;
+  const content = sketch.objects.length - arrows;
+  if (content > maxContent) out.push(errors.tooManyObjects(content));
+  if (arrows > maxArrows) out.push(errors.tooManyArrows(arrows));
+  const inArea = (p: { x: number; y: number }) =>
+    boxInside({ x0: p.x, y0: p.y, x1: p.x, y1: p.y }, area);
+  for (const obj of sketch.objects) {
+    const box = objectBox(obj);
+    const inside =
+      obj.kind === "arrow"
+        ? [obj.from, obj.to].every((a) => !isPoint(a) || inArea(a))
+        : box !== undefined && boxInside(box, area);
+    if (!inside) out.push(errors.outsideAnswerArea(obj.id));
+    if (plainTexts(obj).some((t) => PLAIN_MATHS_RE.test(t)))
+      out.push(errors.mathsInPlainText(obj.id));
+  }
+  for (const action of sketch.actions) {
+    if (action.do === "write" && PLAIN_MATHS_RE.test(action.value))
+      out.push(errors.mathsInPlainText(action.target.id));
+    if (action.do === "move" && isPoint(action.to) && !inArea(action.to))
+      out.push(errors.outsideAnswerArea(action.target.id));
+  }
+  return out;
+}
+
+/**
+ * Every two boxed objects at least `gap` apart. Soft: spacing never stops a drawing alone.
+ * Boxes that touch or intersect are an overlap; closer than `gap` without touching, tight.
+ */
+function checkGaps(objects: readonly BoardObject[]): {
+  overlap: string[];
+  tight: string[];
+} {
+  const { gap } = ANSWER_TEMPLATE;
+  const boxed = objects.flatMap((obj) => {
+    const box = objectBox(obj);
+    return box === undefined ? [] : [{ id: obj.id, box }];
+  });
+  const overlap: string[] = [];
+  const tight: string[] = [];
+  boxed.forEach((a, i) => {
+    for (const b of boxed.slice(0, i)) {
+      const between = boxGap(a.box, b.box);
+      // Estimated boxes are fractional: a gap a rounding error short still counts.
+      if (between <= 0) overlap.push(errors.overlap(b.id, a.id, gap));
+      else if (between < gap - 1e-6)
+        tight.push(errors.tooClose(b.id, a.id, gap));
+    }
+  });
+  return { overlap, tight };
+}
+
+/** What an object shows as plain text, not LaTeX. */
+function plainTexts(obj: BoardObject): string[] {
+  switch (obj.kind) {
+    case "text":
+      return [obj.text];
+    case "matrix":
+      return [...(obj.label ? [obj.label] : []), ...obj.rows.flat()];
+    case "arrow":
+      return obj.label ? [obj.label] : [];
+    case "latex":
+    case "image":
+      return [];
+  }
 }
 
 export function validateSketch(
@@ -327,8 +504,18 @@ export function validateSketch(
 ): ValidationResult<Sketch> {
   const parsed = Sketch.safeParse(input);
   if (!parsed.success) return { ok: false, errors: schemaErrors(parsed.error) };
-  const errs = checkSketch(parsed.data, ctx);
-  return errs.length
-    ? { ok: false, errors: errs }
-    : { ok: true, value: parsed.data };
+  const { hard, overlap, tight } = sketchProblems(parsed.data, ctx);
+  if (hard.length === 0 && overlap.length === 0)
+    return {
+      ok: true,
+      value: parsed.data,
+      ...(tight.length > 0 && { warnings: tight }),
+    };
+  return {
+    ok: false,
+    errors: [...hard, ...overlap, ...tight],
+    ...(hard.length === 0 && {
+      softOnly: { value: parsed.data, count: overlap.length },
+    }),
+  };
 }

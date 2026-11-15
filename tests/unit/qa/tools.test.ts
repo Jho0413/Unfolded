@@ -10,7 +10,9 @@ import {
   transition,
 } from "@/player/machine";
 import {
+  ANSWER_SHOWING,
   ASK_CLOSED,
+  BACK_WHERE_STOPPED,
   createClientTools,
   type HighlightAction,
 } from "@/qa/tools";
@@ -85,7 +87,6 @@ function harness(
     askId: () => 1,
     drawSketch: () => {},
     showNotice: () => {},
-    tellAgent: () => {},
     fetch: vi.fn(() => new Promise<Response>(() => {})),
     ...extra,
   });
@@ -98,6 +99,14 @@ const asking: PlayerState = {
 };
 
 describe("highlight", () => {
+  it(`while the Answer view is up: a no-op, "${ANSWER_SHOWING}"`, async () => {
+    const h = harness(asking, { answerShowing: () => true });
+    expect(await h.tools.highlight?.({ target_id: "label" })).toBe(
+      ANSWER_SHOWING,
+    );
+    expect(h.highlights).toEqual([]);
+  });
+
   it("highlights a whole object: ok", async () => {
     const h = harness(asking);
     expect(await h.tools.highlight?.({ target_id: "label" })).toBe("ok");
@@ -176,6 +185,24 @@ describe("go_to_step", () => {
   });
 });
 
+describe("go_to_step: the step the lesson stopped on (a real case, #90)", () => {
+  it("goes back where it stopped (as the Back to step N chip), not a restart", async () => {
+    const backToLesson = vi.fn();
+    const h = harness(asking, { stoppedStep: () => 0, backToLesson });
+    expect(await h.tools.go_to_step?.({ step: 1 })).toBe(BACK_WHERE_STOPPED);
+    expect(backToLesson).toHaveBeenCalledOnce();
+    expect(h.state()).toEqual(asking); // no goToStep: the step isn't loaded again
+  });
+
+  it("another step still jumps there", async () => {
+    const backToLesson = vi.fn();
+    const h = harness(asking, { stoppedStep: () => 0, backToLesson });
+    expect(await h.tools.go_to_step?.({ step: 2 })).toBe("ok");
+    expect(backToLesson).not.toHaveBeenCalled();
+    expect(h.state()).toEqual({ ...asking, goTo: 1 });
+  });
+});
+
 describe("a tool call that lands after Ask closed", () => {
   const paused: PlayerState = { kind: "paused", step: 0 };
 
@@ -248,12 +275,51 @@ describe("simplify_upcoming", () => {
 });
 
 describe("draw_scene", () => {
-  it("doesn't wait: returns nothing at once (qa/drawScene.ts does the rest)", () => {
-    const result = harness(asking).tools.draw_scene?.({
+  it("waits: resolves with what's drawn once the sketch is on the board (qa/drawScene.ts)", async () => {
+    const sketch = {
+      objects: [{ kind: "text", id: "t", x: 800, y: 400, text: "a box" }],
+      actions: [],
+    };
+    const drawSketch = vi.fn();
+    const { tools } = harness(asking, {
+      drawSketch,
+      fetch: vi.fn(async () => Response.json({ sketch })),
+    });
+    const result = await tools.draw_scene?.({
       description: "a box",
       fresh: false,
     });
-    expect(result).toBeUndefined();
+    expect(drawSketch).toHaveBeenCalledOnce();
+    expect(result).toMatch(/^Drawn: .*text "a box"/);
+  });
+
+  it(`after Ask closed: "${ASK_CLOSED}", nothing requested`, async () => {
+    const fetch = vi.fn();
+    const { tools } = harness({ kind: "playing", step: 0 }, { fetch });
+    expect(
+      await tools.draw_scene?.({ description: "a box", fresh: false }),
+    ).toBe(ASK_CLOSED);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("asks for a fresh answer board even when the agent passed fresh: false", () => {
+    const fetch = vi.fn(() => new Promise<Response>(() => {}));
+    const tools = createClientTools({
+      board: () => board,
+      highlight: () => {},
+      send: () => ({ outcome: "ignored", state: asking }),
+      isAsking: () => true,
+      askId: () => 1,
+      drawSketch: () => {},
+      showNotice: () => {},
+      fetch,
+    });
+    tools.draw_scene?.({ description: "a box", fresh: false });
+    const init = (fetch.mock.calls[0] as unknown[])[1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      fresh: true,
+      board: { objects: [] },
+    });
   });
 });
 

@@ -5,13 +5,12 @@
 import "katex/dist/katex.min.css";
 import type { ActiveAction, LatexObject, ObjectState } from "@/shared/scene";
 import { renderLatex } from "./katex";
+import { LATEX_FONT, LATEX_PAD } from "@/shared/boxes";
 import {
   HIGHLIGHT,
   INK,
   LATEX_BOX,
   LATEX_ERROR,
-  LATEX_FONT,
-  LATEX_PAD,
   fadeOpacity,
   highlightAttr,
   objectProgress,

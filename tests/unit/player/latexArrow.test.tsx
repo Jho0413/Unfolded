@@ -6,14 +6,16 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { FIXED, sceneState } from "@/app/dev/board/scenes";
 import { Whiteboard } from "@/player/Whiteboard";
-import { estimateSize, renderLatex } from "@/player/primitives/katex";
+import { renderLatex } from "@/player/primitives/katex";
 import { arrowGeometry, targetBox } from "@/player/primitives/arrowGeometry";
 import {
-  ARROW,
-  LATEX_ERROR,
+  estimateSize,
+  latexSize,
+  MATRIX_FRAME,
   TEXT_SIZE,
   textBox,
-} from "@/player/primitives/style";
+} from "@/shared/boxes";
+import { ARROW, LATEX_ERROR } from "@/player/primitives/style";
 import {
   type Anchor,
   type BoardState,
@@ -44,6 +46,38 @@ describe("arrowGeometry", () => {
     // Diagonal through the corner region: the nearer edge wins (half height / sin).
     const d = arrowGeometry({ x: 0, y: 0 }, { x: 100, y: 100 }, box)!;
     expect(Math.hypot(d.x1, d.y1)).toBeCloseTo(10 * Math.SQRT2 + ARROW.margin);
+  });
+
+  it("a box reaching further up (a matrix's label): only an arrow end on its top side stops above it", () => {
+    const labelled = { ...box, above: 30 };
+    // Coming down into it: stops above the label (half height 10 + 30).
+    const down = arrowGeometry(
+      { x: 0, y: 0 },
+      { x: 0, y: 200 },
+      box,
+      labelled,
+    )!;
+    expect(down.head.startsWith(`0,${200 - 40 - ARROW.margin} `)).toBe(true);
+    // Leaving it upwards: starts above the label.
+    const up = arrowGeometry({ x: 0, y: 200 }, { x: 0, y: 0 }, labelled)!;
+    expect(up.y1).toBe(200 - 40 - ARROW.margin);
+    // From the side or below: the label changes nothing.
+    const side = arrowGeometry(
+      { x: 0, y: 0 },
+      { x: 200, y: 0 },
+      box,
+      labelled,
+    )!;
+    expect(side.head.startsWith(`${200 - 20 - ARROW.margin},0 `)).toBe(true);
+    const below = arrowGeometry({ x: 0, y: 0 }, { x: 0, y: 200 }, labelled)!;
+    expect(below.y1).toBe(10 + ARROW.margin);
+  });
+
+  it("an arrow with room for ARROW.minLength: its ends stay outside both boxes", () => {
+    // 100 long, 2 x 30 of insets: 40 left, more than minLength.
+    const g = arrowGeometry({ x: 0, y: 0 }, { x: 100, y: 0 }, box, box)!;
+    expect(g.x1).toBe(30);
+    expect(g.head.startsWith("70,0 ")).toBe(true);
   });
 
   it("a short arrow: insets take at most half its length", () => {
@@ -81,7 +115,7 @@ describe("arrowGeometry", () => {
     expect(v.label.x).toBeCloseTo(-(ARROW.labelGap + 40));
   });
 
-  it("property: start, head base and tip run in order along from -> to, insets take at most half, the label is above the line and its box clears it", () => {
+  it("property: start, head base and tip run in order along from -> to, insets leave ARROW.minLength (or half), the label is above the line and its box clears it", () => {
     const coord = fc.double({ min: 0, max: 1600, noNaN: true });
     const size = fc.option(
       fc.record({
@@ -125,7 +159,8 @@ describe("arrowGeometry", () => {
             start <= base + eps &&
             base <= tip + eps &&
             tip <= len + eps &&
-            start + (len - tip) <= len / 2 + eps &&
+            start + (len - tip) <=
+              Math.max(len / 2, len - ARROW.minLength) + eps &&
             g.label.y <= midY + eps &&
             distance >= across + ARROW.labelGap - 1e-6
           );
@@ -151,13 +186,55 @@ describe("estimateSize", () => {
   });
 });
 
+describe("latexSize: a matrix is as wide as its widest row, not all its cells", () => {
+  const bmatrix = (rows: string[][]) =>
+    `\\begin{bmatrix}${rows.map((r) => r.join("&")).join("\\\\")}\\end{bmatrix}`;
+
+  it("more rows of the same cells: as wide", () => {
+    const row = [["1", "22", "3"]];
+    const three = [row[0], ["4", "5", "6"], ["7", "8", "9"]];
+    expect(latexSize(bmatrix(three)).w).toBe(latexSize(bmatrix(row)).w);
+    expect(latexSize(bmatrix(three)).h).toBeGreaterThan(
+      latexSize(bmatrix(row)).h,
+    );
+  });
+
+  it("a 4 x 3 matrix is far narrower than counting every cell", () => {
+    const tex = bmatrix([
+      ["10", "20", "30"],
+      ["40", "50", "60"],
+      ["70", "80", "90"],
+      ["11", "12", "13"],
+    ]);
+    const counted = estimateSize(renderLatex(tex).html!).w;
+    expect(latexSize(tex).w).toBeLessThan(counted * 0.7);
+  });
+
+  it("a wider cell widens its column, and text beside the matrix counts too", () => {
+    const narrow = latexSize(bmatrix([["1", "2"]])).w;
+    expect(latexSize(bmatrix([["1000", "2"]])).w).toBeGreaterThan(narrow);
+    expect(latexSize(`A=${bmatrix([["1", "2"]])}`).w).toBeGreaterThan(narrow);
+  });
+
+  it("the board uses the same estimate (renderLatex's size)", () => {
+    const tex = bmatrix([
+      ["1", "2"],
+      ["3", "4"],
+    ]);
+    expect(renderLatex(tex).size).toEqual(latexSize(tex));
+  });
+});
+
 describe("targetBox", () => {
   it("points have no box; matrices, their parts, texts, latex and images do", () => {
     expect(targetBox(FIXED, { x: 1, y: 1 })).toBe(undefined);
     expect(targetBox(FIXED, { id: "nope" })).toBe(undefined);
+    // A whole matrix reaches up to its label's top too, so arrows stop above the label.
+    const { bracketGap, labelLift, labelFont } = MATRIX_FRAME;
     expect(targetBox(FIXED, { id: "m" })).toEqual({
       w: 3 * CELL.w,
       h: 3 * CELL.h,
+      above: bracketGap + labelLift + labelFont,
     });
     expect(targetBox(FIXED, { id: "m", row: 1 })).toEqual({
       w: 3 * CELL.w,

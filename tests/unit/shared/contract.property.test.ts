@@ -204,7 +204,7 @@ describe("client tools (ARCHITECTURE.md section 8)", () => {
     expect(waits).toEqual({
       highlight: true,
       go_to_step: true,
-      draw_scene: false,
+      draw_scene: true, // waits for the drawing (#90), so the agent explains what's drawn
       simplify_upcoming: false,
       resume_lesson: false,
       pause_lesson: false,

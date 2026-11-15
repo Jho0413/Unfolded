@@ -14,6 +14,7 @@ import {
   type FakeReply,
 } from "@/lib/fakes/claude";
 import { ApiError, SKETCH_FAILED, SketchResponse } from "@/shared/lesson";
+import { ANSWER_TEMPLATE, errors } from "@/shared/validate";
 import {
   type BoardState,
   type ObjectState,
@@ -121,6 +122,207 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   resetEnvForTests();
+});
+
+describe("POST /api/sketch: a fresh answer and its template (#90)", () => {
+  /** A valid answer board: a title and a formula. */
+  const ANSWER: Sketch = {
+    objects: [
+      { kind: "text", id: "title", x: 800, y: 110, text: "Why scale?" },
+      { kind: "latex", id: "f", x: 800, y: 450, tex: "\\frac{40}{8}=5" },
+    ],
+    actions: [{ do: "show", target: { id: "f" }, durationMs: 400, atMs: 0 }],
+  };
+  /** The research run's failure: d_k in plain text, and an object off the area. */
+  const SCATTERED: Sketch = {
+    objects: [
+      { kind: "text", id: "title", x: 800, y: 110, text: "Why divide by d_k?" },
+      { kind: "latex", id: "f", x: 1560, y: 450, tex: "\\frac{40}{8}=5" },
+    ],
+    actions: [],
+  };
+
+  /** Two formulas about 37 apart, not touching: tight spacing, only a warning. */
+  const CRAMPED: Sketch = {
+    objects: [
+      { kind: "text", id: "title", x: 800, y: 110, text: "Why scale?" },
+      { kind: "latex", id: "f", x: 700, y: 450, tex: "x" },
+      { kind: "latex", id: "g", x: 760, y: 450, tex: "y" },
+    ],
+    actions: [],
+  };
+  /** Two formulas whose boxes overlap: retried, but still drawable. */
+  const OVERLAPPING: Sketch = {
+    ...CRAMPED,
+    objects: [
+      CRAMPED.objects[0],
+      { kind: "latex", id: "f", x: 700, y: 450, tex: "x" },
+      { kind: "latex", id: "g", x: 715, y: 450, tex: "y" },
+    ],
+  };
+  /** A third formula over the second: more overlaps. */
+  const MORE_OVERLAPPING: Sketch = {
+    ...OVERLAPPING,
+    objects: [
+      ...OVERLAPPING.objects,
+      { kind: "latex", id: "h", x: 730, y: 450, tex: "z" },
+    ],
+  };
+
+  it("tight spacing only: 200 with the first attempt, no retry, and a warning", async () => {
+    const logs = quietLogs();
+    const fake = script(reply(CRAMPED));
+    const res = await post({ description: "why", fresh: true, board: EMPTY });
+    expect(res.status).toBe(200);
+    expect(SketchResponse.parse(await res.json()).sketch).toEqual(CRAMPED);
+    expect(fake.calls).toHaveLength(1);
+    expect(logs.warned()).toContain(
+      errors.tooClose("f", "g", ANSWER_TEMPLATE.gap),
+    );
+  });
+
+  it("an overlap: retried once with the feedback, 200 with a valid retry", async () => {
+    quietLogs();
+    const fake = script(reply(OVERLAPPING), reply(ANSWER));
+    const res = await post({ description: "why", fresh: true, board: EMPTY });
+    expect(res.status).toBe(200);
+    expect(SketchResponse.parse(await res.json()).sketch).toEqual(ANSWER);
+    expect(fake.calls).toHaveLength(2);
+    expect(fake.calls[1].body.messages.at(-1)?.content).toContain(
+      errors.overlap("f", "g", ANSWER_TEMPLATE.gap),
+    );
+  });
+
+  it("overlaps twice: 200 with the attempt with fewer overlaps, and a warning", async () => {
+    const logs = quietLogs();
+    const fake = script(reply(OVERLAPPING), reply(MORE_OVERLAPPING));
+    const res = await post({ description: "why", fresh: true, board: EMPTY });
+    expect(res.status).toBe(200);
+    expect(SketchResponse.parse(await res.json()).sketch).toEqual(OVERLAPPING);
+    expect(fake.calls).toHaveLength(2);
+    expect(logs.warned()).toContain("used with soft problems only");
+  });
+
+  it("overlaps, then the retry times out: 200 with the first attempt, not Couldn't draw that", async () => {
+    // A real case (2026-11-15): the layout retry hit the 20 s timeout and the answer was lost.
+    const logs = quietLogs();
+    const fake = script(reply(OVERLAPPING), new Anthropic.APIUserAbortError());
+    const res = await post({ description: "why", fresh: true, board: EMPTY });
+    expect(res.status).toBe(200);
+    expect(SketchResponse.parse(await res.json()).sketch).toEqual(OVERLAPPING);
+    expect(fake.calls).toHaveLength(2);
+    expect(logs.warned()).toContain("retry failed, using the first attempt");
+  });
+
+  it("a hard problem, then the retry times out: 502 Couldn't draw that", async () => {
+    quietLogs();
+    const hardFirst: Sketch = {
+      ...CRAMPED,
+      objects: [{ kind: "text", id: "t", x: 20, y: 400, text: "far left" }],
+    };
+    script(reply(hardFirst), new Anthropic.APIUserAbortError());
+    await expectFailed(
+      await post({ description: "why", fresh: true, board: EMPTY }),
+      502,
+    );
+  });
+
+  it("hard, then overlaps only: 200 with the second", async () => {
+    quietLogs();
+    const hardFirst: Sketch = {
+      ...CRAMPED,
+      // Outside the answer area: a hard error.
+      objects: [{ kind: "text", id: "t", x: 20, y: 400, text: "far left" }],
+    };
+    script(reply(hardFirst), reply(OVERLAPPING));
+    const res = await post({ description: "why", fresh: true, board: EMPTY });
+    expect(res.status).toBe(200);
+    expect(SketchResponse.parse(await res.json()).sketch).toEqual(OVERLAPPING);
+  });
+
+  it("rejected twice: the second attempt's output goes to the server log", async () => {
+    const logs = quietLogs();
+    script(reply(SCATTERED), reply(SCATTERED));
+    const res = await post({ description: "why", fresh: true, board: EMPTY });
+    await expectFailed(res, 502);
+    expect(logs.logged()).toContain("rejected output (second attempt)");
+    expect(logs.logged()).toContain('"Why divide by d_k?"');
+  });
+
+  it("a sketch breaking the template: retried once with the template's errors, 200 with the fixed one", async () => {
+    const logs = quietLogs();
+    const fake = script(reply(SCATTERED), reply(ANSWER));
+    const res = await post({
+      description: "why scale",
+      fresh: true,
+      board: EMPTY,
+    });
+    expect(res.status).toBe(200);
+    expect(SketchResponse.parse(await res.json()).sketch).toEqual(ANSWER);
+    const retry = fake.calls[1].body.messages.at(-1)?.content;
+    expect(retry).toContain(errors.outsideAnswerArea("f"));
+    // Its "d_k" title is repaired, not sent back as an error (shared/plainMaths.ts).
+    expect(retry).not.toContain(errors.mathsInPlainText("title"));
+    expect(logs.warned()).toContain(errors.outsideAnswerArea("f"));
+  });
+
+  it("maths written as plain text: repaired (d_k → dₖ), 200 at once, no retry", async () => {
+    quietLogs();
+    const plainMaths: Sketch = {
+      ...ANSWER,
+      objects: ANSWER.objects.map((o) =>
+        o.kind === "text" && o.id === ANSWER.objects[0].id
+          ? { ...o, text: "Why divide by d_k?" }
+          : o,
+      ),
+    };
+    const fake = script(reply(plainMaths));
+    const res = await post({ description: "why", fresh: true, board: EMPTY });
+    expect(res.status).toBe(200);
+    const sketch = SketchResponse.parse(await res.json()).sketch;
+    expect(JSON.stringify(sketch)).toContain("Why divide by dₖ?");
+    expect(JSON.stringify(sketch)).not.toMatch(/d_k/);
+    expect(fake.calls).toHaveLength(1);
+  });
+
+  it('the research request s3-mix, whose two answers wrote to "mix" with no value: Couldn\'t draw that (502), as before the fix', async () => {
+    // /tmp/sketch-research/req-s3-mix.json and resp-s3-mix.json (2026-11-14): the same
+    // rejection twice. The wire schema now lists every required field (atMs) before the
+    // optional ones (outputFormat.test.ts), so Claude can't write past a write's value.
+    const logs = quietLogs();
+    const noValue = {
+      objects: [
+        {
+          kind: "matrix",
+          id: "mix",
+          x: 600,
+          y: 420,
+          rows: [["", ""]],
+          label: "output",
+        },
+      ],
+      actions: [
+        {
+          do: "write",
+          target: { id: "mix", row: 0, col: 0 },
+          durationMs: 400,
+          atMs: 4300,
+        },
+      ],
+    };
+    const fake = script(reply(noValue), reply(noValue));
+    const res = await post({
+      description:
+        "Show how the weights 0.88 and 0.12 mix the two rows of V into the output row, step by step.",
+      fresh: true,
+      board: EMPTY,
+    });
+    await expectFailed(res, 502);
+    expect(fake.calls[1].body.messages.at(-1)?.content).toContain(
+      'write needs value "mix"',
+    );
+    expect(logs.logged()).toContain('rejected twice: write needs value "mix"');
+  });
 });
 
 describe("POST /api/sketch: the sketch against the board", () => {

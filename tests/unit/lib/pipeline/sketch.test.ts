@@ -17,6 +17,8 @@ import {
   buildSketchRequest,
   type SketchRequestBody,
 } from "@/lib/pipeline/sketch";
+import { TEXT_CHAR_EM, TEXT_SIZE } from "@/shared/boxes";
+import { ANSWER_TEMPLATE } from "@/shared/validate";
 
 const REQ: SketchRequestBody = {
   description: "why the row goes with the column",
@@ -41,11 +43,11 @@ const userText = (req: SketchRequestBody) => {
 };
 
 describe("buildSketchRequest", () => {
-  it("uses the sketch model, low effort and the output cap from lib/config.ts", () => {
+  it("uses the sketch model, medium effort and the output cap from lib/config.ts", () => {
     const body = buildSketchRequest(REQ);
     expect(body.model).toBe(config.models.sketch);
-    expect(body.output_config?.effort).toBe("low");
-    expect(config.effort.sketch).toBe("low");
+    expect(body.output_config?.effort).toBe("medium");
+    expect(config.effort.sketch).toBe("medium");
     expect(body.max_tokens).toBe(config.sketch.maxTokens);
   });
 
@@ -121,6 +123,50 @@ describe("the sketch prompt", () => {
       expect(SKETCH_SYSTEM_PROMPT).toContain(part);
       expect(STEP_SYSTEM_PROMPT).toContain(part);
     }
+  });
+
+  it("never draws empty matrices as placeholders, and keeps arrows and their labels clear of other objects", () => {
+    for (const text of [
+      "never draw an empty matrix or empty brackets as a placeholder",
+      "draw it as a latex symbol instead, with its size in the formula",
+      "place objects so that line passes through no other object and no label",
+      "Its label sits beside the middle of the line, so leave free space there",
+    ])
+      expect(SKETCH_SYSTEM_PROMPT).toContain(text);
+  });
+
+  it("lays a fresh answer out from the validator's template: title, content area, takeaway, count, area and gaps", () => {
+    const { title, content, takeaway, area, maxContent, maxArrows, gap } =
+      ANSWER_TEMPLATE;
+    for (const text of [
+      `of size "${title.size}", a few words naming the idea, at x ${title.x}, y ${title.y}`,
+      `a text object of size "${takeaway.size}", at x ${takeaway.x}, y ${takeaway.y}`,
+      `from x ${content.x0} to ${content.x1} and y ${content.y0} to ${content.y1}`,
+      `at x ${takeaway.x}, y ${takeaway.y}`,
+      `At most ${maxContent} objects besides arrows`,
+      `at most ${maxArrows} arrows`,
+      `inside x ${area.x0} to ${area.x1} and y ${area.y0} to ${area.y1}`,
+      `at least ${gap} apart`,
+    ])
+      expect(SKETCH_SYSTEM_PROMPT).toContain(text);
+  });
+
+  it("gives the sizes the validator estimates with (shared/boxes.ts)", () => {
+    expect(SKETCH_SYSTEM_PROMPT).toContain(
+      `about ${TEXT_CHAR_EM} of its size wide per character`,
+    );
+    expect(SKETCH_SYSTEM_PROMPT).toContain(
+      `m ${TEXT_SIZE.m}, l ${TEXT_SIZE.l}`,
+    );
+  });
+
+  it("asks for maths as latex, never _ or ^ in plain text, and a value for every write", () => {
+    expect(SKETCH_SYSTEM_PROMPT).toContain(
+      'Never write "_" or "^" in a text, a label or a matrix cell',
+    );
+    expect(SKETCH_SYSTEM_PROMPT).toContain(
+      "Every write action needs its value.",
+    );
   });
 
   it("the retry prompt lists every error", () => {

@@ -138,7 +138,7 @@ export function PlayerStage({
           </div>
         )}
         {debug && <DebugOverlay tMs={tMs} lastCue={player.lastCue} />}
-        <div className={styles.dock}>
+        <div className={styles.dock} ref={trackDockHeight}>
           {card !== null && (
             <TutorCard
               view={card}
@@ -160,6 +160,21 @@ export function PlayerStage({
       />
     </section>
   );
+}
+
+/**
+ * Keeps `--dock-height` on the board at the dock's height, so a board that must stay clear of
+ * the dock (`data-clear-of-dock`, the Answer view) sits above the card however tall it grows
+ * (Player.module.css). A style property, not state: a resize doesn't re-render the stage.
+ */
+function trackDockHeight(dock: HTMLDivElement | null) {
+  const board = dock?.parentElement;
+  if (!dock || !board) return;
+  const observer = new ResizeObserver(() =>
+    board.style.setProperty("--dock-height", `${dock.offsetHeight}px`),
+  );
+  observer.observe(dock);
+  return () => observer.disconnect();
 }
 
 /** → next idea, ← back, R say that again (Space is usePlayer's, A the Ask panel's). */

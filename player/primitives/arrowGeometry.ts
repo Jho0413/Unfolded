@@ -8,33 +8,44 @@ import {
   isPoint,
   type Point,
 } from "@/shared/scene";
+import { objectBox, type Size, TEXT_SIZE, textBox } from "@/shared/boxes";
 import { renderLatex } from "./katex";
-import { ARROW, TEXT_SIZE, textBox } from "./style";
+import { ARROW } from "./style";
 
-/** A box's width and height, centred on an arrow end. */
-export interface Size {
-  w: number;
-  h: number;
-}
+/**
+ * What an arrow end stops at: a box centred on where the end resolves, and
+ * `above`, how much further it reaches up (a whole matrix's label), so an
+ * arrow coming from above stops over the label instead of crossing it.
+ */
+export type TargetBox = Size & { above?: number };
 
 /**
  * The box of what an arrow end names, centred on where it resolves: a matrix's
- * cells, the cells of a row, column or cell (or its moved copy, the same
- * size), a text's box, an image, or a formula's estimated box. Undefined for
- * a point (the arrow ends exactly on it) or an unknown target.
+ * cells (and its label above them), the cells of a row, column or cell (or its
+ * moved copy, the same size), a text's box, an image, or a formula's estimated
+ * box. Undefined for a point (the arrow ends exactly on it) or an unknown
+ * target.
  */
-export function targetBox(board: BoardState, anchor: Anchor): Size | undefined {
+export function targetBox(
+  board: BoardState,
+  anchor: Anchor,
+): TargetBox | undefined {
   if (isPoint(anchor)) return undefined;
   const object = board.objects.find((s) => s.object.id === anchor.id)?.object;
   switch (object?.kind) {
     case undefined:
     case "arrow": // validate.ts rejects arrows anchored to arrows
       return undefined;
-    case "matrix":
-      return {
+    case "matrix": {
+      const box = {
         w: (anchor.col === undefined ? object.rows[0].length : 1) * CELL.w,
         h: (anchor.row === undefined ? object.rows.length : 1) * CELL.h,
       };
+      const whole = anchor.row === undefined && anchor.col === undefined;
+      if (!whole || !object.label) return box;
+      // The label's top (shared/boxes.ts, as the validator spaces it) above the cells' top.
+      return { ...box, above: object.y - (objectBox(object)?.y0 ?? object.y) };
+    }
     case "text":
       return textBox(object.text, TEXT_SIZE[object.size ?? "m"]);
     case "latex":
@@ -44,10 +55,14 @@ export function targetBox(board: BoardState, anchor: Anchor): Size | undefined {
   }
 }
 
-/** How far from a box's centre, along unit direction (ux, uy), its edge is. */
-function toEdge(box: Size, ux: number, uy: number): number {
+/**
+ * How far from a box's centre, along unit direction (ux, uy), its edge is.
+ * The top edge is `above` further out.
+ */
+function toEdge(box: TargetBox, ux: number, uy: number): number {
+  const up = uy < 0 ? (box.above ?? 0) : 0;
   const x = ux === 0 ? Infinity : box.w / 2 / Math.abs(ux);
-  const y = uy === 0 ? Infinity : box.h / 2 / Math.abs(uy);
+  const y = uy === 0 ? Infinity : (box.h / 2 + up) / Math.abs(uy);
   return Math.min(x, y);
 }
 
@@ -69,15 +84,16 @@ export interface ArrowGeometry {
 /**
  * The arrow from `from` to `to`. An end with a box (see `targetBox`) stops
  * `ARROW.margin` outside it; an end without one is exact. `labelBox` is the
- * label's size, if there is one. Insets take at most
- * half the length between the ends, so a short arrow still shows. Undefined
+ * label's size, if there is one. Insets shrink when they would leave less than
+ * `ARROW.minLength` of the arrow, never below half the length between the
+ * ends, so a short arrow still shows. Undefined
  * when the ends coincide: there is no direction to draw.
  */
 export function arrowGeometry(
   from: Point,
   to: Point,
-  fromBox?: Size,
-  toBox?: Size,
+  fromBox?: TargetBox,
+  toBox?: TargetBox,
   labelBox?: Size,
 ): ArrowGeometry | undefined {
   const dx = to.x - from.x;
@@ -86,13 +102,16 @@ export function arrowGeometry(
   if (len < 1e-6) return undefined;
   const ux = dx / len;
   const uy = dy / len;
-  const inset = (box: Size | undefined) =>
-    box ? toEdge(box, ux, uy) + ARROW.margin : 0;
-  const insetFrom = inset(fromBox);
-  const insetTo = inset(toBox);
+  // Each end's edge, looking out from its centre: along the arrow from the
+  // start, back against it from the end.
+  const inset = (box: TargetBox | undefined, sx: number, sy: number) =>
+    box ? toEdge(box, sx, sy) + ARROW.margin : 0;
+  const insetFrom = inset(fromBox, ux, uy);
+  const insetTo = inset(toBox, -ux, -uy);
 
   const insets = insetFrom + insetTo;
-  const scale = insets > len / 2 ? len / 2 / insets : 1;
+  const room = Math.max(len / 2, len - ARROW.minLength);
+  const scale = insets > room ? room / insets : 1;
   const start = {
     x: from.x + ux * insetFrom * scale,
     y: from.y + uy * insetFrom * scale,

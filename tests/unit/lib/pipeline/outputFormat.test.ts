@@ -27,7 +27,7 @@ import {
   Step,
   TimedSketchAction,
 } from "@/shared/scene";
-import { errors } from "@/shared/validate";
+import { ANSWER_TEMPLATE, errors } from "@/shared/validate";
 
 const LIMITS = { maxNarrationChars: config.maxNarrationChars };
 
@@ -584,6 +584,28 @@ describe("validateWireStep / validateWireSketch", () => {
     });
   });
 
+  it("a fresh sketch with a conversion error and an overlap: not drawable (no softOnly)", () => {
+    const result = validateWireSketch(
+      {
+        objects: [
+          { kind: "latex", id: "f", x: 700, y: 450, tex: "x" },
+          { kind: "latex", id: "g", x: 715, y: 450, tex: "y" },
+        ],
+        actions: [
+          { do: "move", target: { id: "f" }, durationMs: 400, atMs: 0 },
+        ],
+      },
+      { board: EMPTY_BOARD, fresh: true },
+    );
+    expect(result).toStrictEqual({
+      ok: false,
+      errors: [
+        'move needs to "f"',
+        errors.overlap("f", "g", ANSWER_TEMPLATE.gap),
+      ],
+    });
+  });
+
   it("a valid sketch: the converted sketch", () => {
     const wire: WireSketch = {
       objects: [{ kind: "text", id: "t", x: 10, y: 10, text: "hi" }],
@@ -670,6 +692,24 @@ describe("output format size guard (#27)", () => {
     expect(bytes(zodOutputFormat(Sketch).schema)).toBeGreaterThan(
       SCHEMA_BUDGET_BYTES,
     );
+  });
+
+  // Structured output writes properties in the schema's order (s3-mix, #90: a write's value
+  // listed before the sketch's required atMs was skipped twice). Every required action field
+  // comes first, so Claude can always still add an optional one.
+  it("every wire action lists its required fields before its optional ones", () => {
+    for (const format of [STEP_OUTPUT_FORMAT, SKETCH_OUTPUT_FORMAT]) {
+      const actions = (format.schema.properties as Record<string, unknown>)
+        .actions as { items: { properties: object; required: string[] } };
+      const keys = Object.keys(actions.items.properties);
+      const required = new Set(actions.items.required);
+      const firstOptional = keys.findIndex((k) => !required.has(k));
+      expect(firstOptional).toBeGreaterThan(0);
+      expect(keys.slice(firstOptional).every((k) => !required.has(k))).toBe(
+        true,
+      );
+      expect(keys.slice(firstOptional)).toEqual(["color", "to", "value"]);
+    }
   });
 
   it("the wire schemas stay under the documented optional-property cap", () => {

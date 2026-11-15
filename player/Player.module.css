@@ -49,6 +49,8 @@
 }
 
 .board {
+  /* The dock floats this far above the board's bottom. */
+  --dock-bottom: 18px;
   position: relative;
   min-height: 0;
   background: var(--board) radial-gradient(var(--dots) 1.1px, transparent 1.1px)
@@ -65,6 +67,14 @@
   display: grid;
   place-items: center;
   container-type: size;
+}
+/* A board that must never be covered (the Answer view) sits above the dock's measured height
+   (--dock-height, Player.tsx trackDockHeight), as far above it as the board's own inset. */
+.board:has([data-clear-of-dock]) .drawing {
+  bottom: max(
+    var(--dock-reserve, 176px),
+    calc(var(--dock-height, 0px) + var(--dock-bottom) + 12px)
+  );
 }
 .fit {
   width: min(100cqw, calc(100cqh * 16 / 9));
@@ -96,7 +106,7 @@
 .dock {
   position: absolute;
   left: 50%;
-  bottom: 18px;
+  bottom: var(--dock-bottom);
   transform: translateX(-50%);
   width: min(720px, calc(100% - 36px));
   display: flex;
