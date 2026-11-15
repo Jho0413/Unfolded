@@ -1510,13 +1510,21 @@ describe("wire object errors name the field and the rule", () => {
     ).toStrictEqual({ ok: false, errors: [`objects.0.rows.0: ${TOO_WIDE}`] });
   });
 
-  it("the discriminated unions send the same grammar as a plain union of the same kinds", () => {
-    const plain = (options: readonly z.ZodType[]) =>
-      zodOutputFormat(z.object({ objects: z.array(z.union(options)) })).schema;
-    const wire = (union: z.ZodType) =>
-      zodOutputFormat(z.object({ objects: z.array(union) })).schema;
-    expect(wire(WireStepObject)).toEqual(plain(WireStepObject.options));
-    expect(wire(WireSketchObject)).toEqual(plain(BoardObject.options));
+  // zod writes a discriminated union as oneOf; the SDK's zodOutputFormat rewrites it as anyOf.
+  // Byte-identical, key order included: the grammar has almost no headroom (#103).
+  it("the step and sketch formats are byte-identical to the same wire with a plain object union", () => {
+    const plain = (union: { options: readonly z.ZodType[] }) =>
+      z.array(z.union(union.options));
+    const sent = (format: Anthropic.JSONOutputFormat) =>
+      JSON.stringify(format.schema);
+    const asPlain = (schema: z.ZodType) =>
+      JSON.stringify(zodOutputFormat(schema).schema);
+    expect(sent(STEP_OUTPUT_FORMAT)).toBe(
+      asPlain(WireStep.extend({ objects: plain(WireStepObject) })),
+    );
+    expect(sent(SKETCH_OUTPUT_FORMAT)).toBe(
+      asPlain(WireSketch.extend({ objects: plain(BoardObject) })),
+    );
   });
 
   it("the sketch's objects are the contract's BoardObject kinds, the contract's own schemas", () => {

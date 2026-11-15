@@ -13,14 +13,14 @@ import { CANVAS, CELL, MAX_MATRIX_DIM } from "@/shared/scene";
 export const MATRIX_CELL_MAX_CHARS = 4;
 
 /**
- * The prompt's example of a matrix split over rows. Real steps wrote 10 items (a plan's "10
+ * The prompt's example of a matrix split over rows (#157). Real steps wrote 10 items (a plan's "10
  * predictions") as one 10-cell row: structured output can't enforce the 8-cell bound, so only
  * the prompt can stop it: 2 of 10 real first attempts were rejected for it.
  */
 export const MATRIX_SPLIT_EXAMPLE = { items: 10, rows: 2 } as const;
 
 /**
- * The prompt's example of an id without capitals. A real step named two objects calA and calB:
+ * The prompt's example of an id without capitals (#157). A real step named two objects calA and calB:
  * the grammar can't enforce OBJECT_ID_RE (the SDK sends a pattern as a description), so the
  * prompt has to.
  */
