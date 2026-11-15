@@ -238,8 +238,9 @@ export const PlotObject = z.object({
   hidden,
 });
 
-// Plain z.union, not discriminatedUnion: zod emits `anyOf` for it, which
-// structured output supports (`oneOf` is not on its list).
+// A plain z.union. A discriminatedUnion would also be safe on the wire: zod 4 emits
+// `oneOf` for it and the SDK's zodOutputFormat rewrites that as `anyOf` (#159 does this
+// for the wire's own unions, so their errors name the field and rule).
 export const BoardObject = z.union([
   MatrixObject,
   TextObject,
