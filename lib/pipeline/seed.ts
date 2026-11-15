@@ -56,9 +56,9 @@ export function parseSeedFile(input: unknown): SeedLesson[] {
 }
 
 /**
- * Uploads the paper and writes the lesson's run folder: paper.json, paper.pdf, then plan.json. Replaces
- * an earlier seed of the same lesson (steps already saved in it are kept). Throws when the
- * bytes aren't a usable PDF (before uploading) or the upload fails (GenerationError).
+ * Uploads the paper and writes the lesson's run folder: paper.json, paper.pdf, then plan.json.
+ * Replaces an earlier seed of the same lesson (steps already saved in it are kept). Throws when
+ * the bytes aren't a usable PDF (before uploading) or the upload fails (GenerationError).
  */
 export async function seedLesson(
   lesson: SeedLesson,

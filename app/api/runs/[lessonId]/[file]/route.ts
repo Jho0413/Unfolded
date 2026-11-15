@@ -1,6 +1,6 @@
-// GET /api/runs/<lessonId>/<file>: serves step JSON, audio and media from runs/ (ARCHITECTURE.md
-// section 5.1). runs/ is outside public/, and `next start` won't serve files added after the
-// build. lib/runs/store.ts checks every name and refuses symlinks and folders.
+// GET /api/runs/<lessonId>/<file>: serves step JSON, audio, media and the paper from runs/
+// (ARCHITECTURE.md section 5.1). runs/ is outside public/, and `next start` won't serve files
+// added after the build. lib/runs/store.ts checks every name and refuses symlinks and folders.
 import "server-only";
 import type { NextRequest } from "next/server";
 import { readRunFile, servableContentType } from "@/lib/runs/store";

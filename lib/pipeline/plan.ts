@@ -152,9 +152,9 @@ export interface Clients {
 }
 
 /**
- * Uploads the paper, plans the lesson and saves the run folder: paper.json, the cover (waited
- * for up to config.cover.timeoutMs, and left out if it fails), then plan.json last, so a
- * lesson the page can open is always complete. Throws GenerationError
+ * Uploads the paper, plans the lesson and saves the run folder: paper.json, paper.pdf, the
+ * cover (waited for up to config.cover.timeoutMs, and left out if it fails), then plan.json
+ * last, so a lesson the page can open is always complete. Throws GenerationError
  * (`paperRejected` says when Claude refused the PDF itself), or a store error.
  */
 export async function createLesson(
