@@ -442,7 +442,7 @@ sequenceDiagram
 Two columns. The left has the brand and the theme toggle (the lesson page's `ThemeToggle`), the pitch, the **Choose a PDF** picker (a PDF dropped anywhere on the page counts too), the sample lessons and the lesson's key hints (`player/controls.ts`). The right is a miniature of the lesson page (`app/LessonPreview.tsx`: the outline, the board with the tutor card, the PDF beside it), slightly tilted; it is hidden below 900 px.
 
 - **The preview.** Idle (and failed), the board draws a sample step (`app/previewScene.ts`, held to the step rules by a test) through the real renderer: `sceneAt` on a clock and `Whiteboard`, cropped by `stepView`, once; with reduced motion it shows the final frame. While uploading, the outline is skeleton rows. Planned, it shows the plan's title and ideas (`plan-steps`) and the tutor card's intro (`introParts`), and the frame faces the learner.
-- **Stages.** `POST /api/lessons` is one request of about 20 s, so the stage list ("Reading the PDF", "Finding the ideas worth teaching", "Planning the lesson", "Painting a cover") moves on every `UPLOAD_STAGE_MS` (5 s), and the last stays in progress until the answer arrives: none is ever shown done before it.
+- **Stages.** `POST /api/lessons` is one request of about 20 s, so the stage list ("Reading the PDF", "Finding the ideas worth teaching", "Planning the lesson", "Painting a cover") moves on every `UPLOAD_STAGE_MS` (5 s), and the last stays in progress until the answer arrives: the list is never all done before it. The current stage is marked `aria-current="step"`.
 - **Samples.** `config.samples` lists ready-made run folders (`m2-attention`, `calibrating-modern-neural-netw-647864c1`). The server page shows a chip for each whose `plan.json` it can read (`app/samples.ts`, through `loadLesson`), labelled with the plan's title; it opens `/lesson/<id>`.
 - **Replay mode** (`REPLAY_RUN`) redirects to the lesson before any of this (section 5.5).
 
@@ -465,11 +465,11 @@ stateDiagram-v2
 | idle | choose or drop a non-PDF | stays idle, "Please choose a PDF." (no request) |
 | uploading | 200 with a plan | planned: the title, "N ideas", the cover if any, **Start the lesson →** (`/lesson/<id>`), **Another PDF**; the preview shows the plan |
 | uploading | 4xx/5xx with `{ error }` | failed: the server's message, the picker still there |
-| uploading | 200 that isn't a plan, an error without `{ error }`, a network error or a body that isn't JSON | failed: "Couldn't read this PDF." (logged in the console) |
-| uploading | choose or drop a file | can't happen: the picker is gone, and a drop is ignored |
-| planned | Another PDF | idle |
+| uploading | 200 that isn't a plan, an error without `{ error }`, a network error or a body that isn't JSON | failed: "Couldn't read this PDF." (the answer or error is logged in the console) |
+| uploading or planned | choose or drop a file | can't happen: the picker is gone, and a drop is ignored |
+| planned | Another PDF | idle, the picker focused (planned focuses **Start the lesson →**) |
 | failed | choose or drop again | uploading (or idle with "Please choose a PDF." for a non-PDF) |
-| any | a sample chip | navigates to that lesson |
+| idle or failed | a sample chip (shown only there, so a chip never abandons an upload) | navigates to that lesson |
 | server | a sample's run or `plan.json` is missing | that chip isn't rendered |
 
 ### 5.2 Cue markers become times (`lib/narration/cues.ts`, pure)

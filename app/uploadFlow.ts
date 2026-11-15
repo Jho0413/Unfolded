@@ -40,10 +40,13 @@ export const HOME_TEXT = {
   pickHint: "or drop it anywhere on this page",
   samples: "No PDF handy? Open a ready-made lesson:",
   making: "Making your lesson",
-  eta: "About 20 seconds.",
   ready: "Ready",
   start: "Start the lesson →",
   another: "Another PDF",
+  previewIdle: "What a lesson looks like",
+  previewPlanning: "Planning…",
+  previewPlanned: "Your lesson",
+  previewPlanningLine: "The outline fills in once the lesson is planned.",
 } as const;
 
 /**
@@ -149,7 +152,7 @@ export function previewView(state: UploadState): PreviewView {
     case "idle":
     case "failed":
       return {
-        caption: "What a lesson looks like",
+        caption: HOME_TEXT.previewIdle,
         title: SAMPLE_LESSON.title,
         rows: SAMPLE_LESSON.steps,
         isPlan: false,
@@ -162,20 +165,20 @@ export function previewView(state: UploadState): PreviewView {
       };
     case "uploading":
       return {
-        caption: "Planning…",
+        caption: HOME_TEXT.previewPlanning,
         title: null,
         rows: Array<null>(PLANNING_ROWS).fill(null),
         isPlan: false,
         drawing: false,
         card: {
           status: CARD_STATUS.preparing,
-          parts: [{ text: "The outline fills in once the lesson is planned." }],
+          parts: [{ text: HOME_TEXT.previewPlanningLine }],
         },
         straight: false,
       };
     case "planned":
       return {
-        caption: "Your lesson",
+        caption: HOME_TEXT.previewPlanned,
         title: state.plan.title,
         rows: state.plan.steps.map((s) => s.title),
         isPlan: true,

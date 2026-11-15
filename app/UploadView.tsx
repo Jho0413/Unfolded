@@ -5,14 +5,14 @@
 // the lesson page (./LessonPreview.tsx). Failures show the server's plain words, with the
 // picker still there to try again. The decisions are in ./uploadFlow.ts.
 import Link from "next/link";
-import { type ChangeEvent, useEffect, useState } from "react";
+import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import { ThemeToggle } from "@/app/lesson/[lessonId]/Toggles";
 import lessonStyles from "@/app/lesson/[lessonId]/lesson.module.css";
 import { shortcut } from "@/player/controls";
 import styles from "./home.module.css";
 import { LessonPreview } from "./LessonPreview";
 import type { SampleLesson } from "./samples";
-import { PDF_FIELD } from "./upload";
+import { PDF_FIELD, UPLOAD_ERRORS } from "./upload";
 import {
   HOME_TEXT,
   IDLE,
@@ -50,6 +50,9 @@ export function UploadView({ samples }: { samples: SampleLesson[] }) {
   const [state, setState] = useState<UploadState>(IDLE);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [dragging, setDragging] = useState(false);
+  const pickerRef = useRef<HTMLInputElement>(null);
+  /** Another PDF was pressed: the picker takes the focus once it is back. */
+  const focusPicker = useRef(false);
 
   async function choose(file: File) {
     const next = transition(state, { type: "choose", file });
@@ -57,8 +60,23 @@ export function UploadView({ samples }: { samples: SampleLesson[] }) {
     if (next.kind !== "uploading" || state.kind === "uploading") return;
     setElapsedMs(0);
     // Nothing else changes the state while uploading: a new file is ignored then.
-    setState(transition(next, await send(file)));
+    const answer = await send(file);
+    const done = transition(next, answer);
+    // An answer that isn't a plan or an { error }: the learner gets plain words, we get the body.
+    if (
+      answer.type === "answered" &&
+      done.kind === "failed" &&
+      done.message === UPLOAD_ERRORS.planFailed
+    )
+      console.error("[upload] unexpected answer", answer);
+    setState(done);
   }
+
+  useEffect(() => {
+    if (state.kind !== "idle" || !focusPicker.current) return;
+    focusPicker.current = false;
+    pickerRef.current?.focus();
+  }, [state.kind]);
 
   // The stage list moves on by time; its last stage waits for the answer.
   const uploading = state.kind === "uploading";
@@ -118,13 +136,16 @@ export function UploadView({ samples }: { samples: SampleLesson[] }) {
           <ThemeToggle />
         </header>
 
-        <div className={styles.pitch} aria-live="polite">
+        <div className={styles.pitch}>
           {state.kind === "uploading" ? (
             <Uploading fileName={state.fileName} elapsedMs={elapsedMs} />
           ) : state.kind === "planned" ? (
             <Planned
               state={state}
-              onAnother={() => setState(transition(state, { type: "another" }))}
+              onAnother={() => {
+                focusPicker.current = true;
+                setState(transition(state, { type: "another" }));
+              }}
             />
           ) : (
             <>
@@ -140,6 +161,7 @@ export function UploadView({ samples }: { samples: SampleLesson[] }) {
                 >
                   <input
                     type="file"
+                    ref={pickerRef}
                     name={PDF_FIELD}
                     accept="application/pdf,.pdf"
                     className={styles.fileInput}
@@ -210,13 +232,16 @@ function Uploading({
       <h1 className={styles.fileName}>{fileName}</h1>
       <ul className={styles.stages} data-testid="upload-stages">
         {UPLOAD_STAGES.map((stage, i) => (
-          <li key={stage} data-status={statuses[i]}>
+          <li
+            key={stage}
+            data-status={statuses[i]}
+            aria-current={statuses[i] === "on" ? "step" : undefined}
+          >
             <span className={styles.dot} aria-hidden />
             {stage}
           </li>
         ))}
       </ul>
-      <p className={styles.eta}>{HOME_TEXT.eta}</p>
     </>
   );
 }
@@ -229,19 +254,23 @@ function Planned({
   onAnother: () => void;
 }) {
   const { lessonId, plan } = state;
+  const startRef = useRef<HTMLAnchorElement>(null);
+  // Keyboard users land on the way in: the picker they used is gone. (autoFocus skips links.)
+  useEffect(() => startRef.current?.focus(), []);
   return (
     <section data-testid="plan" className={styles.ready}>
       {plan.cover !== undefined && (
         <Cover src={`/api/runs/${lessonId}/${plan.cover}`} />
       )}
       <p className={`${styles.kicker} ${styles.ok}`}>{HOME_TEXT.ready}</p>
-      <h2 className={styles.planTitle}>{plan.title}</h2>
+      <h1 className={styles.planTitle}>{plan.title}</h1>
       <p className={styles.lede}>{ideasLabel(plan.steps.length)}</p>
       <div className={styles.actions}>
         <Link
           href={`/lesson/${lessonId}`}
           data-testid="start-lesson"
           className={styles.btn}
+          ref={startRef}
         >
           {HOME_TEXT.start}
         </Link>

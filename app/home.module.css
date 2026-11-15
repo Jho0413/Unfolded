@@ -203,11 +203,6 @@
     transform: rotate(360deg);
   }
 }
-.eta {
-  color: var(--muted);
-  font-size: 13px;
-  margin: 16px 0 0;
-}
 
 /* Planned */
 .cover {

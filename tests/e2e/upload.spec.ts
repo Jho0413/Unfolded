@@ -261,9 +261,12 @@ test("planned | Another PDF: idle, with the picker", async ({ page }) => {
   );
   await page.goto("/");
   await picker(page).setInputFiles(A_PDF);
+  // Planned: keyboard focus is on the way in.
+  await expect(page.getByTestId("start-lesson")).toBeFocused();
   await page.getByRole("button", { name: HOME_TEXT.another }).click();
   await expect(page.getByTestId("plan")).toHaveCount(0);
   await expect(page.getByTestId("upload-form")).toBeVisible();
+  await expect(picker(page)).toBeFocused();
   await expect(
     page.getByRole("heading", { name: HOME_TEXT.headline }),
   ).toBeVisible();
