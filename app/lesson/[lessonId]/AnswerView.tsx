@@ -2,7 +2,8 @@
 // The Answer view (ARCHITECTURE.md section 5.6): the drawn answer on a clean board, in the
 // lesson's own look, with a small "Answer" tag (the card's answer tag) and a "Back to step N"
 // chip in the board's top corners. The board passed in holds only the drawing: the lesson is
-// hidden, not dimmed. ./boardView.ts decides when it shows.
+// hidden, not dimmed. ./boardView.ts decides when it shows. `data-clear-of-dock` makes the stage
+// keep the whole answer above the tutor card and Ask box (player/Player.module.css).
 import type { BoardState } from "@/shared/scene";
 import { Whiteboard } from "@/player/Whiteboard";
 import cardStyles from "@/player/TutorCard.module.css";
@@ -22,7 +23,7 @@ export function AnswerView({
   onBack: () => void;
 }) {
   return (
-    <div data-testid="answer-view" className={styles.view}>
+    <div data-testid="answer-view" data-clear-of-dock className={styles.view}>
       <Whiteboard state={board} />
       <span
         data-testid="answer-view-tag"
