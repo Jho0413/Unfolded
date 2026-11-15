@@ -85,20 +85,26 @@ export async function generateSketch(
  * The narration is the wire format's first field, so it is voiced as soon as it has streamed,
  * while Claude still writes the objects and actions (a few seconds, longer than TTS): the
  * learner is waiting in silence. An attempt that is then rejected wastes its voicing; a retry
- * that keeps the same narration reuses it.
+ * that keeps the same narration reuses it, unless that voicing failed.
  */
 export async function narratedAnswer(
   req: SketchRequestBody,
   messages: ClaudeMessages = claudeMessages(config.sketch.fixture),
 ): Promise<SketchResponse> {
   const voicings = new Map<string, Promise<Narrated>>();
+  let voiced = 0;
   const voice = (narration: string): Promise<Narrated> => {
     let voicing = voicings.get(narration);
     if (voicing === undefined) {
-      voicing = narrate(narration);
-      // A voicing whose narration isn't used is dropped: its failure isn't the answer's.
-      voicing.catch(() => {});
-      voicings.set(narration, voicing);
+      const started = narrate(narration);
+      voicing = started;
+      voiced++;
+      // A voicing whose narration isn't used is dropped: its failure isn't the answer's. A
+      // failed one is forgotten, so a retry that keeps the narration voices it again.
+      started.catch(() => {
+        if (voicings.get(narration) === started) voicings.delete(narration);
+      });
+      voicings.set(narration, started);
     }
     return voicing;
   };
@@ -120,7 +126,7 @@ export async function narratedAnswer(
   const t3 = performance.now();
   // A debug line for the narrated answer's latency (#105's target: under 12 s end to end).
   console.info(
-    `[pipeline] sketch timings: claude ${ms(t1 - t0)} (${attempts.join("; ")}), then voice ${ms(t2 - t1)}, save ${ms(t3 - t2)}, total ${ms(t3 - t0)}; ${voicings.size} voiced, ${sketch.narration.length} narration chars`,
+    `[pipeline] sketch timings: claude ${ms(t1 - t0)} (${attempts.join("; ")}), then voice ${ms(t2 - t1)}, save ${ms(t3 - t2)}, total ${ms(t3 - t0)}; ${voiced} voiced, ${sketch.narration.length} narration chars`,
   );
   return {
     sketch,

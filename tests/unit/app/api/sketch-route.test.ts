@@ -46,6 +46,8 @@ const voice = vi.hoisted(() => ({
   error: undefined as Error | undefined,
   /** Narrations whose voicing fails, while others are voiced. */
   failing: new Set<string>(),
+  /** Narrations whose next voicing fails once (a passing TTS error). */
+  failingOnce: new Set<string>(),
   narrated: [] as string[],
   runs: "",
 }));
@@ -56,7 +58,7 @@ vi.mock("@/lib/narration/tts", async (importOriginal) => {
     // Always the TTS fake, whatever the mode: a route test never reaches ElevenLabs.
     narrate: (narration: string) => {
       voice.narrated.push(narration);
-      if (voice.failing.has(narration))
+      if (voice.failing.has(narration) || voice.failingOnce.delete(narration))
         return Promise.reject(
           new real.TtsError("provider", `voicing failed: ${narration}`),
         );
@@ -187,6 +189,7 @@ afterEach(async () => {
   claude.current = undefined;
   voice.error = undefined;
   voice.failing.clear();
+  voice.failingOnce.clear();
   voice.narrated = [];
   await rm(voice.runs, { recursive: true, force: true });
   vi.restoreAllMocks();
@@ -790,6 +793,15 @@ describe("POST /api/sketch: the narration is voiced while the sketch streams", (
     const res = await post(fresh);
     expect(res.status).toBe(200);
     expect(SketchResponse.parse(await res.json()).sketch).toEqual(VALID);
+  });
+
+  it("a rejected attempt's voicing fails once, and the retry keeps its narration: voiced again, 200", async () => {
+    quietLogs();
+    voice.failingOnce.add(VALID.narration);
+    script(reply({ ...OFF_AREA, narration: VALID.narration }), reply(VALID));
+    const res = await post(fresh);
+    expect(res.status).toBe(200);
+    expect(voice.narrated).toEqual([VALID.narration, VALID.narration]);
   });
 
   it("the voicing of the narration used fails: 502 Couldn't draw that, logged", async () => {

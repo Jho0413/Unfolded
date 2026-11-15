@@ -71,13 +71,17 @@ export function charsInSlot(n: number, fontSize: number): number {
   );
 }
 
+/** How far below the box above it a size-s note's centre goes: the gap plus half a line. */
+const NOTE_DROP_PX = gap + Math.ceil(textBox("", TEXT_SIZE.s).h / 2);
+
+/** The positions example: a text this wide, centred this far inside the content area's edge. */
+const EXAMPLE_TEXT_W = 300;
+const EXAMPLE_TEXT_X = content.x0 + 50;
+
 /**
  * The longest matrix label that fits a slot of a three-item row: a label is centred over the
  * cells and widens the matrix's box (shared/boxes.ts objectBox).
  */
-/** How far below the box above it a size-s note's centre goes: the gap plus half a line. */
-const NOTE_DROP_PX = gap + Math.ceil(textBox("", TEXT_SIZE.s).h / 2);
-
 export const MAX_MATRIX_LABEL_CHARS = charsInSlot(3, MATRIX_FRAME.labelFont);
 
 export const SKETCH_SYSTEM_PROMPT = `You answer a learner's question about a research paper on a whiteboard, the way a lesson step does. A voice tutor says in plain words what to draw; you turn that into a short narrated answer: a narration that the lesson's narrator speaks, the objects of the sketch, and actions that show, highlight, move or write on them, each fired on a word of the narration, so the drawing builds up as the learner hears it. The tutor stays quiet while your narration plays.
@@ -109,8 +113,8 @@ When the board is empty, the sketch is the whole answer, on its own clean board 
 
 - Title: one text object of size "${title.size}", a few words naming the idea, at x ${title.x}, y ${title.y}.
 - Content: every other object's whole box, a matrix's label included, inside the content area from x ${content.x0} to ${content.x1} and y ${content.y0} to ${content.y1}. Lay it out in one row read left to right (or one column read top to bottom), the group centred in the area: two or three matrices or formulas joined by arrows reads best.
-- Slots: in a row, each item (an object, or an object with a short note under it) gets an equal slot of the content area and is centred in it. Two items: ${slotsText(2)}. Three items: ${slotsText(3)}. Four items: ${slotsText(4)}. An item's whole box, its label and note included, stays inside its slot with ${gap / 2} to spare on each side; an arrow between two items runs in the space between their slots.
-- Positions: a text's or formula's x, y is its centre, so its box reaches half its width to each side (a text 300 wide at x 250 starts at x 100, outside the area); a matrix's x, y is its top-left cell corner. Work out each box from the sizes below before you place it.
+- Slots: in a row, each item (an object, or an object with a short note under it) gets an equal slot of the content area and is centred in it. Two items: ${slotsText(2)}. Three items: ${slotsText(3)}. Four items: ${slotsText(4)}. An item's whole box, its label and note included, stays inside its slot with ${gap / 2} to spare on each side. An arrow between two items runs in the gap between their boxes: for a labelled arrow, keep the two items narrower than their slots, so its label has room.
+- Positions: a text's or formula's x, y is its centre, so its box reaches half its width to each side (a text ${EXAMPLE_TEXT_W} wide at x ${EXAMPLE_TEXT_X} starts at x ${EXAMPLE_TEXT_X - EXAMPLE_TEXT_W / 2}, outside the content area); a matrix's x, y is its top-left cell corner. Work out each box from the sizes below before you place it.
 - Takeaway (optional): one short line, a text object of size "${takeaway.size}", at x ${takeaway.x}, y ${takeaway.y}.
 - At most ${maxContent} objects besides arrows (the title and takeaway included), and at most ${maxArrows} arrows. Every object's whole box stays inside x ${area.x0} to ${area.x1} and y ${area.y0} to ${area.y1}.
 - Sizes: text size "m" for content and "s" for notes and the takeaway; "l" only for a single symbol. A text is about ${TEXT_CHAR_EM} of its size wide per character, plus one size (sizes s ${TEXT_SIZE.s}, m ${TEXT_SIZE.m}, l ${TEXT_SIZE.l}); a formula about ${LATEX_GLYPH_PX} wide per symbol and ${LATEX_LINE_PX} high per line; a matrix's label reaches ${MATRIX_LABEL_PX} above its top. Keep every two objects at least ${gap} apart; an arrow between two objects shows in that space.
