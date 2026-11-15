@@ -7,6 +7,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { CARD_TEXT } from "@/player/cardView";
+import { CANVAS } from "@/shared/scene";
 import { PAPER_PAGES, paperPdf } from "./support/paperPdf";
 import { savedRun } from "./support/savedRun";
 import { askQuestion } from "./support/tutor";
@@ -46,13 +47,21 @@ async function servePaper(page: Page, lessonId: string) {
 const width = (page: Page, testId: string) =>
   page.getByTestId(testId).evaluate((el) => el.getBoundingClientRect().width);
 
-/** Waits until the pane in focus is clearly the larger (the flex-basis transition ends). */
-async function expectLarger(page: Page, larger: string, smaller: string) {
+/** The board's share of the two panes' width. */
+const boardShare = async (page: Page) => {
+  const board = await width(page, "board-pane");
+  return board / (board + (await width(page, "paper-pane")));
+};
+
+/**
+ * Waits until the flex-basis transition ends: the board is 60 % of the width, and 55 % while
+ * the paper is in focus (the paper grows, the board's drawings stay readable: QA A4).
+ */
+async function expectFocusSizes(page: Page, focus: "board" | "paper") {
+  const share = focus === "paper" ? 0.55 : 0.6;
   await expect
-    .poll(
-      async () => (await width(page, larger)) / (await width(page, smaller)),
-    )
-    .toBeGreaterThan(1.4);
+    .poll(async () => Math.abs((await boardShare(page)) - share))
+    .toBeLessThan(0.005);
 }
 
 async function seek(page: Page, seconds: number) {
@@ -114,13 +123,13 @@ test("a narration cue highlights its passage and grows the paper; a click on the
   );
   await expect(paper(page).locator("mark").first()).toBeInViewport();
   await expect(split(page)).toHaveAttribute("data-focus", "paper");
-  await expectLarger(page, "paper-pane", "board-pane");
+  await expectFocusSizes(page, "paper");
   await screenshot(page, "paper-focus-dark");
 
   // A click on the whiteboard (away from the tutor card) gives it focus.
   await boardPane(page).click({ position: { x: 40, y: 40 } });
   await expect(split(page)).toHaveAttribute("data-focus", "board");
-  await expectLarger(page, "board-pane", "paper-pane");
+  await expectFocusSizes(page, "board");
   await screenshot(page, "board-focus-dark");
 
   // The light theme, focused on the paper again by a click.
@@ -128,7 +137,7 @@ test("a narration cue highlights its passage and grows the paper; a click on the
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await paperPane(page).click({ position: { x: 40, y: 40 } });
   await expect(split(page)).toHaveAttribute("data-focus", "paper");
-  await expectLarger(page, "paper-pane", "board-pane");
+  await expectFocusSizes(page, "paper");
   await screenshot(page, "paper-focus-light");
 });
 
@@ -162,7 +171,7 @@ test("a passage far down the paper stays in view while the pane widens, and afte
   await page.keyboard.press("Space");
   await expect(player(page)).toHaveAttribute("data-state", "paused");
   await expect(split(page)).toHaveAttribute("data-focus", "paper");
-  await expectLarger(page, "paper-pane", "board-pane");
+  await expectFocusSizes(page, "paper");
   const mark = paper(page).locator("mark").first();
   await expect(mark).toBeInViewport();
   await page.waitForTimeout(800); // well after the 0.45 s transition
@@ -175,6 +184,44 @@ test("a passage far down the paper stays in view while the pane widens, and afte
   await page.waitForTimeout(800);
   await expect(mark).toBeInViewport();
 });
+
+for (const viewport of [
+  { width: 1440, height: 900 },
+  { width: 1280, height: 800 },
+])
+  test(`${viewport.width} px: the board keeps 55 % or more of the width while the paper is in focus`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport);
+    await using run = await savedRun(`e2e-paper-share-${viewport.width}`, {
+      paperRefs: REFS,
+    });
+    await servePaper(page, run.lessonId);
+    await page.goto(`/lesson/${run.lessonId}`);
+    await expect(paper(page)).toHaveAttribute(
+      "data-pages",
+      String(PAPER_PAGES.length),
+    );
+    await expect(player(page)).toHaveAttribute("data-state", "playing");
+    await page.keyboard.press("Space");
+    await expect(player(page)).toHaveAttribute("data-state", "paused");
+    // The first passage (no cue) grows the paper at 0 s: a click gives the board focus.
+    await boardPane(page).click({ position: { x: 40, y: 40 } });
+    await expect(split(page)).toHaveAttribute("data-focus", "board");
+    await expectFocusSizes(page, "board");
+    const led = await width(page, "board-pane");
+    await paperPane(page).click({ position: { x: 40, y: 40 } });
+    await expect(split(page)).toHaveAttribute("data-focus", "paper");
+    await expectFocusSizes(page, "paper");
+    const grown = await width(page, "board-pane");
+    expect(grown).toBeLessThan(led);
+    // The board's drawing scales with its pane (CANVAS units wide): its 26-unit text.
+    const textPx = (grown / CANVAS.w) * 26;
+    console.info(
+      `[A4] ${viewport.width}px: board ${Math.round(led)} px led, ${Math.round(grown)} px with the paper in focus (26-unit text ~${textPx.toFixed(1)} px)`,
+    );
+    await screenshot(page, `share-${viewport.width}-paper-focus`);
+  });
 
 test("a phone (390 px): the stage and both panes fit the screen, one tab at a time (phone.spec.ts has the tabs)", async ({
   page,
