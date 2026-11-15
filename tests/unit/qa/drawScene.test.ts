@@ -4,11 +4,16 @@ import { describe, expect, it, vi } from "vitest";
 import { config } from "@/lib/config";
 import { SKETCH_FAILED } from "@/shared/lesson";
 import {
-  drawScene,
+  createDrawScene,
   type DrawSceneDeps,
   SKETCH_FETCH_TIMEOUT_MS,
   sketchFailedUpdate,
+  stillLatest,
 } from "@/qa/drawScene";
+
+/** One request on a fresh handler. */
+const drawScene = (deps: DrawSceneDeps, description: string) =>
+  createDrawScene(deps)(description);
 
 /** Valid on a fresh board: its own objects only. */
 const fresh = {
@@ -84,8 +89,7 @@ describe("drawScene", () => {
       board: { objects: [], copies: [], active: [] },
     });
     expect(deps.drawSketch).toHaveBeenCalledOnce();
-    const [sketch, isFresh, description] = deps.drawSketch.mock.calls[0];
-    expect(isFresh).toBe(true);
+    const [sketch, description] = deps.drawSketch.mock.calls[0];
     expect(description).toBe("circle the first row");
     expect(sketch.objects[0].id).toBe("note");
     expect(sketch.actions[0].durationMs).toBe(400);
@@ -185,6 +189,71 @@ describe("drawScene", () => {
   it("tells the agent to answer in words", () => {
     expect(sketchFailedUpdate("a box")).toContain('"a box"');
     expect(sketchFailedUpdate("a box")).toContain("Answer in words");
+  });
+});
+
+// The Answer view table's "latest only" row (ARCHITECTURE.md section 5.6).
+describe("latest request only", () => {
+  /** A fetch whose replies the test releases one by one, in any order. */
+  function gatedFetch() {
+    const pending: ((r: Response) => void)[] = [];
+    const fetchMock = vi.fn(
+      () => new Promise<Response>((resolve) => pending.push(resolve)),
+    );
+    return { fetchMock, reply: (i: number, r: Response) => pending[i](r) };
+  }
+  const sketchNamed = (id: string) => ({
+    objects: [{ kind: "text", id, x: 800, y: 400, text: id }],
+    actions: [],
+  });
+  function twoRequests() {
+    const gate = gatedFetch();
+    const { deps } = setup(async () => json({}));
+    deps.fetch = gate.fetchMock as unknown as typeof fetch;
+    const draw = createDrawScene(deps);
+    return { gate, deps, a: draw("A"), b: draw("B") };
+  }
+
+  it("A slow, B fast: B is drawn, A is dropped when it arrives", async () => {
+    const { gate, deps, a, b } = twoRequests();
+    await vi.waitFor(() => expect(gate.fetchMock).toHaveBeenCalledTimes(2));
+    gate.reply(1, json({ sketch: sketchNamed("b") }));
+    await b;
+    gate.reply(0, json({ sketch: sketchNamed("a") }));
+    await a;
+    expect(deps.drawSketch).toHaveBeenCalledOnce();
+    expect(deps.drawSketch.mock.calls[0][1]).toBe("B");
+    expectSilent(deps);
+  });
+
+  it("A fails late, after B was drawn: no notice, the agent isn't told, B stays", async () => {
+    const { gate, deps, a, b } = twoRequests();
+    await vi.waitFor(() => expect(gate.fetchMock).toHaveBeenCalledTimes(2));
+    gate.reply(1, json({ sketch: sketchNamed("b") }));
+    await b;
+    gate.reply(0, json({ error: SKETCH_FAILED }, 502));
+    await a;
+    expect(deps.drawSketch).toHaveBeenCalledOnce();
+    expectSilent(deps);
+  });
+
+  it("A answers while B is still in flight: A is dropped too", async () => {
+    const { gate, deps, a } = twoRequests();
+    await vi.waitFor(() => expect(gate.fetchMock).toHaveBeenCalledTimes(2));
+    gate.reply(0, json({ sketch: sketchNamed("a") }));
+    await a;
+    expect(deps.drawSketch).not.toHaveBeenCalled();
+    expectSilent(deps);
+  });
+
+  it("stillLatest: only the open Ask session's newest request counts", () => {
+    const now = { asking: true, askId: 2, newest: 5 };
+    expect(stillLatest({ askId: 2, n: 5 }, now)).toBe(true);
+    expect(stillLatest({ askId: 2, n: 4 }, now)).toBe(false);
+    expect(stillLatest({ askId: 1, n: 5 }, now)).toBe(false);
+    expect(stillLatest({ askId: 2, n: 5 }, { ...now, asking: false })).toBe(
+      false,
+    );
   });
 });
 

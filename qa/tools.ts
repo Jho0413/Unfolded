@@ -19,7 +19,7 @@ import {
   DEFAULT_DURATION_MS,
 } from "@/shared/scene";
 import { checkAction } from "@/shared/validate";
-import { type DrawSceneDeps, drawScene } from "./drawScene";
+import { createDrawScene, type DrawSceneDeps } from "./drawScene";
 import type { QaTools } from "./types";
 
 export type HighlightAction = Extract<Action, { do: "highlight" }>;
@@ -61,6 +61,7 @@ export const ANSWER_SHOWING =
   "The answer board is showing; the lesson isn't visible.";
 
 export function createClientTools(deps: ClientToolDeps): QaTools {
+  const drawScene = createDrawScene(deps);
   return {
     highlight: ({ target_id, row, col }) => {
       if (!deps.isAsking()) return ASK_CLOSED;
@@ -85,10 +86,10 @@ export function createClientTools(deps: ClientToolDeps): QaTools {
       return result.outcome === "rejected" ? result.message : "ok";
     },
     // Doesn't wait: the agent keeps talking while the sketch is made.
-    // Always a clean board of its own (drawScene ignores the agent's `fresh`).
+    // Always a clean board of its own (the agent's `fresh` isn't taken), latest request only.
     draw_scene: ({ description }) => {
       if (!deps.isAsking()) return;
-      void drawScene(deps, description);
+      void drawScene(description);
     },
     resume_lesson: () => command(deps, "resume"),
     pause_lesson: () => command(deps, "pause"),

@@ -79,9 +79,9 @@ export function LessonAsk({
         highlight: session.addAction,
         // A sketch that reaches the board opens (or replaces) the Answer view, tags its
         // answer "Drawing on the board" and tells the agent what's showing.
-        drawSketch: (sketch, fresh, description) => {
+        drawSketch: (sketch, description) => {
           const was = answerShowing(session);
-          session.addSketch(sketch, fresh);
+          session.addSketch(sketch, true);
           ask.sketchDrawn();
           tellAnswerContext(ask.tellAgent, was, { kind: "drawn", description });
         },

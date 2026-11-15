@@ -13,7 +13,9 @@ import {
   EMPTY_LAYER,
 } from "@/qa/askBoard";
 import { createAskSession } from "@/qa/askSession";
+import { sketchFailedUpdate } from "@/qa/drawScene";
 import { ANSWER_SHOWING, createClientTools } from "@/qa/tools";
+import { SKETCH_FAILED } from "@/shared/lesson";
 import type { BoardObject, Sketch } from "@/shared/scene";
 
 const lessonObject: BoardObject = {
@@ -118,11 +120,36 @@ describe("the Answer view table", () => {
     expect(highlight).not.toHaveBeenCalled();
   });
 
-  it("Answer (or Lesson), the sketch fails: stays where it was", () => {
-    // A failed sketch never reaches the layer (qa/drawScene.ts); the view is unchanged.
-    const layer = addSketch(EMPTY_LAYER, sketch("first"), 0, true);
-    expect(boardView(true, layer)).toBe("answer");
-    expect(boardView(true, EMPTY_LAYER)).toBe("lesson");
+  it("Answer (or Lesson), the sketch fails: stays where it was, Couldn't draw that, the agent is told", async () => {
+    for (const drawnBefore of [true, false]) {
+      const session = createAskSession(() => 0);
+      session.open();
+      if (drawnBefore) session.addSketch(sketch("first"), true);
+      const before = boardView(session.isAsking(), session.layer());
+      const showNotice = vi.fn();
+      const tellAgent = vi.fn();
+      const tools = createClientTools({
+        board: session.board,
+        highlight: session.addAction,
+        send: (event) => transition(asking, event, CTX),
+        isAsking: session.isAsking,
+        askId: session.askId,
+        drawSketch: (s) => session.addSketch(s, true),
+        showNotice,
+        tellAgent,
+        fetch: async () =>
+          Response.json({ error: SKETCH_FAILED }, { status: 502 }),
+      });
+      tools.draw_scene?.({ description: "a follow-up", fresh: true });
+      await vi.waitFor(() =>
+        expect(showNotice).toHaveBeenCalledWith(SKETCH_FAILED),
+      );
+      expect(tellAgent).toHaveBeenCalledWith(sketchFailedUpdate("a follow-up"));
+      expect(boardView(session.isAsking(), session.layer())).toBe(before);
+      expect(session.layer().objects.map((o) => o.id)).toEqual(
+        drawnBefore ? ["first"] : [],
+      );
+    }
   });
 
   it("any, Ask closes while a sketch is in flight: the sketch is dropped", () => {
