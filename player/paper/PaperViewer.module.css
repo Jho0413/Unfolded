@@ -64,6 +64,23 @@
 .textLayer :global(.markedContent) {
   display: contents;
 }
+/* pdf.js's selection helper (TextLayerBuilder): below the layer, or covering it behind the
+   text while the learner drags, so a pointer between lines never jumps the selection. As
+   specific as the span rule above, so its z-index (under the text) wins. */
+.textLayer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: 0;
+  cursor: default;
+  user-select: none;
+}
+.scroll[data-selecting] .textLayer .endOfContent {
+  top: 0;
+}
+.textLayer br::selection {
+  background: transparent;
+}
 .textLayer ::selection {
   background: color-mix(in srgb, AccentColor, transparent 60%);
   color: transparent;
