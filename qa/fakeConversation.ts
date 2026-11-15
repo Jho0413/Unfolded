@@ -75,12 +75,12 @@ export const DEFAULT_SCRIPT: readonly FakeTurn[] = [
     reply: "Here's the first row, highlighted.",
   },
   {
-    match: /\bin the paper\b/i,
+    match: /\bin the (paper|document)\b/i,
     tool: {
       name: "highlight_paper",
       params: { quote: "every output cell is a row times a column", page: 2 },
     },
-    reply: "Here's where the paper says it.",
+    reply: "Here's where the document says it.",
   },
   {
     match: /\bdraw\b/i,

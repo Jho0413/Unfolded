@@ -37,13 +37,13 @@ export const HighlightPaperParams = z.object({
     .string()
     .min(1)
     .max(MAX_PAPER_QUOTE_CHARS)
-    .describe("A short verbatim quote from the paper, a sentence or less"),
+    .describe("A short verbatim quote from the document, a sentence or less"),
   page: z
     .number()
     .int()
     .min(1)
     .optional()
-    .describe("1-based page of the paper the quote is on, if known"),
+    .describe("1-based page of the document the quote is on, if known"),
 });
 
 /** The lesson control tools take nothing: they act on the step on screen. */
@@ -74,7 +74,7 @@ export const CLIENT_TOOLS = [
   {
     name: "highlight_paper",
     description:
-      "Scroll the paper beside the board to a passage and highlight it. Returns ok, or why it couldn't.",
+      "Scroll the document beside the board to a passage and highlight it. Returns ok, or why it couldn't.",
     expectsResponse: true,
     parameters: HighlightPaperParams,
   },

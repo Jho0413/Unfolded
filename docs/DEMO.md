@@ -40,7 +40,7 @@ Where a drawn answer's time goes (ten typed questions on two lessons, and the wa
    - The paper pane grows for a few seconds when a new passage lights up.
 3. **Ask about the paper.** About 15 s in, after the first passage lights up, say **"Where does the paper say that?"**
    - The narration stops at once.
-   - The tutor answers in voice, the passage turns blue, and the card is tagged **Pointing at the paper**.
+   - The tutor answers in voice, the passage turns blue, and the card is tagged **Pointing at the document**.
    - Say **"carry on"**: the lesson resumes where it stopped.
 4. **Help.** Press **?** to show the keys and spoken commands, then Esc.
 5. **Ask about a sentence in the paper.** While the first idea plays:

@@ -47,10 +47,11 @@ import type { AskSession } from "@/qa/askSession";
 import { boardView } from "./boardView";
 
 /** What highlight_paper returns to the agent when there's no paper to show. */
-export const NO_PAPER = "There is no paper to show for this lesson.";
-export const PAPER_LOADING = "The paper is still loading; answer without it.";
+export const NO_PAPER = "There is no document to show for this lesson.";
+export const PAPER_LOADING =
+  "The document is still loading; answer without it.";
 export const QUOTE_NOT_FOUND =
-  "That quote isn't in the paper; answer without it.";
+  "That quote isn't in the document; answer without it.";
 
 export type LessonPaper = {
   /** The paper's pages once loaded; null while loading or with no paper. */

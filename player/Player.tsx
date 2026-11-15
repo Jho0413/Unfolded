@@ -177,7 +177,7 @@ export function PlayerStage({
           <div
             className={styles.tabs}
             role="tablist"
-            aria-label="Board or paper"
+            aria-label="Board or document"
             data-testid="pane-tabs"
           >
             {(["board", "paper"] as const).map((pane) => (
@@ -199,7 +199,7 @@ export function PlayerStage({
                   onFocusPane?.(pane);
                 }}
               >
-                {pane === "board" ? "Board" : "Paper"}
+                {pane === "board" ? "Board" : "Document"}
               </button>
             ))}
           </div>

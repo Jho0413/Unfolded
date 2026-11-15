@@ -58,7 +58,7 @@ export const CARD_TEXT = {
   /** The answer highlighted the board (the `highlight` tool) and drew nothing (#91). */
   tagPointingBoard: "Pointing at the board",
   /** The answer highlighted a passage in the paper (`highlight_paper`, #106) (#91). */
-  tagPointingPaper: "Pointing at the paper",
+  tagPointingPaper: "Pointing at the document",
   tagSpoken: "Spoken answer",
 } as const;
 

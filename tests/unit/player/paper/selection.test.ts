@@ -62,7 +62,7 @@ describe("askAboutNote", () => {
   it("tells the agent the whole passage and its page", () => {
     const quote = "word ".repeat(60).trim();
     const note = askAboutNote({ quote, page: 4 });
-    expect(note).toContain("page 4");
+    expect(note).toContain("in the document (page 4)");
     expect(note).toContain(`"${quote}"`);
   });
 });
