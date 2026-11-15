@@ -30,6 +30,7 @@ import { type Player as PlayerApi, usePlayer } from "./usePlayer";
 import { Whiteboard } from "./Whiteboard";
 import { stepView } from "./viewport";
 import { WidgetPanel, WidgetPrompt } from "./widget/WidgetPanel";
+import { Help } from "./help/Help";
 import { widgetOnScreen } from "./widget/widgetView";
 import styles from "./Player.module.css";
 
@@ -157,6 +158,7 @@ export function PlayerStage({
         </div>
         <span className={styles.spacer} />
         {barEnd}
+        <Help />
       </header>
       <div
         className={styles.split}
