@@ -1,6 +1,7 @@
 // Barge-in (qa/bargeIn.ts, issue #93): the learner starting to speak stops the narration once.
 import { describe, expect, it, vi } from "vitest";
 import {
+  ACK_WAIT_MS,
   AGENT_SPEAKING_CAP_MS,
   AgentTurn,
   BargeIn,
@@ -90,29 +91,54 @@ describe("BargeIn", () => {
 });
 
 describe("AgentTurn (spoken commands wait for the agent to finish speaking)", () => {
-  it("runs at once while the agent is quiet; queued while it speaks, run when it stops", () => {
-    const turn = new AgentTurn(() => {});
-    const now = vi.fn();
-    turn.after(now);
-    expect(now).toHaveBeenCalledOnce();
-    turn.setSpeaking(true);
-    const later = vi.fn();
-    turn.after(later);
-    expect(later).not.toHaveBeenCalled();
-    turn.setSpeaking(false);
-    expect(later).toHaveBeenCalledOnce();
-    turn.setSpeaking(false);
-    expect(later).toHaveBeenCalledOnce();
-  });
-
-  it("a lost 'listening' event: run after AGENT_SPEAKING_CAP_MS, once", () => {
+  function timed() {
     const timers: [() => void, number][] = [];
     const turn = new AgentTurn((fn, ms) => timers.push([fn, ms]));
+    const fire = (ms: number) =>
+      timers.filter(([, m]) => m === ms).forEach(([fn]) => fn());
+    return { turn, timers, fire };
+  }
+
+  it("queued while the agent speaks, run when it stops, once", () => {
+    const { turn } = timed();
     turn.setSpeaking(true);
     const fn = vi.fn();
     turn.after(fn);
-    expect(timers[0][1]).toBe(AGENT_SPEAKING_CAP_MS);
-    timers[0][0]();
+    expect(fn).not.toHaveBeenCalled();
+    turn.setSpeaking(false);
+    expect(fn).toHaveBeenCalledOnce();
+    turn.setSpeaking(false);
+    expect(fn).toHaveBeenCalledOnce();
+  });
+
+  it("tool first, 'Sure.' after: waits for the agent's acknowledgement to end", () => {
+    const { turn, fire } = timed();
+    const fn = vi.fn();
+    turn.after(fn);
+    expect(fn).not.toHaveBeenCalled();
+    turn.setSpeaking(true);
+    fire(ACK_WAIT_MS); // still speaking: keeps waiting
+    expect(fn).not.toHaveBeenCalled();
+    turn.setSpeaking(false);
+    expect(fn).toHaveBeenCalledOnce();
+  });
+
+  it("the agent stays quiet: runs after ACK_WAIT_MS", () => {
+    const { turn, fire } = timed();
+    const fn = vi.fn();
+    turn.after(fn);
+    fire(ACK_WAIT_MS);
+    expect(fn).toHaveBeenCalledOnce();
+    fire(AGENT_SPEAKING_CAP_MS);
+    expect(fn).toHaveBeenCalledOnce();
+  });
+
+  it("a lost 'listening' event: run after AGENT_SPEAKING_CAP_MS, once", () => {
+    const { turn, fire } = timed();
+    turn.setSpeaking(true);
+    const fn = vi.fn();
+    turn.after(fn);
+    fire(AGENT_SPEAKING_CAP_MS);
     expect(fn).toHaveBeenCalledOnce();
     turn.setSpeaking(false);
     expect(fn).toHaveBeenCalledOnce();

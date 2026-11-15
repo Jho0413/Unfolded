@@ -19,5 +19,6 @@ export async function callTool(
       .join("; ");
     return `bad parameters for ${name}: ${issues}`;
   }
+  console.info(`[qa] tool ${name}`, parsed.data);
   return handler(parsed.data);
 }

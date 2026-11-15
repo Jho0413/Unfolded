@@ -79,10 +79,17 @@ export class BargeIn {
 
 /** A spoken command waits at most this long for the agent to finish speaking. */
 export const AGENT_SPEAKING_CAP_MS = 10_000;
+/**
+ * A command that arrives while the agent is quiet waits this long for it to start speaking:
+ * the agent often calls the tool first and says "Sure." after, and the narration must not
+ * start under that (it would count as barge-in and stop the lesson again).
+ */
+export const ACK_WAIT_MS = 2_000;
 
 /**
  * Runs spoken commands once the agent has finished speaking (its "Sure." before the narration
- * starts again), or after AGENT_SPEAKING_CAP_MS if the "listening" event is lost.
+ * starts again): when it stops, or after ACK_WAIT_MS if it never starts, or after
+ * AGENT_SPEAKING_CAP_MS if the "listening" event is lost.
  */
 export class AgentTurn {
   private speaking = false;
@@ -105,13 +112,17 @@ export class AgentTurn {
   }
 
   after(fn: () => void): void {
-    if (!this.speaking) return fn();
     this.queue.push(fn);
-    this.setTimer(() => {
+    const run = () => {
       if (!this.queue.includes(fn)) return;
       this.queue = this.queue.filter((f) => f !== fn);
       fn();
-    }, AGENT_SPEAKING_CAP_MS);
+    };
+    this.setTimer(run, AGENT_SPEAKING_CAP_MS);
+    if (!this.speaking)
+      this.setTimer(() => {
+        if (!this.speaking) run();
+      }, ACK_WAIT_MS);
   }
 
   private flush(): void {
