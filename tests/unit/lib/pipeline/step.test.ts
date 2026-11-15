@@ -17,7 +17,7 @@ import {
   type StepRequest,
 } from "@/lib/pipeline/step";
 import type { LessonPlanOutput } from "@/shared/lesson";
-import { type CuedPaperRef, Step } from "@/shared/scene";
+import { type CuedPaperRef, MAX_PAPER_QUOTE_CHARS, Step } from "@/shared/scene";
 
 const PLAN: LessonPlanOutput = {
   title: "A lesson",
@@ -341,6 +341,48 @@ describe("paper quotes (#98): one test per row", () => {
     const step = await generateStep(REQ_PAPER, claude);
     expect(step).toEqual(valid);
     expect(step).not.toHaveProperty("paperRefs");
+  });
+
+  it("a quote missing in the first attempt and a hard error in the retry: the first, without the missing quote", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const claude = fakeClaude([
+      reply(withRefs(FOUND, MISSING)),
+      reply({ ...withRefs(FOUND), title: "" }),
+    ]);
+    await expect(generateStep(REQ_PAPER, claude)).resolves.toEqual(
+      withRefs(FOUND),
+    );
+  });
+
+  it("a hard error in the first attempt and a quote missing in the retry: the retry, without the missing quote", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const claude = fakeClaude([
+      reply({ ...withRefs(FOUND), title: "" }),
+      reply(withRefs(MISSING, ALSO_FOUND)),
+    ]);
+    await expect(generateStep(REQ_PAPER, claude)).resolves.toEqual(
+      withRefs(ALSO_FOUND),
+    );
+  });
+
+  it("a malformed ref (an over-long quote, page 0): dropped and logged, not a rejection", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const claude = fakeClaude([
+      reply({
+        ...withRefs(FOUND),
+        paperRefs: [
+          { page: 0, quote: "x" },
+          FOUND,
+          { page: 2, quote: "y".repeat(MAX_PAPER_QUOTE_CHARS + 1) },
+        ],
+      }),
+    ]);
+    await expect(generateStep(REQ_PAPER, claude)).resolves.toEqual(
+      withRefs(FOUND),
+    );
+    expect(claude.calls).toHaveLength(1);
+    expect(warnings(warn)).toContain("paperRefs.0 dropped");
+    expect(warnings(warn)).toContain("paperRefs.2 dropped");
   });
 
   it("quote on the wrong page: treated as missing (retried with where it is, then dropped)", async () => {
