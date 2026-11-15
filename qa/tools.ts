@@ -88,7 +88,7 @@ export type ClientToolDeps = {
 export const ASK_CLOSED = "Ask is closed";
 
 /** What highlight_paper returns where the page has no paper viewer. */
-export const NO_PAPER_VIEWER = "There is no paper on screen.";
+export const NO_PAPER_VIEWER = "There is no document on screen.";
 
 /** What `go_to_step` returns for the step the lesson stopped on. */
 export const BACK_WHERE_STOPPED =

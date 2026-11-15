@@ -34,7 +34,7 @@ export function askAboutPrefill({ quote, page }: PaperSelection): string {
 
 /** The agent's contextual update: the passage the learner's next question is about. */
 export function askAboutNote({ quote, page }: PaperSelection): string {
-  return `The learner selected this passage in the paper (page ${page}) and is asking about it: "${quote}". Their next question is about this passage.`;
+  return `The learner selected this passage in the document (page ${page}) and is asking about it: "${quote}". Their next question is about this passage.`;
 }
 
 /** At most `max` characters, cut at a word with "…" if it was longer. */

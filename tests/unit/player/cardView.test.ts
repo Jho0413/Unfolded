@@ -368,7 +368,7 @@ describe("askCard", () => {
       expect(TAG_TEXT).toEqual({
         drawing: "Drawing on the board",
         board: "Pointing at the board",
-        paper: "Pointing at the paper",
+        paper: "Pointing at the document",
         spoken: "Spoken answer",
       });
     });
