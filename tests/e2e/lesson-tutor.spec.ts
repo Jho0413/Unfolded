@@ -261,10 +261,46 @@ test("a spoken answer: Spoken answer, and the lesson stays on the board", async 
   await using run = await savedRun("e2e-tutor-spoken");
   await page.goto(`/lesson/${run.lessonId}`);
   await expectState(page, "playing", 0);
+  await askQuestion(page, "why does that work?");
+  await expect(answer(page)).toContainText("row times a column");
+  await expect(page.getByTestId("answer-tag")).toHaveText(CARD_TEXT.tagSpoken);
+  await expect(page.getByTestId("answer-tag")).toHaveAttribute(
+    "data-tag",
+    "spoken",
+  );
+  await expect(answerView(page)).toHaveCount(0);
+});
+
+test("a highlight answer (#91): Pointing at the board, the highlight on the lesson's board; the next spoken answer is Spoken answer", async ({
+  page,
+}) => {
+  await using run = await savedRun("e2e-tutor-pointing");
+  await page.goto(`/lesson/${run.lessonId}`);
+  await expectState(page, "playing", 0);
+  // The fake agent highlights the first row of the first object it was told about.
   await askQuestion(page, "show me the first row");
   await expect(answer(page)).toContainText("first row");
-  await expect(page.getByTestId("answer-tag")).toHaveText(CARD_TEXT.tagSpoken);
+  await expect(page.getByTestId("answer-tag")).toHaveText(
+    CARD_TEXT.tagPointingBoard,
+  );
+  await expect(page.getByTestId("answer-tag")).toHaveAttribute(
+    "data-tag",
+    "board",
+  );
+  // The highlight landed on the lesson's board (full-flow.spec.ts checks the cells).
+  expect(
+    await page.evaluate(() =>
+      window.__qaFake?.toolCalls.map((c) => `${c.name} -> ${c.result}`),
+    ),
+  ).toContain("highlight -> ok");
   await expect(answerView(page)).toHaveCount(0);
+
+  // The tag is the latest answer's: a question answered in words only is spoken.
+  await askQuestion(page, "and why?");
+  await expect(page.getByTestId("ask-question")).toHaveText(
+    "You asked: and why?",
+  );
+  await expect(page.getByTestId("answer-tag")).toHaveText(CARD_TEXT.tagSpoken);
 });
 
 test("a draw_scene answer: Drawing on the board, in the Answer view instead of the lesson", async ({
