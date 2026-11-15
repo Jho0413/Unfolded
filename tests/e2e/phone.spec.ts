@@ -92,14 +92,17 @@ async function expectNoSideScroll(page: Page) {
   expect(scroll).toBeLessThanOrEqual(width);
 }
 
-/** The drawing (the board's 16:9 box) is clear of the dock, and big enough to read. */
+/** The drawing (the board's 16:9 box) is clear of the dock, and big enough to read. Retries:
+ *  the dock and the board settle a frame or two after the card or the widget panel changes. */
 async function expectBoardClear(page: Page, minHeight = 150) {
-  const drawing = await box(
-    page.getByTestId("board-pane").locator("svg").first(),
-  );
-  const dock = await box(card(page).locator(".."));
-  expect(drawing.y + drawing.height).toBeLessThanOrEqual(dock.y + 1);
-  expect(drawing.height).toBeGreaterThanOrEqual(minHeight);
+  await expect(async () => {
+    const drawing = await box(
+      page.getByTestId("board-pane").locator("svg").first(),
+    );
+    const dock = await box(card(page).locator(".."));
+    expect(drawing.y + drawing.height).toBeLessThanOrEqual(dock.y + 1);
+    expect(drawing.height).toBeGreaterThanOrEqual(minHeight);
+  }).toPass({ timeout: 5_000 });
 }
 
 for (const theme of ["light", "dark"] as const)
