@@ -558,7 +558,7 @@ describe("POST /api/lessons: the cover (L4)", () => {
     // The fake never answers and ignores the abort: only the cover's own deadline ends it.
     state.images = fakeImages(["hang"]);
     await expectNoCover(await postFile(pdfs["tiny.pdf"]));
-    expect(logs.warned()).toContain("no cover after 50 ms");
+    expect(logs.warned()).toContain("no image after 50 ms");
   });
 
   it("a missing FAL_KEY still returns the plan without a cover: there's no fal to call", async () => {

@@ -86,3 +86,58 @@ async function download(url: string, signal: AbortSignal): Promise<Uint8Array> {
   if (!res.ok) throw new Error(`fal image download: HTTP ${res.status}`);
   return new Uint8Array(await res.arrayBuffer());
 }
+
+/** Every JPEG starts with these bytes (an SOI marker, then the next marker's FF). */
+const JPEG_MAGIC = [0xff, 0xd8, 0xff];
+
+/** True when `bytes` are a JPEG by their first bytes: fal's answer is untrusted. */
+export function isJpeg(bytes: Uint8Array): boolean {
+  return JPEG_MAGIC.every((b, i) => bytes[i] === b);
+}
+
+export class ImageTimeoutError extends Error {
+  override name = "ImageTimeoutError";
+}
+
+/**
+ * Runs `work` with a deadline of its own: past `ms` it rejects with ImageTimeoutError and
+ * aborts the signal, even if `work` ignores it, so a hung provider can't hold the request.
+ */
+export async function withDeadline<T>(
+  work: (signal: AbortSignal) => Promise<T>,
+  ms: number,
+): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const err = new ImageTimeoutError(`no image after ${ms} ms`);
+      controller.abort(err);
+      reject(err);
+    }, ms);
+  });
+  try {
+    return await Promise.race([work(controller.signal), expired]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * One JPEG from `prompt`, generated and downloaded within `timeoutMs`. Throws on a fal error,
+ * past the deadline, or bytes that aren't a JPEG: the file is named .jpg and served as
+ * image/jpeg, so anything else would be served wrongly.
+ */
+export async function makeJpeg(
+  images: ImageMaker,
+  prompt: string,
+  timeoutMs: number,
+): Promise<Uint8Array> {
+  const image = await withDeadline(
+    (signal) => images.make(prompt, signal),
+    timeoutMs,
+  );
+  if (!isJpeg(image))
+    throw new Error(`fal sent ${image.length} bytes that aren't a JPEG`);
+  return image;
+}
