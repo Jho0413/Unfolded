@@ -6,7 +6,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { FIXED, sceneState } from "@/app/dev/board/scenes";
 import { Whiteboard } from "@/player/Whiteboard";
-import { estimateSize, renderLatex } from "@/player/primitives/katex";
+import { renderLatex } from "@/player/primitives/katex";
+import { estimateSize } from "@/shared/boxes";
 import { arrowGeometry, targetBox } from "@/player/primitives/arrowGeometry";
 import {
   ARROW,

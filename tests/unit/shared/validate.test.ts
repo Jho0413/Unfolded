@@ -1,5 +1,6 @@
 // One test per row of the ARCHITECTURE.md section 4 validation table, named
 // after the row, plus the M1 demo fixture as the contract's acceptance test.
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import demoM1 from "@/lib/fakes/fixtures/demo-m1.step.json";
 import {
@@ -10,6 +11,8 @@ import {
   type Step,
 } from "@/shared/scene";
 import {
+  ANSWER_TEMPLATE,
+  errors,
   validateSketch,
   validateStep,
   type ValidationResult,
@@ -643,6 +646,272 @@ describe("validate: ARCHITECTURE.md section 4 table", () => {
         { board: lessonBoard, fresh: true },
       ),
     );
+  });
+});
+
+// The answer template's rows (ARCHITECTURE.md section 4): only a fresh sketch, the Answer
+// view's drawing, is held to them.
+describe("validate: a fresh sketch's answer template (#90)", () => {
+  const FRESH = { board: lessonBoard, fresh: true };
+  const title: BoardObject = {
+    kind: "text",
+    id: "title",
+    x: 800,
+    y: 110,
+    text: "Why scale?",
+  };
+  const a: BoardObject = {
+    kind: "matrix",
+    id: "a",
+    x: 300,
+    y: 400,
+    rows: [["1", "2"]],
+    label: "raw",
+  };
+  const f: BoardObject = {
+    kind: "latex",
+    id: "f",
+    x: 1100,
+    y: 424,
+    tex: "d_k",
+  };
+  const join: BoardObject = {
+    kind: "arrow",
+    id: "j",
+    from: { id: "a" },
+    to: { id: "f" },
+    label: "divide",
+  };
+  const answer = (...objects: BoardObject[]): Sketch => ({
+    objects,
+    actions: [],
+  });
+
+  it("A fresh sketch laid out from the template: valid", () => {
+    expectValid(validateSketch(answer(title, a, f, join), FRESH));
+  });
+
+  it("More than 8 objects: rejected: too many objects", () => {
+    const many = Array.from(
+      { length: ANSWER_TEMPLATE.maxObjects + 1 },
+      (_, i): BoardObject => ({
+        kind: "text",
+        id: `t${i}`,
+        x: 200 + (i % 3) * 500,
+        y: 200 + Math.floor(i / 3) * 200,
+        text: "x",
+        size: "s",
+      }),
+    );
+    expectErrors(
+      validateSketch(answer(...many), FRESH),
+      errors.tooManyObjects(ANSWER_TEMPLATE.maxObjects + 1),
+    );
+    expectValid(validateSketch(answer(...many.slice(1)), FRESH));
+  });
+
+  it('An object whose estimated box leaves the answer area: rejected: outside the answer area "x"', () => {
+    // On the canvas (its centre is), but its box runs past the area's right edge.
+    const wide: BoardObject = {
+      kind: "text",
+      id: "wide",
+      x: 1450,
+      y: 450,
+      text: "a long line of words",
+    };
+    expectErrors(
+      validateSketch(answer(wide), FRESH),
+      errors.outsideAnswerArea("wide"),
+    );
+  });
+
+  it('A matrix whose label rises out of the area: rejected: outside the answer area "x"', () => {
+    const high: BoardObject = { ...a, y: ANSWER_TEMPLATE.area.y0 + 10 };
+    expectErrors(
+      validateSketch(answer(high), FRESH),
+      errors.outsideAnswerArea("a"),
+    );
+    // Without the label, the cells and brackets fit.
+    const bare = { ...high, label: undefined };
+    expectValid(validateSketch(answer(bare), FRESH));
+  });
+
+  it('An arrow point, or a move to a point, outside the area: rejected: outside the answer area "x"', () => {
+    const toEdge: BoardObject = {
+      kind: "arrow",
+      id: "edge",
+      from: { id: "a" },
+      to: { x: 1550, y: 450 },
+    };
+    expectErrors(
+      validateSketch(answer(a, toEdge), FRESH),
+      errors.outsideAnswerArea("edge"),
+    );
+    const moved: Sketch = {
+      objects: [title],
+      actions: [
+        {
+          atMs: 0,
+          do: "move",
+          target: { id: "title" },
+          to: { x: 40, y: 450 },
+          durationMs: 400,
+        },
+      ],
+    };
+    expectErrors(
+      validateSketch(moved, FRESH),
+      errors.outsideAnswerArea("title"),
+    );
+  });
+
+  it('Two objects closer than 40 (or overlapping): rejected: "a" and "b" are too close', () => {
+    const near: BoardObject = { ...f, x: 480, id: "near" };
+    expectErrors(
+      validateSketch(answer(a, near), FRESH),
+      errors.tooClose("a", "near", ANSWER_TEMPLATE.gap),
+    );
+  });
+
+  it("Two objects an arrow joins, closer than 80: rejected: too close (leave 80)", () => {
+    // About 60 apart: enough for two objects, not for an arrow between them.
+    const close: BoardObject = { ...f, x: 530 };
+    expectValid(validateSketch(answer(a, close), FRESH));
+    expectErrors(
+      validateSketch(answer(a, close, join), FRESH),
+      errors.tooClose("a", "f", ANSWER_TEMPLATE.arrowGap),
+    );
+  });
+
+  it('"_" or "^" in a text, an arrow or matrix label, a matrix cell or a written value: rejected', () => {
+    const cases: [Sketch, string][] = [
+      [answer({ ...title, text: "d_k grows" }), "title"],
+      [answer(a, f, { ...join, label: "x^2" }), "j"],
+      [answer({ ...a, label: "W_Q" }), "a"],
+      [answer({ ...a, rows: [["q_1", "2"]] }), "a"],
+      [
+        {
+          objects: [title],
+          actions: [
+            {
+              atMs: 0,
+              do: "write",
+              target: { id: "title" },
+              value: "x^2",
+              durationMs: 400,
+            },
+          ],
+        },
+        "title",
+      ],
+    ];
+    for (const [sketch, id] of cases)
+      expectErrors(validateSketch(sketch, FRESH), errors.mathsInPlainText(id));
+    // Maths in a latex object is what the rule asks for.
+    expectValid(validateSketch(answer(f), FRESH));
+  });
+
+  it("A sketch on the lesson board (not fresh) isn't held to the template", () => {
+    const wide: BoardObject = {
+      kind: "text",
+      id: "wide",
+      x: 1580,
+      y: 20,
+      text: "d_k",
+    };
+    expectValid(validateSketch(answer(wide), { board: lessonBoard }));
+  });
+});
+
+describe("validate: the answer template (property, #90)", () => {
+  const FRESH = { board: lessonBoard, fresh: true };
+  /** A plain word or number, never "_" or "^". */
+  const word = fc.stringMatching(/^[a-z0-9 .]{1,12}$/);
+  /** Up to 8 small texts in a grid of slots, each inside the content area. */
+  const laidOut = fc
+    .uniqueArray(fc.integer({ min: 0, max: 11 }), {
+      minLength: 1,
+      maxLength: ANSWER_TEMPLATE.maxObjects,
+    })
+    .chain((slots) =>
+      fc.tuple(
+        fc.constant(slots),
+        fc.array(word, { minLength: slots.length, maxLength: slots.length }),
+      ),
+    )
+    .map(([slots, words]): Sketch => ({
+      objects: slots.map((slot, i) => ({
+        kind: "text",
+        id: `t${i}`,
+        x: 350 + (slot % 4) * 300,
+        y: 250 + Math.floor(slot / 4) * 200,
+        text: words[i],
+        size: "s",
+      })),
+      actions: [],
+    }));
+
+  it("any answer laid out in the template's grid with plain words is valid", () => {
+    fc.assert(
+      fc.property(laidOut, (sketch) => {
+        expectValid(validateSketch(sketch, FRESH));
+      }),
+    );
+  });
+
+  it("moving any one object's centre off the area is always rejected, naming it", () => {
+    fc.assert(
+      fc.property(
+        laidOut,
+        fc.nat(),
+        fc.constantFrom("left", "right", "up", "down"),
+        (sketch, pick, side) => {
+          const i = pick % sketch.objects.length;
+          const { area } = ANSWER_TEMPLATE;
+          const objects = sketch.objects.map((o, j) =>
+            j !== i || o.kind !== "text"
+              ? o
+              : {
+                  ...o,
+                  x:
+                    side === "left"
+                      ? area.x0
+                      : side === "right"
+                        ? area.x1
+                        : o.x,
+                  y: side === "up" ? area.y0 : side === "down" ? area.y1 : o.y,
+                },
+          );
+          expectErrors(
+            validateSketch({ ...sketch, objects }, FRESH),
+            errors.outsideAnswerArea(`t${i}`),
+          );
+        },
+      ),
+    );
+  });
+
+  it('any text with "_" or "^" in it is always rejected', () => {
+    fc.assert(
+      fc.property(
+        word,
+        fc.constantFrom("_", "^"),
+        word,
+        (before, mark, after) => {
+          const sketch = answer(`${before}${mark}${after}`);
+          expectErrors(
+            validateSketch(sketch, FRESH),
+            errors.mathsInPlainText("t"),
+          );
+        },
+      ),
+    );
+    function answer(text: string): Sketch {
+      return {
+        objects: [{ kind: "text", id: "t", x: 800, y: 450, text, size: "s" }],
+        actions: [],
+      };
+    }
   });
 });
 

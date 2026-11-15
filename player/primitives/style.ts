@@ -11,8 +11,8 @@ import { coversCell, highlightColor, isPart, partKey } from "@/player/sceneAt";
 
 /**
  * The board's colours and font, as CSS custom properties: both themes' values are in
- * player/theme.css (ARCHITECTURE.md section 1), so the board follows the theme, and a sketch
- * layer (Whiteboard.tsx) re-points them at the answer blue.
+ * player/theme.css (ARCHITECTURE.md section 1), so the board, and a drawn answer, follow the
+ * theme.
  */
 export const INK = "var(--wb-ink)";
 export const MUTED = "var(--wb-muted)";
@@ -24,7 +24,7 @@ export const FRAME_BORDER = "var(--wb-frame)";
 /** STIX Two Text (next/font, app/layout.tsx): the board's numerals and maths. */
 export const FONT = "var(--wb-font)";
 
-/** `accent` is the lesson's yellow; inside a sketch layer it becomes the answer blue. */
+/** `accent` is the lesson's yellow, in a drawn answer too. */
 export const HIGHLIGHT: Record<
   HighlightColor,
   { fill: string; stroke: string }
@@ -33,20 +33,21 @@ export const HIGHLIGHT: Record<
   warn: { fill: "var(--wb-warn-fill)", stroke: "var(--wb-warn)" },
 };
 
-export const TEXT_SIZE = { s: 24, m: 32, l: 48 } as const;
 export const CELL_FONT = 26;
 
 /**
- * A text object's box (its highlight, and where arrows stop), from a rough
- * width: a pure render has no layout pass to measure the text.
+ * The sizes of text and formulas live in shared/boxes.ts, so the validator estimates the same
+ * boxes the board draws.
  */
-export function textBox(text: string, fontSize: number) {
-  const width = Math.max(1, [...text].length) * fontSize * 0.62;
-  return { w: width + fontSize, h: fontSize * 1.4 };
-}
+export {
+  GLYPH_EM,
+  KATEX_EM,
+  LATEX_FONT,
+  LATEX_PAD,
+  TEXT_SIZE,
+  textBox,
+} from "@/shared/boxes";
 
-/** Font size (px) a latex object's formula is set in: the size of a medium text. */
-export const LATEX_FONT = TEXT_SIZE.m;
 /**
  * The box a latex object is laid out in, centred on its x,y. KaTeX's size is
  * only known after layout, so the formula is centred in a box big enough for
@@ -54,12 +55,6 @@ export const LATEX_FONT = TEXT_SIZE.m;
  */
 export const LATEX_BOX = { w: 1200, h: 400 } as const;
 
-/** Padding (px) around a formula, inside its highlight box. */
-export const LATEX_PAD = { x: 12, y: 4 } as const;
-/** KaTeX sets formulas at 1.21em of the surrounding font (its stylesheet). */
-export const KATEX_EM = 1.21;
-/** Average formula glyph width, in ems, for estimating a formula's width. */
-export const GLYPH_EM = 0.6;
 /** Colour of tex KaTeX can't render (KaTeX's own default). */
 export const LATEX_ERROR = "#cc0000";
 
@@ -73,8 +68,11 @@ export const ARROW = {
   head: { len: 18, w: 14 },
   margin: 10,
   labelFont: 22,
-  /** Clear space between the line and the nearest edge of its label's box. */
-  labelGap: 6,
+  /**
+   * Clear space between the line and the nearest edge of its label's box: wide enough that
+   * the label never reads as struck through (#90).
+   */
+  labelGap: 14,
   /** The board-coloured outline behind a label, so it reads over the line. */
   labelHalo: 6,
 } as const;

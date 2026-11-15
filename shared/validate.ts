@@ -3,6 +3,7 @@
 // draws, so it must stay free of node-only imports.
 import katex from "katex";
 import type { z } from "zod";
+import { type Box, boxGap, boxInside, objectBox } from "./boxes";
 import { KATEX_OPTIONS } from "./latex";
 import {
   type Action,
@@ -80,7 +81,41 @@ export const errors = {
   narrationTooLong: () => "narration too long",
   narrationEmpty: () => "narration empty",
   cantAnchorToArrow: (id: string) => `can't anchor to "${id}"`,
+  tooManyObjects: (n: number) =>
+    `too many objects (${n}; an answer board takes at most ${ANSWER_TEMPLATE.maxObjects})`,
+  outsideAnswerArea: (id: string) => `outside the answer area "${id}"`,
+  tooClose: (a: string, b: string, gap: number) =>
+    `"${a}" and "${b}" are too close (leave ${gap} between them)`,
+  mathsInPlainText: (id: string) =>
+    `"_" or "^" in plain text "${id}" (write maths as a latex object)`,
 } as const;
+
+/**
+ * A fresh sketch is a drawn answer on its own clean board, the Answer view (ARCHITECTURE.md
+ * sections 5.6 and 8), laid out from one template: a short title at the top centre, the
+ * content centred in the content area, an optional one-line takeaway under it. The prompt
+ * describes it from these numbers, and checkSketch holds a fresh sketch to `maxObjects`,
+ * `area` and the gaps (every object's estimated box, shared/boxes.ts): `gap` between any two
+ * objects, `arrowGap` between two an arrow joins, so the arrow shows. The area keeps clear of
+ * the Answer view's tag and chip in the board's top corners.
+ */
+export const ANSWER_TEMPLATE = {
+  maxObjects: 8,
+  area: { x0: 120, y0: 60, x1: 1480, y1: 860 },
+  title: { x: 800, y: 110 },
+  content: { x0: 200, y0: 200, x1: 1400, y1: 760 },
+  takeaway: { x: 800, y: 810 },
+  gap: 40,
+  arrowGap: 80,
+} as const satisfies {
+  maxObjects: number;
+  gap: number;
+  arrowGap: number;
+  area: Box;
+  content: Box;
+  title: { x: number; y: number };
+  takeaway: { x: number; y: number };
+};
 
 function schemaErrors(error: z.ZodError): string[] {
   return error.issues.map((issue) => {
@@ -307,7 +342,7 @@ export function validateStep(
  * Known ids are the sketch's own objects plus the board's (none if `fresh`).
  */
 export function checkSketch(sketch: Sketch, ctx: SketchContext): string[] {
-  const out: string[] = [];
+  const out: string[] = ctx.fresh ? checkAnswerLayout(sketch) : [];
   const boardObjects = ctx.fresh ? [] : ctx.board.objects.map((s) => s.object);
   const objects = byId(sketch.objects, boardObjects);
   checkObjects(
@@ -319,6 +354,82 @@ export function checkSketch(sketch: Sketch, ctx: SketchContext): string[] {
   for (const action of sketch.actions)
     out.push(...checkAction(action, objects));
   return unique(out);
+}
+
+/** Underscores and carets are maths, which plain text shows raw ("d_k"). */
+const PLAIN_MATHS_RE = /[_^]/;
+
+/**
+ * The answer template's rules for a fresh sketch: at most `maxObjects` objects, each one's
+ * estimated box (and an arrow's point ends) inside `area` with room around it, and no maths
+ * in plain text (text, labels, matrix cells, and the values written into them).
+ */
+function checkAnswerLayout(sketch: Sketch): string[] {
+  const out: string[] = [];
+  const { maxObjects, area } = ANSWER_TEMPLATE;
+  if (sketch.objects.length > maxObjects)
+    out.push(errors.tooManyObjects(sketch.objects.length));
+  const inArea = (p: { x: number; y: number }) =>
+    boxInside({ x0: p.x, y0: p.y, x1: p.x, y1: p.y }, area);
+  out.push(...checkGaps(sketch.objects));
+  for (const obj of sketch.objects) {
+    const box = objectBox(obj);
+    const inside =
+      obj.kind === "arrow"
+        ? [obj.from, obj.to].every((a) => !isPoint(a) || inArea(a))
+        : box !== undefined && boxInside(box, area);
+    if (!inside) out.push(errors.outsideAnswerArea(obj.id));
+    if (plainTexts(obj).some((t) => PLAIN_MATHS_RE.test(t)))
+      out.push(errors.mathsInPlainText(obj.id));
+  }
+  for (const action of sketch.actions) {
+    if (action.do === "write" && PLAIN_MATHS_RE.test(action.value))
+      out.push(errors.mathsInPlainText(action.target.id));
+    if (action.do === "move" && isPoint(action.to) && !inArea(action.to))
+      out.push(errors.outsideAnswerArea(action.target.id));
+  }
+  return out;
+}
+
+/**
+ * Every two boxed objects at least `gap` apart, and two that an arrow joins (whole objects or
+ * their parts) at least `arrowGap`, so the arrow has room to show between them.
+ */
+function checkGaps(objects: readonly BoardObject[]): string[] {
+  const { gap, arrowGap } = ANSWER_TEMPLATE;
+  const joined = new Set<string>();
+  const pair = (a: string, b: string) => [a, b].sort().join(" ");
+  for (const obj of objects)
+    if (obj.kind === "arrow" && !isPoint(obj.from) && !isPoint(obj.to))
+      joined.add(pair(obj.from.id, obj.to.id));
+  const boxed = objects.flatMap((obj) => {
+    const box = objectBox(obj);
+    return box === undefined ? [] : [{ id: obj.id, box }];
+  });
+  const out: string[] = [];
+  boxed.forEach((a, i) => {
+    for (const b of boxed.slice(0, i)) {
+      const need = joined.has(pair(a.id, b.id)) ? arrowGap : gap;
+      if (boxGap(a.box, b.box) < need)
+        out.push(errors.tooClose(b.id, a.id, need));
+    }
+  });
+  return out;
+}
+
+/** What an object shows as plain text, not LaTeX. */
+function plainTexts(obj: BoardObject): string[] {
+  switch (obj.kind) {
+    case "text":
+      return [obj.text];
+    case "matrix":
+      return [...(obj.label ? [obj.label] : []), ...obj.rows.flat()];
+    case "arrow":
+      return obj.label ? [obj.label] : [];
+    case "latex":
+    case "image":
+      return [];
+  }
 }
 
 export function validateSketch(
