@@ -52,6 +52,9 @@ afterEach(() => {
   resetEnvForTests();
 });
 
+/** A step as Claude writes it on the wire: demo-m1 has no heatmaps or plots, so objectsJson is []. */
+const asWire = (step: object) => JSON.stringify({ ...step, objectsJson: "[]" });
+
 /** Runs generateStep against the scripted replies; returns the error it threw. */
 async function failure(replies: Parameters<typeof fakeClaude>[0]) {
   const claude = fakeClaude(replies);
@@ -63,15 +66,15 @@ async function failure(replies: Parameters<typeof fakeClaude>[0]) {
 
 describe("generateStep (G1)", () => {
   it("valid first time: returns the step after one request", async () => {
-    const claude = fakeClaude([fakeMessage(JSON.stringify(valid))]);
+    const claude = fakeClaude([fakeMessage(asWire(valid))]);
     await expect(generateStep(REQ, claude)).resolves.toEqual(valid);
     expect(claude.calls).toHaveLength(1);
   });
 
   it("invalid then valid: retries once with the errors, then returns the step", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const rejected = fakeMessage(JSON.stringify(invalid));
-    const claude = fakeClaude([rejected, fakeMessage(JSON.stringify(valid))]);
+    const rejected = fakeMessage(asWire(invalid));
+    const claude = fakeClaude([rejected, fakeMessage(asWire(valid))]);
 
     await expect(generateStep(REQ, claude)).resolves.toEqual(valid);
 
@@ -92,7 +95,7 @@ describe("generateStep (G1)", () => {
   it("output that fails the zod schema is a rejection, retried with the schema error", async () => {
     const noTitle = { ...valid, title: "" };
     const { claude } = await failure([
-      fakeMessage(JSON.stringify(noTitle)),
+      fakeMessage(asWire(noTitle)),
       new Anthropic.InternalServerError(
         500,
         undefined,
@@ -107,8 +110,8 @@ describe("generateStep (G1)", () => {
     const move = valid.actions.find((a) => a.do === "move")!;
     const noTo = { ...move, to: undefined };
     const claude = fakeClaude([
-      fakeMessage(JSON.stringify({ ...valid, actions: [noTo] })),
-      fakeMessage(JSON.stringify(valid)),
+      fakeMessage(asWire({ ...valid, actions: [noTo] })),
+      fakeMessage(asWire(valid)),
     ]);
     vi.spyOn(console, "warn").mockImplementation(() => {});
     await expect(generateStep(REQ, claude)).resolves.toEqual(valid);
@@ -120,7 +123,7 @@ describe("generateStep (G1)", () => {
   it("output that isn't JSON is a rejection, retried", async () => {
     const claude = fakeClaude([
       fakeMessage("not json"),
-      fakeMessage(JSON.stringify(valid)),
+      fakeMessage(asWire(valid)),
     ]);
     vi.spyOn(console, "warn").mockImplementation(() => {});
     await expect(generateStep(REQ, claude)).resolves.toEqual(valid);
@@ -131,8 +134,8 @@ describe("generateStep (G1)", () => {
 
   it("invalid twice: fails as rejected, with the second attempt's errors", async () => {
     const { err, claude } = await failure([
-      fakeMessage(JSON.stringify(invalid)),
-      fakeMessage(JSON.stringify({ ...valid, title: "" })),
+      fakeMessage(asWire(invalid)),
+      fakeMessage(asWire({ ...valid, title: "" })),
     ]);
     expect(claude.calls).toHaveLength(2);
     expect(err.reason).toBe("rejected");
@@ -155,7 +158,7 @@ describe("generateStep (G1)", () => {
 
   it("refusal on the retry: fails as refusal", async () => {
     const { err } = await failure([
-      fakeMessage(JSON.stringify(invalid)),
+      fakeMessage(asWire(invalid)),
       fakeMessage("", "refusal"),
     ]);
     expect(err.reason).toBe("refusal");
@@ -183,8 +186,8 @@ describe("generateStep (G1)", () => {
       narration: `${valid.narration} ${"word ".repeat(config.maxNarrationChars / 5)}`,
     };
     const claude = fakeClaude([
-      fakeMessage(JSON.stringify(long)),
-      fakeMessage(JSON.stringify(valid)),
+      fakeMessage(asWire(long)),
+      fakeMessage(asWire(valid)),
     ]);
     vi.spyOn(console, "warn").mockImplementation(() => {});
     await expect(generateStep(REQ, claude)).resolves.toEqual(valid);
@@ -195,7 +198,7 @@ describe("generateStep (G1)", () => {
 
   it("an empty first answer is retried without an empty assistant turn", async () => {
     const empty = { ...fakeMessage(""), content: [] };
-    const claude = fakeClaude([empty, fakeMessage(JSON.stringify(valid))]);
+    const claude = fakeClaude([empty, fakeMessage(asWire(valid))]);
     vi.spyOn(console, "warn").mockImplementation(() => {});
     await expect(generateStep(REQ, claude)).resolves.toEqual(valid);
     const retry = claude.calls[1].body.messages;
@@ -226,7 +229,7 @@ describe("generateStep (G1)", () => {
   });
 
   it("each attempt gets an abort signal as its total deadline", async () => {
-    const claude = fakeClaude([fakeMessage(JSON.stringify(valid))]);
+    const claude = fakeClaude([fakeMessage(asWire(valid))]);
     await generateStep(REQ, claude);
     expect(claude.calls[0].options?.signal).toBeInstanceOf(AbortSignal);
     expect(claude.calls[0].options?.signal?.aborted).toBe(false);
