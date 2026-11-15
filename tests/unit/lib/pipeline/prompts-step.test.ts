@@ -12,7 +12,9 @@ import {
   STEP_SYSTEM_PROMPT,
   stepContextPrompt,
   VIZ_EXAMPLES,
+  WIDGET_EXAMPLES,
 } from "@/lib/pipeline/prompts/step";
+import { PARAM_NAME_RE, WIDGET_LIMITS } from "@/shared/widget";
 import type { LessonPlanOutput } from "@/shared/lesson";
 import { MAX_PAPER_QUOTE_CHARS, VIZ_LIMITS } from "@/shared/scene";
 
@@ -152,6 +154,62 @@ describe("STEP_SYSTEM_PROMPT", () => {
         expect(STEP_SYSTEM_PROMPT).toContain(
           `action: ${JSON.stringify(action)}`,
         );
+    }
+  });
+});
+
+describe("the widget section (#110)", () => {
+  it("offers at most one widget, in widgetJson, left out when there's none", () => {
+    expect(STEP_SYSTEM_PROMPT).toContain("# Try it yourself");
+    expect(STEP_SYSTEM_PROMPT).toContain(
+      "It goes in widgetJson: a string holding one JSON object. Leave widgetJson out when the step has none",
+    );
+    expect(STEP_SYSTEM_PROMPT).toContain('starting "Try it yourself:"');
+  });
+
+  it("states the contract's limits", () => {
+    for (const limit of [
+      `at most ${WIDGET_LIMITS.maxPromptChars} characters`,
+      `at most ${WIDGET_LIMITS.maxExprChars} characters`,
+      `0 to ${WIDGET_LIMITS.maxParams} sliders`,
+      `1 to ${WIDGET_LIMITS.maxHeatmapDim} rows`,
+      `is at most ${WIDGET_LIMITS.maxLabelChars} characters`,
+    ])
+      expect(STEP_SYSTEM_PROMPT).toContain(limit);
+  });
+
+  it("states a parameter name's length as PARAM_NAME_RE allows it (16)", () => {
+    expect(STEP_SYSTEM_PROMPT).toContain("at most 16 characters, unique");
+    expect(PARAM_NAME_RE.test("a".repeat(16))).toBe(true);
+    expect(PARAM_NAME_RE.test("a".repeat(17))).toBe(false);
+  });
+
+  it("shows each example as the JSON string Claude writes, and each is a valid widget", () => {
+    for (const widget of Object.values(WIDGET_EXAMPLES)) {
+      expect(STEP_SYSTEM_PROMPT).toContain(
+        JSON.stringify(JSON.stringify(widget)),
+      );
+      const result = validateWireStep(
+        {
+          title: "An example",
+          narration: "Look [[go]]here. Try it yourself.",
+          objects: [
+            { kind: "text", id: "t", x: 800, y: 450, text: "an example" },
+          ],
+          objectsJson: "[]",
+          actions: [
+            {
+              cue: "go",
+              do: "highlight",
+              target: { id: "t" },
+              durationMs: 400,
+            },
+          ],
+          widgetJson: JSON.stringify(widget),
+        },
+        { maxNarrationChars: config.maxNarrationChars },
+      );
+      expect(result).toMatchObject({ ok: true, value: { widget } });
     }
   });
 });

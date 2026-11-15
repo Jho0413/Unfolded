@@ -23,6 +23,8 @@ import {
   paperContextPrompt,
 } from "@/lib/pipeline/prompts/paper";
 import { retryPromptFor } from "@/lib/pipeline/prompts/retry";
+import { FUNCTIONS } from "@/shared/expr";
+import { WIDGET_LIMITS } from "@/shared/widget";
 
 /**
  * The prompt's examples of objectsJson (#103, after docs/snippets/viz-objects.md), with the
@@ -167,6 +169,64 @@ ${exampleLines(VIZ_EXAMPLES.heatmap)}
 Example, a curve drawn on, then one point highlighted:
 ${exampleLines(VIZ_EXAMPLES.plot)}`;
 
+/**
+ * The prompt's examples of widgetJson (#110, after docs/snippets/widgets.md). Generic on
+ * purpose, and checked against the contract in tests/unit/lib/pipeline/prompts-step.test.ts.
+ */
+export const WIDGET_EXAMPLES = {
+  plot: {
+    kind: "plot",
+    prompt:
+      "Try it yourself: change a and b and watch the bell grow and narrow.",
+    expr: "a * exp(-b * x^2)",
+    x: [-3, 3],
+    y: [0, 3],
+    params: [
+      { name: "a", label: "height a", min: 0.5, max: 2.5, step: 0.1, value: 1 },
+      {
+        name: "b",
+        label: "narrowness b",
+        min: 0.2,
+        max: 4,
+        step: 0.1,
+        value: 1,
+      },
+    ],
+    xLabel: "x",
+    yLabel: "y",
+  },
+  heatmap: {
+    kind: "heatmap",
+    prompt:
+      "Try it yourself: raise one score, then lower the temperature to sharpen its row.",
+    values: [
+      [2, 1, 0.1],
+      [0.3, 2.5, 0.4],
+      [0.2, 1.9, 1.2],
+    ],
+    rowLabels: ["a", "b", "c"],
+    colLabels: ["a", "b", "c"],
+    transform: "softmax-rows",
+    temperature: { min: 0.1, max: 3, step: 0.1, value: 1 },
+  },
+} as const;
+
+/** Try-it-yourself widgets (#110): at most one per step, written as JSON text in widgetJson. */
+const WIDGET_PROMPT = `# Try it yourself
+
+A step may end with one widget that the learner plays with once the narration ends. It goes in widgetJson: a string holding one JSON object. Leave widgetJson out when the step has none, which is most steps. Add one only where playing with it teaches something the narration can't: a parameter whose effect is easier to feel than to describe, or a small calculation the learner can poke at. Skip it for definitions, history or prose. End the narration by inviting it ("Try it yourself: ..."), and give the widget a prompt of at most ${WIDGET_LIMITS.maxPromptChars} characters, starting "Try it yourself:", that says what to change and what to watch.
+
+- plot: kind, prompt, expr (a formula in x and the parameters, at most ${WIDGET_LIMITS.maxExprChars} characters), x and y ([min, max]; choose y to fit the curve across the sliders' whole range), params (0 to ${WIDGET_LIMITS.maxParams} sliders, each {name, label, min, max, step, value}, step above 0, value between min and max). Optional: xLabel, yLabel. Every label (a slider's, xLabel, yLabel) is at most ${WIDGET_LIMITS.maxLabelChars} characters. expr may use only numbers, x, the parameters' names, pi, e, + - * / ^ ( ), unary minus, and the functions ${FUNCTIONS.join(" ")} (min and max take two or more arguments). Write every * (2 * x, not 2x); ^ is a power, and -x^2 means -(x^2). A name is lowercase letters, digits and underscores, starting with a letter, at most 16 characters, unique, and not x, pi, e or a function's name. The curve must be finite somewhere at the starting values.
+- heatmap: kind, prompt, values (1 to ${WIDGET_LIMITS.maxHeatmapDim} rows of 1 to ${WIDGET_LIMITS.maxHeatmapDim} numbers, all the same length), which the learner edits. Optional: rowLabels and colLabels (one per row or column, at most ${WIDGET_LIMITS.maxLabelChars} characters each), transform "softmax-rows" to show each row as softmax(row / temperature), and with it a temperature slider {min, max, step, value} with min and step above 0 and value between min and max. Without a transform the grid shows the numbers as they are.
+
+The examples show the form only: write this step's own formula, numbers and labels.
+
+Example widgetJson, a curve with two sliders:
+${JSON.stringify(JSON.stringify(WIDGET_EXAMPLES.plot))}
+
+Example widgetJson, editable scores through softmax-rows:
+${JSON.stringify(JSON.stringify(WIDGET_EXAMPLES.heatmap))}`;
+
 export const STEP_SYSTEM_PROMPT = `You are a tutor who teaches a research paper one step at a time, speaking over a whiteboard. For each step you write a short spoken narration and the whiteboard that goes with it. Every visual change is tied to a word of the narration, so the board moves exactly as the learner hears it.
 
 The paper is attached. Teach from it: use its notation, definitions and numbers where they help, and keep small worked examples small enough to read on a board.
@@ -187,6 +247,8 @@ An object with hidden: true is on the board from the start but not drawn until a
 Each action has a cue (a marker name from the narration), a target and a durationMs (0 to ${MAX_DURATION_MS}, usually ${DEFAULT_DURATION_MS}). ${BOARD_ACTIONS_PROMPT}
 
 Several actions may share a cue; they run in the order listed.
+
+${WIDGET_PROMPT}
 
 ${PAPER_REFS_PROMPT}
 
