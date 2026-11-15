@@ -19,7 +19,12 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { DEFAULT_FOCUS, focusReducer, type Pane } from "@/player/paper/focus";
+import {
+  DEFAULT_FOCUS,
+  focusReducer,
+  holdTimer,
+  type Pane,
+} from "@/player/paper/focus";
 import { locateQuote, type PaperMatch } from "@/player/paper/locate";
 import { paperRefAt } from "@/player/paper/paperAt";
 import type { PaperHighlight } from "@/player/paper/PaperViewer";
@@ -60,10 +65,11 @@ export function useLessonPaper(
   const [focus, dispatch] = useReducer(focusReducer, DEFAULT_FOCUS);
   // A hold ends by itself: one timer for the current one.
   useEffect(() => {
-    if (focus.by === "default") return;
+    const timer = holdTimer(focus, performance.now());
+    if (timer === null) return;
     const id = setTimeout(
-      () => dispatch({ type: "tick", atMs: performance.now() }),
-      Math.max(0, focus.untilMs - performance.now()),
+      () => dispatch(timer.tick(performance.now())),
+      timer.delayMs,
     );
     return () => clearTimeout(id);
   }, [focus]);
