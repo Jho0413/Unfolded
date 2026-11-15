@@ -1,6 +1,7 @@
 // The scene contract (ARCHITECTURE.md section 4). Imported by the server and
 // the browser, so this file must stay free of node-only imports.
 import { z } from "zod";
+import { Widget } from "./widget";
 
 /** Virtual canvas: every coordinate is in this viewBox, origin top-left. */
 export const CANVAS = { w: 1600, h: 900 } as const;
@@ -371,6 +372,8 @@ export const Step = z.object({
   actions: z.array(CuedAction),
   /** Passages of the paper, in narration order (issue #98). Absent in older runs. */
   paperRefs: z.array(CuedPaperRef).optional(),
+  /** A "try it yourself" widget shown when the narration ends (issue #110). */
+  widget: Widget.optional(),
 });
 export type Step = z.infer<typeof Step>;
 
