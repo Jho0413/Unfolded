@@ -1,6 +1,6 @@
-// POST /api/lessons/<lessonId>/steps/<n> (ROADMAP G2, ARCHITECTURE.md sections 5.1, 6.2 and 7).
-// One test per cell of the section 6.2 table except the A1 ones, named "<state> x <event>", run
-// through the route, plus the route's rejections (a bad lessonId or n). Nothing real is called:
+// POST /api/lessons/<lessonId>/steps/<n> (ROADMAP G2 and A1, ARCHITECTURE.md sections 5.1, 5.4,
+// 6.2 and 7). One test per cell of the section 6.2 table, named "<state> x <event>", run through
+// the route, plus the route's rejections (a bad lessonId or n) and adaptation's rows (A1). Nothing real is called:
 // Claude is lib/fakes/claude.ts (scripted per test) and TTS is its FAKE_APIS=1 fake, and runs go
 // to a temp runs dir.
 import { mkdtemp, readdir, rm } from "node:fs/promises";
@@ -25,10 +25,13 @@ import { NoAlignmentError, stripMarkers } from "@/lib/narration/cues";
 import { TtsError } from "@/lib/narration/tts";
 import type { SavedPaper } from "@/lib/pipeline/plan";
 import {
+  appendSignal,
   PAPER_FILE,
   PLAN_FILE,
   readRunJson,
   saveStepVersion,
+  SIGNALS_FILE,
+  writeRunFile,
   writeRunJson,
 } from "@/lib/runs/store";
 import {
@@ -193,7 +196,12 @@ describe("section 6.2: notRequested", () => {
     // Saved as SavedStep with its audio, exactly what the route answered.
     expect(await stepFiles()).toEqual(["step-0.v1.json", "step-0.v1.mp3"]);
     const saved = await readRunJson(LESSON, "step-0.v1.json", SavedStep);
-    expect(saved).toEqual({ step: body.step, cueTimes: body.cueTimes });
+    // With no signals.json, the generation used signals version 0, and adapted to nothing.
+    expect(saved).toEqual({
+      step: body.step,
+      cueTimes: body.cueTimes,
+      signalsVersion: 0,
+    });
   });
 
   it("notRequested x request for step n > 0: the previous step's saved narration goes to Claude", async () => {
@@ -547,5 +555,303 @@ describe("replay mode (REPLAY_RUN): the saved run only, no provider call", () =>
       STEP_ROUTE_ERRORS.noSuchStep,
     );
     expect(claude.calls).toHaveLength(0);
+  });
+});
+
+describe("adaptation (A1, section 5.4): a question makes a step that hasn't started stale", () => {
+  const QUESTION = { question: "why divide by root d?", step: 0, t: 1200 };
+
+  /** Saves a version of step n made with signals version `signalsVersion` (absent: before A1). */
+  async function saveVersion(n: number, signalsVersion?: number) {
+    const step = Step.parse(await readFixture("demo-m1.step.json"));
+    const saved: SavedStep = { step, cueTimes: {}, signalsVersion };
+    const version = await saveStepVersion(
+      LESSON,
+      n,
+      saved,
+      new Uint8Array([1]),
+    );
+    return { saved, version };
+  }
+  const sentToClaude = (claude: FakeClaude, i = 0) =>
+    JSON.stringify(claude.calls[i].body.messages[0].content);
+
+  it("stale step regenerated with adaptedFrom: v2 with the question sent to Claude, signalsVersion and adaptedFrom saved", async () => {
+    await saveVersion(1, 0);
+    await appendSignal(LESSON, QUESTION);
+    const claude = script(validReply);
+    vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const res = await post(LESSON, "1");
+    expect(res.status).toBe(200);
+    const body = StepResponse.parse(await res.json());
+    expect(body.version).toBe(2);
+    expect(body.audioUrl).toBe(`/api/runs/${LESSON}/step-1.v2.mp3`);
+    expect(body.signalsVersion).toBe(1);
+    expect(body.adaptedFrom).toEqual({
+      kind: "question",
+      text: QUESTION.question,
+      atStep: 0,
+    });
+    expect(claude.calls).toHaveLength(1);
+    expect(sentToClaude(claude)).toContain(`- Asked: ${QUESTION.question}`);
+    expect(sentToClaude(claude)).toContain("<learner_messages>");
+    // Saved as the route answered it; v1 is kept, never overwritten.
+    const saved = await readRunJson(LESSON, "step-1.v2.json", SavedStep);
+    expect(saved).toMatchObject({
+      signalsVersion: 1,
+      adaptedFrom: body.adaptedFrom,
+    });
+    expect(await stepFiles()).toEqual([
+      "step-1.v1.json",
+      "step-1.v1.mp3",
+      "step-1.v2.json",
+      "step-1.v2.mp3",
+    ]);
+    // Once regenerated, the next request is served the new version.
+    const again = StepResponse.parse(await (await post(LESSON, "1")).json());
+    expect(again.version).toBe(2);
+    expect(claude.calls).toHaveLength(1);
+  });
+
+  it("a step saved before signals existed (no signalsVersion) is stale once a question arrives", async () => {
+    await saveVersion(1);
+    await appendSignal(LESSON, QUESTION);
+    script(validReply);
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const body = StepResponse.parse(await (await post(LESSON, "1")).json());
+    expect(body.version).toBe(2);
+    expect(body.adaptedFrom?.text).toBe(QUESTION.question);
+  });
+
+  it("several new questions: Claude gets only the ones the old version didn't see, adaptedFrom names the newest", async () => {
+    await appendSignal(LESSON, { question: "an old question?", step: 0 });
+    await saveVersion(1, 1);
+    await appendSignal(LESSON, { question: "first new?", step: 0 });
+    await appendSignal(LESSON, { started: 0, version: 1 });
+    await appendSignal(LESSON, { simplify: "slower please", step: 0 });
+    await appendSignal(LESSON, { question: "second new?", step: 0, t: 40 });
+    const claude = script(validReply);
+    vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const body = StepResponse.parse(await (await post(LESSON, "1")).json());
+    expect(body.signalsVersion).toBe(4);
+    expect(body.adaptedFrom).toEqual({
+      kind: "question",
+      text: "second new?",
+      atStep: 0,
+    });
+    const sent = sentToClaude(claude);
+    expect(sent).toContain("- Asked: first new?");
+    expect(sent).toContain("- Asked to simplify: slower please");
+    expect(sent).toContain("- Asked: second new?");
+    expect(sent).not.toContain("an old question?");
+  });
+
+  it("a simplify request regenerates too, with adaptedFrom kind simplify", async () => {
+    await saveVersion(1, 0);
+    await appendSignal(LESSON, { simplify: "too fast", step: 0, t: 10 });
+    script(validReply);
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const body = StepResponse.parse(await (await post(LESSON, "1")).json());
+    expect(body.adaptedFrom).toEqual({
+      kind: "simplify",
+      text: "too fast",
+      atStep: 0,
+    });
+  });
+
+  it("not stale (same version): served as saved, no provider call", async () => {
+    await appendSignal(LESSON, QUESTION);
+    const { saved } = await saveVersion(1, 1);
+    const claude = script();
+    state.ttsError = new Error("TTS must not be called");
+    const body = StepResponse.parse(await (await post(LESSON, "1")).json());
+    expect(body).toEqual({
+      ...saved,
+      version: 1,
+      audioUrl: `/api/runs/${LESSON}/step-1.v1.mp3`,
+    });
+    expect(claude.calls).toHaveLength(0);
+  });
+
+  it("a started signal alone makes nothing stale", async () => {
+    await saveVersion(1, 0);
+    await appendSignal(LESSON, { started: 0, version: 1 });
+    const claude = script();
+    expect(
+      StepResponse.parse(await (await post(LESSON, "1")).json()).version,
+    ).toBe(1);
+    expect(claude.calls).toHaveLength(0);
+  });
+
+  it("a first version made with signals: they go to Claude and signalsVersion is saved, but no adaptedFrom (nothing replaced)", async () => {
+    await appendSignal(LESSON, QUESTION);
+    const claude = script(validReply);
+    const body = StepResponse.parse(await (await post(LESSON, "1")).json());
+    expect(body.version).toBe(1);
+    expect(body.signalsVersion).toBe(1);
+    expect(body.adaptedFrom).toBeUndefined();
+    expect(sentToClaude(claude)).toContain(`- Asked: ${QUESTION.question}`);
+    const saved = await readRunJson(LESSON, "step-1.v1.json", SavedStep);
+    expect(saved).not.toHaveProperty("adaptedFrom");
+  });
+
+  it("a new version over a damaged newest file, with no newer signals: no adaptedFrom", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    await writeRunJson(LESSON, "step-1.v1.json", { step: "damaged" });
+    script(validReply);
+    const body = StepResponse.parse(await (await post(LESSON, "1")).json());
+    expect(body.version).toBe(2);
+    expect(body.adaptedFrom).toBeUndefined();
+  });
+
+  it("started step never regenerated: after a newer question, the played version is served", async () => {
+    await saveVersion(1, 0);
+    await appendSignal(LESSON, { started: 1, version: 1 });
+    await appendSignal(LESSON, QUESTION);
+    const claude = script();
+    const body = StepResponse.parse(await (await post(LESSON, "1")).json());
+    expect(body.version).toBe(1);
+    expect(claude.calls).toHaveLength(0);
+    expect(await stepFiles()).toEqual(["step-1.v1.json", "step-1.v1.mp3"]);
+  });
+
+  it("started x request: the played version, not a newer one saved after it", async () => {
+    await saveVersion(1, 0);
+    await saveVersion(1, 0);
+    await appendSignal(LESSON, { started: 1, version: 1 });
+    const claude = script();
+    const body = StepResponse.parse(await (await post(LESSON, "1")).json());
+    expect(body.version).toBe(1);
+    expect(body.audioUrl).toBe(`/api/runs/${LESSON}/step-1.v1.mp3`);
+    expect(claude.calls).toHaveLength(0);
+  });
+
+  it("a played version whose file is missing: the latest is served, still never regenerated", async () => {
+    await saveVersion(1, 0);
+    await appendSignal(LESSON, { started: 1, version: 7 });
+    await appendSignal(LESSON, QUESTION);
+    const claude = script();
+    const body = StepResponse.parse(await (await post(LESSON, "1")).json());
+    expect(body.version).toBe(1);
+    expect(claude.calls).toHaveLength(0);
+  });
+
+  it("generation failure keeps serving the old version: logged with the route's failure line, 200 with v1, and not retried until a newer signal", async () => {
+    const logs = quietLogs();
+    await saveVersion(1, 0);
+    await appendSignal(LESSON, QUESTION);
+    const claude = script(fakeMessage("", "refusal"), validReply);
+
+    const res = await post(LESSON, "1");
+    expect(res.status).toBe(200);
+    expect(StepResponse.parse(await res.json()).version).toBe(1);
+    expect(logs.logged()).toContain(
+      `[api/lessons/steps] ${LESSON} step 1: failed (claudeFailed), keeping v1`,
+    );
+    expect(await stepFiles()).toEqual(["step-1.v1.json", "step-1.v1.mp3"]);
+
+    // The kept version is ready: the next request is served it, with no new attempt.
+    expect(
+      StepResponse.parse(await (await post(LESSON, "1")).json()).version,
+    ).toBe(1);
+    expect(claude.calls).toHaveLength(1);
+
+    // A newer signal makes it stale again; the regeneration gets both questions.
+    await appendSignal(LESSON, { question: "and the softmax?", step: 0 });
+    const body = StepResponse.parse(await (await post(LESSON, "1")).json());
+    expect(body.version).toBe(2);
+    expect(body.adaptedFrom?.text).toBe("and the softmax?");
+    expect(sentToClaude(claude, 1)).toContain(`- Asked: ${QUESTION.question}`);
+  });
+
+  it("a regeneration whose TTS fails keeps the old version too", async () => {
+    const logs = quietLogs();
+    await saveVersion(1, 0);
+    await appendSignal(LESSON, QUESTION);
+    script(validReply);
+    state.ttsError = new TtsError("quota", "ElevenLabs TTS returned 429");
+    const res = await post(LESSON, "1");
+    expect(res.status).toBe(200);
+    expect(StepResponse.parse(await res.json()).version).toBe(1);
+    expect(logs.logged()).toContain("failed (ttsFailed), keeping v1");
+  });
+
+  it("staleGenerating: a question while v1 is generating; a request waiting on it is decided again and gets v2", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const { claude, release, firstCall } = gatedClaude(validReply, validReply);
+    const first = post(LESSON, "1");
+    await firstCall;
+    await appendSignal(LESSON, QUESTION);
+    const second = post(LESSON, "1");
+    release();
+    const a = StepResponse.parse(await (await first).json());
+    const b = StepResponse.parse(await (await second).json());
+    expect(a.version).toBe(1);
+    expect(a.signalsVersion).toBe(0);
+    expect(b.version).toBe(2);
+    expect(b.adaptedFrom?.text).toBe(QUESTION.question);
+    expect(claude.calls).toHaveLength(2);
+  });
+
+  it("generating x started n: v1 starts playing while v2 is made; v2 is discarded and v1 served", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    await saveVersion(1, 0);
+    await appendSignal(LESSON, QUESTION);
+    const { release, firstCall } = gatedClaude(validReply);
+    const regenerating = post(LESSON, "1");
+    await firstCall;
+    await appendSignal(LESSON, { started: 1, version: 1 });
+    release();
+    const body = StepResponse.parse(await (await regenerating).json());
+    expect(body.version).toBe(1);
+    expect(await stepFiles()).toEqual(["step-1.v1.json", "step-1.v1.mp3"]);
+    expect(info.mock.calls.flat().join(" ")).toContain(
+      `${LESSON} step 1: v1 started while regenerating; discarded`,
+    );
+  });
+
+  it("a damaged signals.json: logged, read as no signals, and the step is still served", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await saveVersion(1, 0);
+    await writeRunFile(LESSON, SIGNALS_FILE, "{ not json");
+    const claude = script();
+    expect(
+      StepResponse.parse(await (await post(LESSON, "1")).json()).version,
+    ).toBe(1);
+    expect(claude.calls).toHaveLength(0);
+    expect(warn.mock.calls.flat().join(" ")).toContain(
+      `${LESSON}/${SIGNALS_FILE} is not a signals file`,
+    );
+  });
+
+  describe("replay mode never regenerates", () => {
+    function replay() {
+      vi.stubEnv("REPLAY_RUN", LESSON);
+      resetEnvForTests();
+      return script();
+    }
+
+    it("a stale step is served as saved, with no provider call", async () => {
+      await saveVersion(1, 0);
+      await appendSignal(LESSON, QUESTION);
+      const claude = replay();
+      const body = StepResponse.parse(await (await post(LESSON, "1")).json());
+      expect(body.version).toBe(1);
+      expect(claude.calls).toHaveLength(0);
+      expect(state.ttsCalls).toBe(0);
+      expect(await stepFiles()).toEqual(["step-1.v1.json", "step-1.v1.mp3"]);
+    });
+
+    it("the played version is served, not the latest (section 5.5)", async () => {
+      await saveVersion(1, 0);
+      await saveVersion(1, 1);
+      await appendSignal(LESSON, { started: 1, version: 1 });
+      const claude = replay();
+      const body = StepResponse.parse(await (await post(LESSON, "1")).json());
+      expect(body.version).toBe(1);
+      expect(claude.calls).toHaveLength(0);
+    });
   });
 });

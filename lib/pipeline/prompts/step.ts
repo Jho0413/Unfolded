@@ -48,7 +48,10 @@ export interface StepPromptInput {
   n: number;
   /** The previous step's narration, if it has been generated. */
   previousNarration?: string;
-  /** The learner's signals so far (section 5.4). Only questions and simplify requests are used. */
+  /**
+   * The learner's signals this step adapts to (section 5.4): those the version it replaces
+   * didn't see. Only questions and simplify requests are used.
+   */
   signals: readonly Signal[];
 }
 
@@ -93,7 +96,7 @@ export function stepContextPrompt({
   );
   if (learner.length > 0) {
     parts.push(
-      `<learner_messages>\n${learner.join("\n")}\n</learner_messages>\nAdapt this step to what the learner asked, where it's relevant.`,
+      `<learner_messages>\n${learner.join("\n")}\n</learner_messages>\nThe learner sent these during the lesson. Adapt this step to them: where one bears on this step, address it in the narration as you teach.`,
     );
   }
 
