@@ -61,6 +61,27 @@ test("speaking stops the narration at once, the question is answered, and 'carry
   await expect(listening(page)).toHaveText("Listening");
 });
 
+test("after a spoken 'carry on', the agent speaking about it seconds later doesn't stop the lesson (QA A2)", async ({
+  page,
+}) => {
+  await using run = await savedRun("e2e-voice-late-sure");
+  await playing(page, run.lessonId);
+  await say(page, "What is this?");
+  await expect(player(page)).toHaveAttribute("data-state", "asking");
+  await say(page, "ok, carry on");
+  await expect(player(page)).toHaveAttribute("data-state", "playing");
+  // The agent's "Sure." as a second turn, well after ACK_WAIT_MS (2 s).
+  await page.waitForTimeout(2500);
+  await page.evaluate(() => window.__qaFake?.agentSays("Sure, carrying on."));
+  await page.waitForTimeout(300);
+  await expect(player(page)).toHaveAttribute("data-state", "playing");
+  await expect(panel(page)).toHaveAttribute("data-open", "false");
+  expect(await audioPaused(page)).toBe(false);
+  // The learner speaking still stops it at once.
+  await say(page, "wait, what?");
+  await expect(player(page)).toHaveAttribute("data-state", "asking");
+});
+
 test("spoken commands: skip ahead, say that again, go to a step then carry on", async ({
   page,
 }) => {

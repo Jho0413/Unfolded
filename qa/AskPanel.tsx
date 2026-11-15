@@ -197,10 +197,16 @@ export function AskPanel({
             sketchDrawn,
             pointed,
             sketching: setSketching,
-            afterAgentSpeaks: (fn) => agentTurn.after(fn),
+            // A spoken command: once it runs, the agent talking about it isn't barge-in
+            // (qa/bargeIn.ts quietAgent, QA A2).
+            afterAgentSpeaks: (fn) =>
+              agentTurn.after(() => {
+                bargeIn.quietAgent();
+                fn();
+              }),
           })
         : tools,
-    [tools, link, sketchDrawn, pointed, agentTurn],
+    [tools, link, sketchDrawn, pointed, agentTurn, bargeIn],
   );
   // A question typed in the box before Ask was open: sent once Ask opens (text-first).
   const pending = useRef<string | null>(null);
