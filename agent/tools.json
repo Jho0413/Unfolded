@@ -19,6 +19,31 @@
       "type": "client",
       "config": "tool_configs/simplify_upcoming.json",
       "id": "tool_5701m7dhcyssfdv9gnvpy1d1p6tg"
+    },
+    {
+      "type": "client",
+      "config": "tool_configs/resume_lesson.json",
+      "id": "tool_8801m7eachazea8b0sfp8cywhasr"
+    },
+    {
+      "type": "client",
+      "config": "tool_configs/pause_lesson.json",
+      "id": "tool_1801m7eactdjecz9vwpt8z329s38"
+    },
+    {
+      "type": "client",
+      "config": "tool_configs/next_step.json",
+      "id": "tool_5301m7eactxvfw296tcx522c3gsb"
+    },
+    {
+      "type": "client",
+      "config": "tool_configs/previous_step.json",
+      "id": "tool_6701m7eacvewftsasnza1xaxd80h"
+    },
+    {
+      "type": "client",
+      "config": "tool_configs/replay_step.json",
+      "id": "tool_0801m7eacw0df7f9a87gmeb6ffn1"
     }
   ]
 }
