@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildContextUpdate,
   narrationUpTo,
+  PASSAGES_HEADER,
   type QaContext,
 } from "@/qa/context";
 
@@ -60,6 +61,46 @@ describe("buildContextUpdate", () => {
     });
     expect(text).toContain(
       "Questions asked earlier in this lesson:\n- What is a row?\n- Why multiply?",
+    );
+  });
+});
+
+describe("buildContextUpdate: the step's paper passages (QA A1)", () => {
+  it("lists each passage verbatim with its page and label, after the board", () => {
+    const text = buildContextUpdate({
+      ...base,
+      paperRefs: [
+        {
+          page: 1,
+          label: "Abstract",
+          quote: "ensembles are too computationally expensive",
+        },
+        { page: 4, quote: 'We call this "distillation"' },
+      ],
+    });
+    expect(text).toContain(
+      [
+        "Objects on the board (ids for highlight): q, k, out",
+        "Passages this step quotes (verbatim):",
+        '- p.1 (Abstract) "ensembles are too computationally expensive"',
+        '- p.4 "We call this "distillation""',
+      ].join("\n"),
+    );
+  });
+
+  it("puts a quote broken over lines on one line (findQuote ignores whitespace)", () => {
+    expect(
+      buildContextUpdate({
+        ...base,
+        paperRefs: [{ page: 2, quote: "a row\ntimes  a column " }],
+      }),
+    ).toContain('- p.2 "a row times a column"');
+  });
+
+  it("says nothing about passages when the step has none", () => {
+    expect(buildContextUpdate(base)).not.toContain(PASSAGES_HEADER);
+    expect(buildContextUpdate({ ...base, paperRefs: [] })).not.toContain(
+      PASSAGES_HEADER,
     );
   });
 });
