@@ -54,6 +54,11 @@ export const ARROW = {
   stroke: 3,
   head: { len: 18, w: 14 },
   margin: 10,
+  /**
+   * The visible length an arrow between two boxes keeps (twice its head) before its ends move
+   * into the boxes' margins; a shorter one keeps half its length (./arrowGeometry.ts).
+   */
+  minLength: 36,
   labelFont: 22,
   /**
    * Clear space between the line and the nearest edge of its label's box: wide enough that
