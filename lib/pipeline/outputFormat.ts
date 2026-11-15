@@ -20,6 +20,7 @@ import {
   Anchor,
   BoardObject,
   type CuedAction,
+  CuedPaperRef,
   HighlightColor,
   MAX_DURATION_MS,
   OBJECT_ID_RE,
@@ -82,6 +83,8 @@ export const WireStep = z.object({
       ...wireOptional,
     }),
   ),
+  /** Last, after everything the board needs (#98). An empty list isn't saved. */
+  paperRefs: z.array(CuedPaperRef).optional(),
 });
 export type WireStep = z.infer<typeof WireStep>;
 
@@ -171,6 +174,8 @@ export function wireToStep(wire: WireStep): Converted<Step> {
       narration: wire.narration,
       objects: wire.objects,
       actions: actions.value satisfies CuedAction[],
+      ...(wire.paperRefs !== undefined &&
+        wire.paperRefs.length > 0 && { paperRefs: wire.paperRefs }),
     },
     errors: actions.errors,
   };

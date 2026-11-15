@@ -367,11 +367,10 @@ describe("field coverage: the wire has every contract action field and kind", ()
   });
 
   it("the wire step and sketch have the contract's top-level fields", () => {
-    // paperRefs (#98) isn't on the wire yet: Jason removes this exception once WireStep has it.
     expect(Object.keys(WireStep.shape).sort()).toEqual(
       Object.keys(Step.shape)
-        // widget (#110) isn't on the wire yet either (S3: no grammar headroom); same for Jason.
-        .filter((k) => k !== "paperRefs" && k !== "widget")
+        // widget (#110) isn't on the wire yet (S3: no grammar headroom); same for Jason.
+        .filter((k) => k !== "widget")
         .sort(),
     );
     expect(Object.keys(WireSketch.shape).sort()).toEqual(
@@ -637,11 +636,13 @@ describe("validateWireStep / validateWireSketch", () => {
 /**
  * The API compiles each schema into a grammar and rejects one that is too large (#27). Its
  * limit isn't documented, so these are the measured sizes of the schemas a real request
- * accepted (2026-11-14), with a little room. One more object kind on top of them was
- * rejected (S3), and is about 280 bytes, so it fails here first: probe a bigger schema with a
- * real request before raising the budget.
+ * accepted, with a little room: 3864 bytes for the step with paperRefs (#98, 2026-11-15).
+ * Size isn't the whole story: one more object kind on top of the 2026-11-14 schemas (about
+ * 280 bytes, a member of the object union) was rejected (S3), while paperRefs (about 420
+ * bytes, no union) was accepted. Probe a bigger schema with a real request before raising
+ * the budget.
  */
-const SCHEMA_BUDGET_BYTES = 3600;
+const SCHEMA_BUDGET_BYTES = 4000;
 /** The documented cap on optional properties across a request's strict schemas. */
 const MAX_OPTIONAL_PROPERTIES = 24;
 
