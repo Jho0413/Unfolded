@@ -25,6 +25,7 @@ export type FakeTurn = {
   match: RegExp;
   /** Called before the reply; its result is recorded in `toolCalls`. */
   tool?: { name: ClientToolName; params: Record<string, unknown> };
+  /** What the agent says; empty: nothing (after a control tool, #138). */
   reply: string;
   /**
    * Speak the reply first, then call the tool and wait for it, as the real agent does with
@@ -41,31 +42,32 @@ export const DEFAULT_SCRIPT: readonly FakeTurn[] = [
     tool: { name: "go_to_step", params: { step: 1 } },
     reply: "Sure, we'll go there once you close this.",
   },
-  // The learner's spoken commands (issue #93).
+  // The learner's spoken commands (issue #93). The agent says nothing after one (its prompt,
+  // #138), so these turns have no reply.
   {
     match: /\b(carry on|go on|continue)\b/i,
     tool: { name: "resume_lesson", params: {} },
-    reply: "Sure.",
+    reply: "",
   },
   {
     match: /\b(hold on|pause)\b/i,
     tool: { name: "pause_lesson", params: {} },
-    reply: "Okay, holding on.",
+    reply: "",
   },
   {
     match: /\b(skip ahead|next step)\b/i,
     tool: { name: "next_step", params: {} },
-    reply: "Moving on.",
+    reply: "",
   },
   {
     match: /\b(go back|previous step)\b/i,
     tool: { name: "previous_step", params: {} },
-    reply: "Going back.",
+    reply: "",
   },
   {
     match: /\bsay that again\b/i,
     tool: { name: "replay_step", params: {} },
-    reply: "Once more.",
+    reply: "",
   },
   {
     match: /first row/i,
@@ -236,7 +238,7 @@ export class FakeConversation {
     const speak = async () => {
       await tick();
       if (this.status !== "connected") return false;
-      this.emit({ role: "agent", text: turn.reply });
+      if (turn.reply) this.emit({ role: "agent", text: turn.reply });
       return true;
     };
     if (turn.speakFirst && !(await speak())) return;

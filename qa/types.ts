@@ -1,6 +1,7 @@
 // Types shared by the conversation adapter (qa/conversation.ts), its scripted
 // fake (qa/fakeConversation.ts) and the Ask panel. No @elevenlabs/react here:
 // only qa/conversation.ts imports it (ARCHITECTURE.md section 8).
+import type { LessonCommand } from "@/player/controls";
 import type { ClientToolName, ClientToolParams } from "@/shared/tools";
 
 /** One line of the Ask transcript. */
@@ -60,6 +61,11 @@ export type AskApi = {
   pointed: (at: "board" | "paper") => void;
   /** A draw_scene answer is being made (true) or no longer (false): the card's "Sketching…". */
   sketching: (on: boolean) => void;
+  /**
+   * A control tool ran for the latest question (resume_lesson, replay_step, ...): the agent
+   * says nothing after one, so the card shows what it did instead of "Thinking…" (QA A8).
+   */
+  commanded: (command: LessonCommand) => void;
   /**
    * Runs `fn` once the agent has finished speaking (after a short wait for it to start if it's
    * quiet: qa/bargeIn.ts AgentTurn), so a spoken command

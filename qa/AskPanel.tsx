@@ -38,7 +38,11 @@ import {
   askAboutPrefill,
   type PaperSelection,
 } from "@/player/paper/selection";
-import { type AskClose, isTextEntry } from "@/player/controls";
+import {
+  type AskClose,
+  isTextEntry,
+  type LessonCommand,
+} from "@/player/controls";
 import { AskBox, CardNotice, TutorCard } from "@/player/TutorCard";
 
 export const ASK_MESSAGES = {
@@ -107,11 +111,14 @@ const NO_DRAWING: {
   drewFor: number | null;
   boardFor: number | null;
   paperFor: number | null;
+  /** The spoken command a question was (QA A8): the agent stays quiet after one. */
+  command: { for: number; command: LessonCommand } | null;
 } = {
   asked: 0,
   drewFor: null,
   boardFor: null,
   paperFor: null,
+  command: null,
 };
 
 /** A transcript line, and whether it was typed (the card says "You asked" or "You said"). */
@@ -202,6 +209,11 @@ export function AskPanel({
       setDrawn((d) => ({ ...d, [`${at}For`]: d.asked })),
     [],
   );
+  const commanded = useCallback(
+    (command: LessonCommand) =>
+      setDrawn((d) => ({ ...d, command: { for: d.asked, command } })),
+    [],
+  );
   // A draw_scene answer is being made: the card says "Sketching…" (#105).
   const [sketching, setSketching] = useState(false);
 
@@ -225,6 +237,7 @@ export function AskPanel({
             sketchDrawn,
             pointed,
             sketching: setSketching,
+            commanded,
             // A spoken command: once it runs, the agent talking about it isn't barge-in
             // (qa/bargeIn.ts quietAgent, QA A2).
             afterAgentSpeaks: (fn) =>
@@ -234,7 +247,7 @@ export function AskPanel({
               }),
           })
         : tools,
-    [tools, link, sketchDrawn, pointed, agentTurn, bargeIn],
+    [tools, link, sketchDrawn, pointed, commanded, agentTurn, bargeIn],
   );
   // A question typed in the box before Ask was open: sent once Ask opens (text-first).
   const pending = useRef<string | null>(null);
@@ -525,6 +538,7 @@ export function AskPanel({
     pointedAtBoard: drawn.boardFor === drawn.asked,
     pointedAtPaper: drawn.paperFor === drawn.asked,
     sketching,
+    command: drawn.command?.for === drawn.asked ? drawn.command.command : null,
     captions,
   });
 
