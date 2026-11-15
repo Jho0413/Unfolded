@@ -8,12 +8,9 @@ import {
   isPoint,
   type Point,
 } from "@/shared/scene";
-import type { Size } from "@/shared/boxes";
+import { type Size, TEXT_SIZE, textBox } from "@/shared/boxes";
 import { renderLatex } from "./katex";
-import { ARROW, TEXT_SIZE, textBox } from "./style";
-
-/** A box's width and height, centred on an arrow end. */
-export type { Size } from "@/shared/boxes";
+import { ARROW } from "./style";
 
 /**
  * The box of what an arrow end names, centred on where it resolves: a matrix's

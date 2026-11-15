@@ -280,6 +280,9 @@ export const BoardState = z.object({
 });
 export type BoardState = z.infer<typeof BoardState>;
 
+/** A board with nothing on it (a step still loading, a drawn answer's starting board). */
+export const EMPTY_BOARD: BoardState = { objects: [], copies: [], active: [] };
+
 /** Centre of cell (r, c) of a matrix whose top-left corner is (x, y). */
 export function cellCentre(x: number, y: number, r: number, c: number): Point {
   return { x: x + CELL.w * c + CELL.w / 2, y: y + CELL.h * r + CELL.h / 2 };

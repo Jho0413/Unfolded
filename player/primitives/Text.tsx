@@ -1,14 +1,13 @@
 // A text object, centred on (x, y), with an optional whole-object highlight.
 import type { ActiveAction, ObjectState, TextObject } from "@/shared/scene";
+import { TEXT_SIZE, textBox } from "@/shared/boxes";
 import {
   HIGHLIGHT,
   INK,
-  TEXT_SIZE,
   fadeOpacity,
   highlightAttr,
   objectProgress,
   opacityAttr,
-  textBox,
 } from "./style";
 
 export function Text({

@@ -36,19 +36,6 @@ export const HIGHLIGHT: Record<
 export const CELL_FONT = 26;
 
 /**
- * The sizes of text and formulas live in shared/boxes.ts, so the validator estimates the same
- * boxes the board draws.
- */
-export {
-  GLYPH_EM,
-  KATEX_EM,
-  LATEX_FONT,
-  LATEX_PAD,
-  TEXT_SIZE,
-  textBox,
-} from "@/shared/boxes";
-
-/**
  * The box a latex object is laid out in, centred on its x,y. KaTeX's size is
  * only known after layout, so the formula is centred in a box big enough for
  * any lesson formula; what overflows it is still drawn.

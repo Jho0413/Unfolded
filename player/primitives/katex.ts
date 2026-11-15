@@ -4,7 +4,7 @@
 // and a lesson has few formulas, so each tex is rendered once.
 import katex from "katex";
 import { KATEX_OPTIONS } from "@/shared/latex";
-import { estimateSize, type Size } from "@/shared/boxes";
+import { latexSize, type Size } from "@/shared/boxes";
 import { LATEX_ERROR } from "./style";
 
 export interface RenderedLatex {
@@ -34,7 +34,7 @@ export function renderLatex(tex: string): RenderedLatex {
       // throwOnError: false only covers parse errors. Logged once per tex.
       console.error("KaTeX failed to render tex", { tex, error });
     }
-    out = { html, size: estimateSize(html ?? tex) };
+    out = { html, size: latexSize(tex) };
     rendered.set(tex, out);
   }
   return out;

@@ -7,14 +7,9 @@ import { describe, expect, it, vi } from "vitest";
 import { FIXED, sceneState } from "@/app/dev/board/scenes";
 import { Whiteboard } from "@/player/Whiteboard";
 import { renderLatex } from "@/player/primitives/katex";
-import { estimateSize } from "@/shared/boxes";
 import { arrowGeometry, targetBox } from "@/player/primitives/arrowGeometry";
-import {
-  ARROW,
-  LATEX_ERROR,
-  TEXT_SIZE,
-  textBox,
-} from "@/player/primitives/style";
+import { estimateSize, latexSize, TEXT_SIZE, textBox } from "@/shared/boxes";
+import { ARROW, LATEX_ERROR } from "@/player/primitives/style";
 import {
   type Anchor,
   type BoardState,
@@ -149,6 +144,45 @@ describe("estimateSize", () => {
       estimateSize(renderLatex("abcd").html!).w,
     );
     expect(estimateSize("plain")).toEqual(estimateSize("plaix"));
+  });
+});
+
+describe("latexSize: a matrix is as wide as its widest row, not all its cells", () => {
+  const bmatrix = (rows: string[][]) =>
+    `\\begin{bmatrix}${rows.map((r) => r.join("&")).join("\\\\")}\\end{bmatrix}`;
+
+  it("more rows of the same cells: as wide", () => {
+    const row = [["1", "22", "3"]];
+    const three = [row[0], ["4", "5", "6"], ["7", "8", "9"]];
+    expect(latexSize(bmatrix(three)).w).toBe(latexSize(bmatrix(row)).w);
+    expect(latexSize(bmatrix(three)).h).toBeGreaterThan(
+      latexSize(bmatrix(row)).h,
+    );
+  });
+
+  it("a 4 x 3 matrix is far narrower than counting every cell", () => {
+    const tex = bmatrix([
+      ["10", "20", "30"],
+      ["40", "50", "60"],
+      ["70", "80", "90"],
+      ["11", "12", "13"],
+    ]);
+    const counted = estimateSize(renderLatex(tex).html!).w;
+    expect(latexSize(tex).w).toBeLessThan(counted * 0.7);
+  });
+
+  it("a wider cell widens its column, and text beside the matrix counts too", () => {
+    const narrow = latexSize(bmatrix([["1", "2"]])).w;
+    expect(latexSize(bmatrix([["1000", "2"]])).w).toBeGreaterThan(narrow);
+    expect(latexSize(`A=${bmatrix([["1", "2"]])}`).w).toBeGreaterThan(narrow);
+  });
+
+  it("the board uses the same estimate (renderLatex's size)", () => {
+    const tex = bmatrix([
+      ["1", "2"],
+      ["3", "4"],
+    ]);
+    expect(renderLatex(tex).size).toEqual(latexSize(tex));
   });
 });
 

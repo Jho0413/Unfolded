@@ -57,33 +57,77 @@ const STRUT_RE =
 /** A line with no strut (an error, plain text) is one text line high. */
 export const LATEX_LINE_EM = 1.2;
 
+/** How many glyphs KaTeX's HTML draws (its visible part only). */
+function glyphCount(html: string): number {
+  const body = html.match(KATEX_HTML_RE)?.[1] ?? html;
+  const text = body
+    .replace(/<[^>]*>/g, "")
+    .replace(/&[^;]+;/g, "x") // an entity is one glyph
+    .replace(/​/g, ""); // KaTeX's zero-width spaces
+  return [...text].length;
+}
+
+/** A formula's width for `glyphs` glyphs, padding included. */
+function formulaWidth(glyphs: number): number {
+  const em = LATEX_FONT * KATEX_EM;
+  return Math.max(1, glyphs) * em * GLYPH_EM + 2 * LATEX_PAD.x;
+}
+
 /**
  * A formula's box from KaTeX's HTML: its height from KaTeX's struts (at least one text line),
  * its width from its glyph count. Stacked parts (fractions, limits) count every glyph, so the
- * width errs wide and arrows stop short rather than overlap.
+ * width errs wide and arrows stop short rather than overlap; `latexSize` narrows matrices.
  */
 export function estimateSize(html: string): Size {
   const body = html.match(KATEX_HTML_RE)?.[1] ?? html;
   const struts = [...body.matchAll(STRUT_RE)].map(
     (m) => Number(m[1]) + Math.max(0, -Number(m[2] ?? 0)),
   );
-  const text = body
-    .replace(/<[^>]*>/g, "")
-    .replace(/&[^;]+;/g, "x") // an entity is one glyph
-    .replace(/​/g, ""); // KaTeX's zero-width spaces
   const em = LATEX_FONT * KATEX_EM;
   return {
-    w: Math.max(1, [...text].length) * em * GLYPH_EM + 2 * LATEX_PAD.x,
+    w: formulaWidth(glyphCount(html)),
     h: Math.max(LATEX_LINE_EM, ...struts) * em + 2 * LATEX_PAD.y,
   };
 }
 
-/** A formula's estimated box; tex KaTeX can't render at all is sized as its source. */
+/** A matrix environment in tex (not nested): its name, then its body. */
+const MATRIX_ENV_RE =
+  /\\begin\{([pbBvV]?matrix|smallmatrix)\}([\s\S]*?)\\end\{\1\}/g;
+/** Glyphs each of a matrix's brackets, and the space between two of its columns, take. */
+const MATRIX_BRACKET_GLYPHS = 1;
+const MATRIX_COLUMN_GAP_GLYPHS = 2;
+
+function render(tex: string): string {
+  return katex.renderToString(tex, { ...KATEX_OPTIONS, throwOnError: false });
+}
+
+/** A matrix body's width in glyphs: each column as wide as its widest cell. */
+function matrixGlyphs(body: string): number {
+  const rows = body
+    .split(/\\\\/)
+    .map((row) => row.split("&"))
+    .filter((row) => row.join("").trim() !== "");
+  const cols = Math.max(0, ...rows.map((row) => row.length));
+  let glyphs =
+    2 * MATRIX_BRACKET_GLYPHS +
+    MATRIX_COLUMN_GAP_GLYPHS * Math.max(0, cols - 1);
+  for (let c = 0; c < cols; c++)
+    glyphs += Math.max(...rows.map((row) => glyphCount(render(row[c] ?? ""))));
+  return glyphs;
+}
+
+/**
+ * A formula's estimated box; tex KaTeX can't render at all is sized as its source. A matrix
+ * counts the widest cell of each column, not every cell: its rows stack.
+ */
 export function latexSize(tex: string): Size {
   try {
-    return estimateSize(
-      katex.renderToString(tex, { ...KATEX_OPTIONS, throwOnError: false }),
-    );
+    const size = estimateSize(render(tex));
+    const matrices = [...tex.matchAll(MATRIX_ENV_RE)];
+    if (matrices.length === 0) return size;
+    const outside = glyphCount(render(tex.replace(MATRIX_ENV_RE, "")));
+    const inside = matrices.reduce((n, m) => n + matrixGlyphs(m[2]), 0);
+    return { ...size, w: formulaWidth(outside + inside) };
   } catch {
     return estimateSize(tex);
   }
