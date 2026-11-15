@@ -198,6 +198,34 @@ describe("the answer player (AnswerViewAudio)", () => {
     expect(warn).toHaveBeenCalled();
   });
 
+  it("a barge-in right after play (the play aborted): stays paused, not an audio failure", async () => {
+    let abort: (err: unknown) => void = () => {};
+    const { answers, warn } = player(
+      () => new Promise<void>((_resolve, reject) => (abort = reject)),
+    );
+    const outcome = answers.play(BLOB);
+    answers.send("learnerSpoke");
+    abort(new DOMException("interrupted by pause()", "AbortError"));
+    await expect(outcome).resolves.toMatchObject({ kind: "paused" });
+    await Promise.resolve();
+    expect(answers.state()).toBe("paused");
+    expect(warn).not.toHaveBeenCalled();
+    // So "carry on" still goes on with the answer.
+    expect(answers.send("resume")).toBe(true);
+  });
+
+  it("a play that fails after a pause: ignored, the answer stays held", async () => {
+    let fail: (err: unknown) => void = () => {};
+    const { answers } = player(
+      () => new Promise<void>((_resolve, reject) => (fail = reject)),
+    );
+    void answers.play(BLOB);
+    answers.send("learnerSpoke");
+    fail(new DOMException("no", "NotSupportedError"));
+    await Promise.resolve();
+    expect(answers.state()).toBe("paused");
+  });
+
   it("playing x the audio element errors: done with the full drawing", async () => {
     const { answers, audio } = player();
     const outcome = answers.play(BLOB);

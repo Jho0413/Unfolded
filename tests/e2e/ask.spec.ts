@@ -4,7 +4,7 @@
 // window.__qaFake for these tests.
 import { expect, type Page, test } from "@playwright/test";
 import { answer, askByVoice, askInput, carryOn } from "./support/tutor";
-import { narratedReply } from "./support/answer";
+import { lessonOf, narratedReply } from "./support/answer";
 
 const ASK = {
   unavailable: "Questions are unavailable right now.",
@@ -213,7 +213,7 @@ test.describe("draw_scene on /dev/ask (ROADMAP Q5)", () => {
     const gate = new Promise<void>((r) => (release = r));
     await page.route("**/api/sketch", async (route) => {
       await gate;
-      await route.fulfill({ json: narratedReply(SKETCH) });
+      await route.fulfill({ json: narratedReply(lessonOf(route), SKETCH) });
     });
     await open(page);
     await toPlaying(page);
@@ -261,7 +261,7 @@ test.describe("draw_scene on /dev/ask (ROADMAP Q5)", () => {
       "a sketch invalid on the board",
       {
         status: 200,
-        json: narratedReply({
+        json: narratedReply("dev-ask", {
           narration: "[[c]]Here it is.",
           objects: [],
           actions: [

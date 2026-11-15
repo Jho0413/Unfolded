@@ -5,7 +5,7 @@
 import { expect, type Page, test } from "@playwright/test";
 import { savedRun } from "./support/savedRun";
 import { answer, askByKey, askInput, askQuestion } from "./support/tutor";
-import { narratedReply } from "./support/answer";
+import { lessonOf, narratedReply } from "./support/answer";
 
 test.use({
   launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
@@ -227,7 +227,7 @@ test("'hold on' while asking with a sketch in flight (no Answer view): Ask, the 
   await page.route("**/api/sketch", async (route) => {
     await gate;
     await route.fulfill({
-      json: narratedReply({
+      json: narratedReply(lessonOf(route), {
         narration: "Here it is.",
         objects: [
           {

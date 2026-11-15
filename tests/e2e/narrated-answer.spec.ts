@@ -6,7 +6,7 @@
 import { expect, type Page, test } from "@playwright/test";
 import { answerShownResult } from "@/qa/drawScene";
 import { CARD_TEXT } from "@/player/cardView";
-import { fakeAnswerAudio, narratedReply } from "./support/answer";
+import { fakeAnswerAudio, lessonOf, narratedReply } from "./support/answer";
 import { savedRun } from "./support/savedRun";
 
 test.use({
@@ -54,7 +54,7 @@ async function gatedAnswer(page: Page) {
   const gate = new Promise<void>((r) => (release = r));
   await page.route("**/api/sketch", async (route) => {
     await gate;
-    await route.fulfill({ json: narratedReply(SKETCH, CUES) });
+    await route.fulfill({ json: narratedReply(lessonOf(route), SKETCH, CUES) });
   });
   return () => release();
 }
@@ -135,7 +135,7 @@ test("done x say that again: from 0, the drawing reset; then carry on closes Ask
   await fakeAnswerAudio(page, 1500);
   await page.route("**/api/sketch", (route) =>
     route.fulfill({
-      json: narratedReply(SKETCH, { first: 300, second: 900 }),
+      json: narratedReply(lessonOf(route), SKETCH, { first: 300, second: 900 }),
     }),
   );
   await askForDrawing(page, run.lessonId);
@@ -162,7 +162,7 @@ test("audio fails to load: the whole drawing at once (degrade, don't fail), and 
   await using run = await savedRun("e2e-narrated-no-audio");
   await fakeAnswerAudio(page, 0, 404);
   await page.route("**/api/sketch", (route) =>
-    route.fulfill({ json: narratedReply(SKETCH, CUES) }),
+    route.fulfill({ json: narratedReply(lessonOf(route), SKETCH, CUES) }),
   );
   await askForDrawing(page, run.lessonId);
   await expect(answerView(page)).toBeVisible();
@@ -187,9 +187,7 @@ test("generation fails: Couldn't draw that, nothing drawn, and the agent answers
     "Couldn't draw that.",
   );
   await expect(answerView(page)).toHaveCount(0);
-  await expect(page.getByTestId("card-wait")).not.toHaveText(
-    CARD_TEXT.sketching,
-  );
+  await expect(page.getByText(CARD_TEXT.sketching)).toHaveCount(0);
   await expect
     .poll(() => drawResults(page))
     .toEqual([expect.stringContaining("Answer in words")]);
@@ -201,7 +199,7 @@ test("Ask closes while the answer plays (Got it, carry on): the narration stops 
   await using run = await savedRun("e2e-narrated-close");
   await fakeAnswerAudio(page, AUDIO_MS);
   await page.route("**/api/sketch", (route) =>
-    route.fulfill({ json: narratedReply(SKETCH, CUES) }),
+    route.fulfill({ json: narratedReply(lessonOf(route), SKETCH, CUES) }),
   );
   await askForDrawing(page, run.lessonId);
   await expect.poll(() => visible(page, "p1")).toBe("true");

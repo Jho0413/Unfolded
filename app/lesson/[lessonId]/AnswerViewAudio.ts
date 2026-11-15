@@ -64,8 +64,11 @@ export function createAnswerPlayer(deps: AnswerPlayerDeps = {}) {
     if (next.to === "playing") {
       if (p.audio === null) return send("audioFailed");
       p.audio.play().catch((err: unknown) => {
+        // A pause right after play() (the learner barging in at once) aborts the play: not a
+        // failure. Only a play that should still be playing degrades the answer.
+        if (err instanceof DOMException && err.name === "AbortError") return;
         log.warn("[answer] play failed", err);
-        if (current === p) send("audioFailed");
+        if (current === p && p.state === "playing") send("audioFailed");
       });
     } else {
       p.audio?.pause();

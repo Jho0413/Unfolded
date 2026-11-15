@@ -11,7 +11,7 @@ import {
   carryOn,
   holdOn,
 } from "./support/tutor";
-import { narratedReply } from "./support/answer";
+import { lessonOf, narratedReply } from "./support/answer";
 
 test.use({
   launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
@@ -54,7 +54,7 @@ test("typed question -> asking -> highlight, then draw (the Answer view) -> carr
   const gate = new Promise<void>((r) => (release = r));
   await page.route("**/api/sketch", async (route) => {
     await gate;
-    await route.fulfill({ json: narratedReply(SKETCH) });
+    await route.fulfill({ json: narratedReply(lessonOf(route), SKETCH) });
   });
   await page.goto(`/lesson/${run.lessonId}`);
   await expect(player(page)).toHaveAttribute("data-state", "playing");

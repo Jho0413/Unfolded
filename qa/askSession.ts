@@ -1,8 +1,8 @@
 // One lesson's Ask session state, outside React (ARCHITECTURE.md section 8):
 // the Ask layer drawn on the frozen board (or a drawn answer instead, on its
-// own clock), when Ask opened, and which Ask session it is. The page opens and closes it as the player enters and leaves
-// `asking`; the client tools and the board read it. A small store, so tool
-// handlers can read it outside render.
+// own clock), when Ask opened, and which Ask session it is. The page opens and
+// closes it as the player enters and leaves `asking`; the client tools and the
+// board read it. A small store, so tool handlers can read it outside render.
 import type { TimedAction } from "@/player/sceneAt";
 import type { CueTimes } from "@/shared/lesson";
 import type { Action, SceneObject, BoardState, Sketch } from "@/shared/scene";

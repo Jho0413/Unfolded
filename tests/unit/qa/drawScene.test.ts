@@ -6,6 +6,7 @@ import { config } from "@/lib/config";
 import { SKETCH_FAILED } from "@/shared/lesson";
 import {
   ANSWER_LEFT,
+  answerAudioOf,
   answerPausedResult,
   answerShownResult,
   createDrawScene,
@@ -204,6 +205,25 @@ describe("drawScene", () => {
     );
     await drawScene(deps, "x");
     expectFailed(deps, "x", "bad response");
+  });
+
+  it("a response whose audio is another lesson's fails (the boundary check on the route's URL)", async () => {
+    const { deps } = setup(async () =>
+      json({
+        ...answer(fresh),
+        audioUrl: "/api/runs/other-lesson/answers/a1.mp3",
+      }),
+    );
+    await drawScene(deps, "x");
+    expectFailed(deps, "x", "bad response");
+  });
+
+  it("answerAudioOf: only the lesson's own answers folder", () => {
+    expect(answerAudioOf(AUDIO_URL, "lesson-1")).toBe(true);
+    expect(answerAudioOf(AUDIO_URL, "lesson")).toBe(false);
+    expect(answerAudioOf("/api/runs/lesson-1/step-0.v1.mp3", "lesson-1")).toBe(
+      false,
+    );
   });
 
   it("a response with no cue times fails", async () => {

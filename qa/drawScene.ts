@@ -12,7 +12,7 @@
 // in words. Only the latest request counts: whatever comes back for an older
 // one (an answer or a failure) is dropped.
 import { fetchAudioBlob } from "@/player/stepLoader";
-import { SKETCH_FAILED, SketchResponse } from "@/shared/lesson";
+import { ANSWERS_DIR, SKETCH_FAILED, SketchResponse } from "@/shared/lesson";
 import { EMPTY_BOARD } from "@/shared/scene";
 import { parseNarration, validateSketch } from "@/shared/validate";
 import { narrationUpTo } from "./context";
@@ -89,6 +89,11 @@ export function answerPausedResult(
   return `Paused after: ${heard === "" ? "(nothing yet)" : `${heard}…`}`;
 }
 
+/** Whether an answer's audio URL is in `lessonId`'s answers folder (pure). */
+export function answerAudioOf(audioUrl: string, lessonId: string): boolean {
+  return audioUrl.startsWith(`/api/runs/${lessonId}/${ANSWERS_DIR}/`);
+}
+
 /** The tool's result when the learner left the answer (Ask closed, or a newer one replaced it). */
 export const ANSWER_LEFT =
   "The learner left this answer before it finished. Don't describe it.";
@@ -158,7 +163,8 @@ async function requestSketch(
     return fail(current, deps, description, `HTTP ${res.status}`);
   }
   const parsed = SketchResponse.safeParse(body);
-  if (!parsed.success) {
+  // The audio must be this lesson's own (the route builds the URL; this is the boundary check).
+  if (!parsed.success || !answerAudioOf(parsed.data.audioUrl, deps.lessonId)) {
     settled();
     return fail(current, deps, description, "bad response");
   }

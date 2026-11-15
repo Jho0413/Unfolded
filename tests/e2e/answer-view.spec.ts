@@ -14,7 +14,7 @@ import { CANVAS } from "@/shared/scene";
 import { ANSWER_TEMPLATE } from "@/shared/validate";
 import { savedRun } from "./support/savedRun";
 import { answer, askQuestion, carryOn, goOn } from "./support/tutor";
-import { narratedReply } from "./support/answer";
+import { lessonOf, narratedReply } from "./support/answer";
 
 test.use({
   launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
@@ -56,7 +56,9 @@ const SECOND = answerSketch("second", "The same, again");
 async function fakeSketches(page: Page) {
   let n = 0;
   await page.route("**/api/sketch", (route) =>
-    route.fulfill({ json: narratedReply(n++ === 0 ? FIRST : SECOND) }),
+    route.fulfill({
+      json: narratedReply(lessonOf(route), n++ === 0 ? FIRST : SECOND),
+    }),
   );
 }
 

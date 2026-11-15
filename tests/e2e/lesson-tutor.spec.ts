@@ -21,7 +21,7 @@ import {
   nextIdea,
   sayAgain,
 } from "./support/tutor";
-import { narratedReply } from "./support/answer";
+import { lessonOf, narratedReply } from "./support/answer";
 
 test.use({
   launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
@@ -271,7 +271,7 @@ test("a draw_scene answer: Drawing on the board, in the Answer view instead of t
   page,
 }) => {
   await page.route("**/api/sketch", (route) =>
-    route.fulfill({ json: narratedReply(SKETCH) }),
+    route.fulfill({ json: narratedReply(lessonOf(route), SKETCH) }),
   );
   await using run = await savedRun("e2e-tutor-drawn");
   await page.goto(`/lesson/${run.lessonId}`);
@@ -461,7 +461,7 @@ test("the system's theme with nothing saved: light when it prefers light", async
 for (const theme of ["dark", "light"] as const) {
   test(`evidence: the tutor at 1440 x 900, ${theme}`, async ({ page }) => {
     await page.route("**/api/sketch", (route) =>
-      route.fulfill({ json: narratedReply(SKETCH) }),
+      route.fulfill({ json: narratedReply(lessonOf(route), SKETCH) }),
     );
     await using run = await savedRun(`e2e-tutor-shots-${theme}`, {
       steps: 3,

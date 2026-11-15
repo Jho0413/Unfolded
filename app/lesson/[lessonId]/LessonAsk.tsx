@@ -33,6 +33,7 @@ import { type AskSignals, noteCommands } from "@/qa/askSignals";
 import { createClientTools } from "@/qa/tools";
 import type { AskApi } from "@/qa/types";
 import type { LessonPlan } from "@/shared/lesson";
+import { parseNarration } from "@/shared/validate";
 import { AnswerView } from "./AnswerView";
 import { type AnswerPlayer, createAnswerPlayer } from "./AnswerViewAudio";
 import { answerCommand } from "./AnswerViewPlayback";
@@ -119,7 +120,11 @@ export function LessonAsk({
           const was = answerShowing(session);
           session.showAnswer(answer.sketch, answer.cueTimes);
           ask.sketchDrawn();
-          tellAnswerContext(ask.tellAgent, was, { kind: "drawn", description });
+          tellAnswerContext(ask.tellAgent, was, {
+            kind: "drawn",
+            description,
+            narration: parseNarration(answer.sketch.narration).spoken,
+          });
           return answerPlayer.play(answer.audio);
         },
         send,

@@ -26,6 +26,18 @@ describe("answerContextUpdate", () => {
     );
   });
 
+  it("a narrated answer (#105): the update also gives the narrator's words, so the agent knows them if they leak into the mic", () => {
+    expect(
+      answerContextUpdate(false, {
+        ...drawn("why divide"),
+        narration: "Dividing keeps the scores small.",
+      }),
+    ).toBe(
+      `${ANSWER_CONTEXT.showing("why divide")}\n${ANSWER_CONTEXT.narrating("Dividing keeps the scores small.")}`,
+    );
+    expect(ANSWER_CONTEXT.narrating("x")).toContain("not the learner");
+  });
+
   it("Answer, Ask closes: Back on the lesson.", () => {
     expect(answerContextUpdate(true, closed)).toBe("Back on the lesson.");
   });

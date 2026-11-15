@@ -9,7 +9,10 @@ import { NoAlignmentError } from "@/lib/narration/cues";
 import { TtsError } from "@/lib/narration/tts";
 import { GenerationError } from "@/lib/pipeline/generate";
 import { narratedAnswer, SketchRequestBody } from "@/lib/pipeline/sketch";
+import { fakesEnabled } from "@/lib/fakes";
+import { PLAN_FILE, readRunJson } from "@/lib/runs/store";
 import {
+  LessonPlan,
   SKETCH_FAILED,
   type ApiError,
   type SketchResponse,
@@ -38,6 +41,17 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   try {
+    // The answer's audio goes in the lesson's run folder: the lesson must exist, so no paid
+    // request is made, and no folder created, for an id that isn't one. Fake mode (e2e,
+    // /dev/ask, which has no lesson) costs nothing and keeps its answers in a folder of their own.
+    const { lessonId } = body.data;
+    if (
+      !fakesEnabled() &&
+      (await readRunJson(lessonId, PLAN_FILE, LessonPlan)) === undefined
+    ) {
+      console.warn(TAG, `no such lesson: ${lessonId}`);
+      return failed(404);
+    }
     const answer = await narratedAnswer(body.data);
     return Response.json(answer satisfies SketchResponse);
   } catch (err) {

@@ -24,6 +24,7 @@ import {
   SketchResponse,
 } from "@/shared/lesson";
 import { NoAlignmentError } from "@/lib/narration/cues";
+import { PLAN_FILE, writeRunJson } from "@/lib/runs/store";
 import { TtsError } from "@/lib/narration/tts";
 import { ANSWER_TEMPLATE, errors } from "@/shared/validate";
 import {
@@ -50,9 +51,12 @@ vi.mock("@/lib/narration/tts", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/narration/tts")>();
   return {
     ...real,
-    narrate: (...args: Parameters<typeof real.narrate>) => {
-      voice.narrated.push(args[0]);
-      return voice.error ? Promise.reject(voice.error) : real.narrate(...args);
+    // Always the TTS fake, whatever the mode: a route test never reaches ElevenLabs.
+    narrate: (narration: string) => {
+      voice.narrated.push(narration);
+      return voice.error
+        ? Promise.reject(voice.error)
+        : real.narrate(narration, { mode: "fake" });
     },
   };
 });
@@ -617,6 +621,46 @@ describe("POST /api/sketch: a narrated answer (#105)", () => {
       await post({ description: "point at it", board: BOARD }),
       502,
     );
+  });
+
+  describe("real mode: the lesson must exist (it keeps the answer's audio)", () => {
+    function realMode() {
+      vi.stubEnv("FAKE_APIS", undefined);
+      vi.stubEnv("REPLAY_RUN", undefined);
+      vi.stubEnv("NEXT_PUBLIC_FAKE_APIS", undefined);
+      vi.stubEnv("BUILT_WITH_BROWSER_FAKES", undefined);
+      vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+      vi.stubEnv("ELEVENLABS_API_KEY", "test-key");
+      vi.stubEnv("ELEVENLABS_VOICE_ID", "test-voice");
+      resetEnvForTests();
+    }
+
+    it("a lessonId with no plan.json: 404 Couldn't draw that, no Claude or voice call, no folder made", async () => {
+      const logs = quietLogs();
+      realMode();
+      const fake = script(reply(NARRATED));
+      await expectFailed(
+        await post({ description: "x", board: BOARD, lessonId: "nope" }),
+        404,
+      );
+      expect(fake.calls).toHaveLength(0);
+      expect(voice.narrated).toEqual([]);
+      expect(logs.warned()).toContain("no such lesson: nope");
+      await expect(readdir(path.join(voice.runs, "nope"))).rejects.toThrow();
+    });
+
+    it("a lesson with its plan: the answer is made", async () => {
+      realMode();
+      await writeRunJson(LESSON, PLAN_FILE, {
+        title: "t",
+        coverPrompt: "c",
+        steps: [{ title: "s", goal: "g" }],
+      });
+      script(reply(NARRATED));
+      const res = await post({ description: "x", board: BOARD });
+      expect(res.status).toBe(200);
+      expect(voice.narrated).toEqual([NARRATED.narration]);
+    });
   });
 
   it("a sketch whose action's cue isn't in its narration: unknown cue, retried once with it", async () => {

@@ -73,8 +73,9 @@ export type AskPanelProps = {
    */
   onLearnerMessage?: (text: string) => void;
   /**
-   * The learner spoke while Ask is open in a voice session (the same signals as barge-in,
-   * qa/bargeIn.ts): the lesson page holds a drawn answer's narration with it (#105).
+   * The learner spoke while Ask is open in a voice session (barge-in's VAD and transcript
+   * signals, qa/bargeIn.ts, not the agent speaking): the lesson page holds a drawn answer's
+   * narration with it (#105).
    */
   onLearnerSpeech?: (signal: BargeInSignal) => void;
 };
@@ -167,7 +168,8 @@ export function AskPanel({
   const [agentTurn] = useState(() => new AgentTurn());
   // Barge-in (issue #93): armed while the lesson's session listens with Ask closed.
   const [bargeIn] = useState(() => new BargeIn());
-  // The same signals while Ask is open (#105): the learner speaking over a drawn answer.
+  // The learner's own signals (VAD and transcripts, not the agent speaking) while Ask is open
+  // (#105): the learner speaking over a drawn answer.
   const [speech] = useState(() => new BargeIn());
   // The learner's privacy switch for the lesson's mic (issue #93).
   const [muted, setMuted] = useState(false);
@@ -205,10 +207,12 @@ export function AskPanel({
         return;
       }
       // Words in the lesson's session with Ask closed: the learner spoke, or the agent did.
-      for (const b of [bargeIn, speech]) {
-        if (m.role === "user") b.transcript(m.text);
-        else b.agentSpeaking(true);
-      }
+      // While Ask is open only the learner's words count (`speech`): the agent's own voice
+      // never holds a drawn answer.
+      if (m.role === "user") {
+        bargeIn.transcript(m.text);
+        speech.transcript(m.text);
+      } else bargeIn.agentSpeaking(true);
       addMessage(m);
     },
     onError: (message) => connectorRef.current?.error(message),
@@ -218,7 +222,6 @@ export function AskPanel({
     },
     onAgentSpeaking: (speaking) => {
       bargeIn.agentSpeaking(speaking);
-      speech.agentSpeaking(speaking);
       agentTurn.setSpeaking(speaking);
     },
   });
