@@ -31,6 +31,7 @@ import { Whiteboard } from "./Whiteboard";
 import { stepView } from "./viewport";
 import { WidgetPanel, WidgetPrompt } from "./widget/WidgetPanel";
 import { Help } from "./help/Help";
+import { useBoardZoom } from "./zoom/useBoardZoom";
 import { widgetOnScreen } from "./widget/widgetView";
 import styles from "./Player.module.css";
 
@@ -98,6 +99,8 @@ export function PlayerStage({
   useShortcuts(send);
   const boardFocus = usePaneFocus("board", onFocusPane);
   const paperFocus = usePaneFocus("paper", onFocusPane);
+  // On a phone, a tap on the board zooms it (./zoom/useBoardZoom.ts).
+  const zoom = useBoardZoom(state, send);
   // On a phone the panes are tabs (Player.module.css): the learner's tab for this step wins,
   // otherwise the focus rules pick it.
   const [chosenTab, setChosenTab] = useState<{
@@ -201,8 +204,17 @@ export function PlayerStage({
             ))}
           </div>
         )}
-        <div className={styles.board} data-testid="board-pane" {...boardFocus}>
-          <div className={styles.drawing}>
+        <div
+          className={styles.board}
+          data-testid="board-pane"
+          data-zoom={zoom.zoomed ? "1" : undefined}
+          {...boardFocus}
+        >
+          <div
+            className={styles.drawing}
+            data-testid="board-drawing"
+            onClick={zoom.onDrawingClick}
+          >
             <div className={styles.fit}>
               {renderBoard ? (
                 renderBoard(player)
@@ -211,6 +223,19 @@ export function PlayerStage({
               )}
             </div>
           </div>
+          {zoom.enabled && (
+            <button
+              type="button"
+              className={zoom.zoomed ? styles.zoomClose : styles.zoomOpen}
+              data-testid={zoom.zoomed ? "zoom-close" : "zoom-open"}
+              aria-label={
+                zoom.zoomed ? "Close the zoomed board" : "Zoom the board"
+              }
+              onClick={zoom.zoomed ? zoom.close : zoom.open}
+            >
+              <span aria-hidden>{zoom.zoomed ? "✕" : "⤢"}</span>
+            </button>
+          )}
           {state.kind === "loading" && (
             <div className={styles.preparing} data-testid="board-preparing">
               <div>
