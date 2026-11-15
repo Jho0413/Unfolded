@@ -9,7 +9,12 @@ import { isHelpKey, SHORTCUTS } from "../controls";
 import { SPOKEN_COMMANDS } from "./spoken";
 import styles from "./Help.module.css";
 
-export function Help() {
+export function Help({
+  ask = true,
+}: {
+  /** Whether the page has the Ask panel (its `A` key and the mic's spoken commands). */
+  ask?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
 
@@ -61,14 +66,21 @@ export function Help() {
           if (e.target === e.currentTarget) setOpen(false);
         }}
       >
-        {open && <HelpContent onClose={() => setOpen(false)} />}
+        {open && <HelpContent ask={ask} onClose={() => setOpen(false)} />}
       </dialog>
     </>
   );
 }
 
 /** What the help lists; rendered on its own for tests. */
-export function HelpContent({ onClose }: { onClose?: () => void }) {
+export function HelpContent({
+  ask = true,
+  onClose,
+}: {
+  /** Without the Ask panel (the dev player), no `A` key and no spoken commands. */
+  ask?: boolean;
+  onClose?: () => void;
+}) {
   const titleId = useId();
   return (
     <div className={styles.content}>
@@ -85,43 +97,45 @@ export function HelpContent({ onClose }: { onClose?: () => void }) {
           Close
         </button>
       </header>
-      <div className={styles.columns}>
+      <div className={styles.columns} data-ask={ask ? "1" : "0"}>
         <section aria-labelledby={`${titleId}-keys`}>
           <h3 id={`${titleId}-keys`} className={styles.heading}>
             Keys
           </h3>
           <dl className={styles.list} data-testid="help-keys">
-            {SHORTCUTS.map((s) => (
+            {SHORTCUTS.filter((s) => ask || s.id !== "ask").map((s) => (
               <div key={s.id} className={styles.row} data-shortcut={s.id}>
                 <dt>
                   <kbd className={styles.kbd}>{s.label}</kbd>
                 </dt>
-                <dd>{s.does}</dd>
+                <dd>{s.id === "close" && !ask ? "Close this help" : s.does}</dd>
               </div>
             ))}
           </dl>
         </section>
-        <section aria-labelledby={`${titleId}-say`}>
-          <h3 id={`${titleId}-say`} className={styles.heading}>
-            Say it
-          </h3>
-          <p className={styles.note}>
-            With the mic on, say these any time, or type them in the Ask box.
-          </p>
-          <dl className={styles.list} data-testid="help-spoken">
-            {Object.entries(SPOKEN_COMMANDS).map(([tool, c]) => (
-              <div key={tool} className={styles.row} data-command={tool}>
-                <dt className={styles.say}>
-                  {c.say.map((s) => `“${s}”`).join(" or ")}
-                </dt>
-                <dd>{c.does}</dd>
-              </div>
-            ))}
-          </dl>
-          <p className={styles.note}>
-            Or just ask: “Why do we divide by the square root of d?”
-          </p>
-        </section>
+        {ask && (
+          <section className={styles.spoken} aria-labelledby={`${titleId}-say`}>
+            <h3 id={`${titleId}-say`} className={styles.heading}>
+              Say it
+            </h3>
+            <p className={styles.note}>
+              With the mic on, say these any time, or type them in the Ask box.
+            </p>
+            <dl className={styles.list} data-testid="help-spoken">
+              {Object.entries(SPOKEN_COMMANDS).map(([tool, c]) => (
+                <div key={tool} className={styles.row} data-command={tool}>
+                  <dt className={styles.say}>
+                    {c.say.map((s) => `“${s}”`).join(" or ")}
+                  </dt>
+                  <dd>{c.does}</dd>
+                </div>
+              ))}
+            </dl>
+            <p className={styles.note}>
+              Or just ask: “Why do we divide by the square root of d?”
+            </p>
+          </section>
+        )}
       </div>
     </div>
   );

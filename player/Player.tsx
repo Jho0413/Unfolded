@@ -158,7 +158,7 @@ export function PlayerStage({
         </div>
         <span className={styles.spacer} />
         {barEnd}
-        <Help />
+        <Help ask={renderAsk !== undefined} />
       </header>
       <div
         className={styles.split}

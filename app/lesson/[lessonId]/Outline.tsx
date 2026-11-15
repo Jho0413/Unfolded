@@ -2,7 +2,8 @@
 // The lesson outline (ARCHITECTURE.md section 5.6): the lesson's title and cover, one row per
 // step (done, current, preparing, not ready), and the keyboard hints. A row goes to its step
 // (the machine's goToStep); what each row shows is ./outlineRows.ts.
-import { useState } from "react";
+import { Fragment, useState } from "react";
+import { shortcutHintLines } from "@/player/controls";
 import type { PlayerEvent, PlayerState } from "@/player/machine";
 import type { StepFetchStatus } from "@/player/prefetch";
 import type { LessonPlan } from "@/shared/lesson";
@@ -65,12 +66,18 @@ export function Outline({
           );
         })}
       </ol>
-      <p className={styles.keys}>
-        <kbd>Space</kbd> hold on / go on
-        <br />
-        <kbd>→</kbd> next idea · <kbd>←</kbd> back · <kbd>R</kbd> again
-        <br />
-        <kbd>A</kbd> ask by voice
+      <p className={styles.keys} data-testid="outline-keys">
+        {shortcutHintLines().map((line, i) => (
+          <Fragment key={i}>
+            {i > 0 && <br />}
+            {line.map(({ label, hint }, j) => (
+              <Fragment key={label}>
+                {j > 0 && " · "}
+                <kbd>{label}</kbd> {hint}
+              </Fragment>
+            ))}
+          </Fragment>
+        ))}
       </p>
     </nav>
   );
