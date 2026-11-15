@@ -4,7 +4,7 @@
 // the scripted answer and its tool (qa/fakeConversation.ts).
 import { expect, type Page, test } from "@playwright/test";
 import { savedRun } from "./support/savedRun";
-import { answer, askByKey, askQuestion } from "./support/tutor";
+import { answer, askByKey, askInput, askQuestion } from "./support/tutor";
 
 test.use({
   launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
@@ -182,4 +182,26 @@ test("the voice session drops with Ask closed: no message, the lesson goes on, i
   await expect(player(page)).toHaveAttribute("data-state", "playing");
   await expect(listening(page)).toHaveText("Listening", { timeout: 6000 });
   expect(await starts(page)).toEqual(["webrtc", "webrtc"]);
+});
+
+test("after a typed question, a spoken command still works: the mic is off only while typing", async ({
+  page,
+}) => {
+  await using run = await savedRun("e2e-voice-typed");
+  await playing(page, run.lessonId);
+  const micMuted = () => page.evaluate(() => window.__qaFake?.micMuted);
+  await askInput(page).fill("What is this?");
+  await expect.poll(micMuted).toBe(true);
+  await askInput(page).press("Enter");
+  await expect(answer(page)).toContainText("row times a column");
+  // The input still has focus, but the draft is gone: the mic is back.
+  await expect(askInput(page)).toBeFocused();
+  await expect.poll(micMuted).toBe(false);
+  expect(await page.evaluate(() => window.__qaFake?.textOnly)).toBe(false);
+
+  await say(page, "ok, carry on");
+  await expect(player(page)).toHaveAttribute("data-state", "playing");
+  // The same voice session the whole time, listening again.
+  expect(await starts(page)).toEqual(["webrtc"]);
+  await expect(listening(page)).toHaveText("Listening");
 });
