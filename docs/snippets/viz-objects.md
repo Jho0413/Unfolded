@@ -51,8 +51,10 @@ bigger schema before merging (the size-guard test in `outputFormat.test.ts` move
 | An arrow to a cell or a point | `arrow` with `to: { "id": "attn", "row": 2, "col": 1 }` or `{ "id": "plot", "row": 0, "col": 12 }` |
 
 Rejected: `write` on either (`can't write to "x"`), `move` on a part (`can't move "x"`; move
-the whole object), `show` on a single plot point (show draws a whole series), and any row or
-column past the grid or the series (`target out of range "x"`).
+the whole object), `show` or `hide` on a single plot point (they draw or remove a whole
+series), any row or column past the grid or the series (`target out of range "x"`), and a box
+too small for its labels (`"x" is too small for its labels`: cells under 20 px, a plot area
+under 80 px).
 
 ## Example 1: attention weights ("Attention Is All You Need")
 
@@ -148,5 +150,5 @@ column past the grid or the series (`target out of range "x"`).
 | Plot series | 1..4 |
 | Points per series | 2..200, each `[x, y]` (two finite numbers) |
 | Line series | x never decreases (`style: "points"` may be in any order) |
-| `xRange` / `yRange` | `[min, max]` with `min < max` |
-| Box | `w, h >= 120`, inside the 1600 × 900 canvas |
+| `xRange` / `yRange` | `[min, max]` with `min < max`, and not too narrow for its magnitude |
+| Box | `w, h >= 120`, inside the 1600 × 900 canvas; after labels, heatmap cells >= 20 px and the plot area >= 80 px |

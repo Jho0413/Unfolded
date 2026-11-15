@@ -130,9 +130,14 @@ const vizSize = z.number().min(VIZ_LIMITS.minSize);
  */
 const pair = z.array(finite).length(2);
 /** `[min, max]` with min < max. */
-const range = pair.refine(([lo, hi]) => lo < hi, {
-  message: "range must be [min, max] with min < max",
-});
+const range = pair
+  .refine(([lo, hi]) => lo < hi, {
+    message: "range must be [min, max] with min < max",
+  })
+  .refine(
+    ([lo, hi]) => hi - lo > 1e-9 * Math.max(1, Math.abs(lo), Math.abs(hi)),
+    { message: "range is too narrow for its size (shift the data nearer 0)" },
+  );
 
 /**
  * A grid of numbers drawn as coloured cells (issue #103), e.g. attention weights. Everything,

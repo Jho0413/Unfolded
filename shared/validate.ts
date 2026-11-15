@@ -12,6 +12,7 @@ import {
   textBox,
 } from "./boxes";
 import { KATEX_OPTIONS } from "./latex";
+import { heatmapLayout, plotLayout, VIZ_MIN } from "./viz";
 import {
   type Action,
   type Anchor,
@@ -116,8 +117,10 @@ export const errors = {
     `"${a}" and "${b}" overlap (leave ${gap} between them)`,
   mathsInPlainText: (id: string) =>
     `"_" or "^" in plain text "${id}" (write maths as a latex object)`,
-  showNeedsSeries: (id: string) =>
-    `show on "${id}" needs the whole plot or one series ({ id, row })`,
+  needsSeries: (verb: "show" | "hide", id: string) =>
+    `${verb} on "${id}" needs the whole plot or one series ({ id, row })`,
+  tooSmall: (id: string) =>
+    `"${id}" is too small for its labels (make the box bigger)`,
 } as const;
 
 /** One line of text, a title or a takeaway, centred at x, y in a text size. */
@@ -212,6 +215,19 @@ function objectOnCanvas(obj: SceneObject): boolean {
   }
 }
 
+/** Whether a heatmap's cells or a plot's area keep a legible size once labels take their room. */
+function fitsLabels(obj: SceneObject): boolean {
+  if (obj.kind === "heatmap") {
+    const l = heatmapLayout(obj);
+    return Math.min(l.cellW, l.cellH) >= VIZ_MIN.cell;
+  }
+  if (obj.kind === "plot") {
+    const { area } = plotLayout(obj);
+    return Math.min(area.w, area.h) >= VIZ_MIN.area;
+  }
+  return true;
+}
+
 /**
  * Whether KaTeX renders `tex` cleanly under KATEX_OPTIONS. A command refused
  * by `trust: false` (\href, \url, \htmlClass, ...) doesn't throw, it renders
@@ -298,7 +314,7 @@ export function checkAction(action: Action, objects: Objects): string[] {
     case "show":
       // A heatmap reveals any of its cells; a plot draws on a whole series.
       if (obj?.kind === "plot") {
-        if (col !== undefined) out.push(errors.showNeedsSeries(obj.id));
+        if (col !== undefined) out.push(errors.needsSeries("show", obj.id));
       } else if (
         obj?.kind !== "heatmap" &&
         (row !== undefined || col !== undefined)
@@ -330,6 +346,10 @@ export function checkAction(action: Action, objects: Objects): string[] {
         out.push(errors.writeNeedsCell());
       break;
     case "hide":
+      // A plot hides a whole series, as it draws one.
+      if (obj?.kind === "plot" && col !== undefined)
+        out.push(errors.needsSeries("hide", obj.id));
+      break;
     case "highlight":
     case "unhighlight":
       // show on a visible object, hide on a hidden one, or hide on a part
@@ -351,6 +371,7 @@ function checkObjects(
     if (seen.has(obj.id)) out.push(errors.duplicateId(obj.id));
     seen.add(obj.id);
     if (!objectOnCanvas(obj)) out.push(errors.offCanvas(obj.id));
+    if (!fitsLabels(obj)) out.push(errors.tooSmall(obj.id));
     if (obj.kind === "latex" && !latexParses(obj.tex))
       out.push(errors.invalidLatex(obj.id));
     if (obj.kind === "arrow") {

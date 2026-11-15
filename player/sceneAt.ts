@@ -646,10 +646,13 @@ export function sceneAt(
       )
         return [];
       const target = base.byId.get(e.action.target.id)?.object;
+      const field = cellField(e.action);
+      // A matrix part's show or hide is about its copy, not its cells: no `cells`.
       const onGrid =
-        cellField(e.action) !== undefined &&
+        field !== undefined &&
         target !== undefined &&
-        isGrid(target);
+        isGrid(target) &&
+        !(field === "visible" && target.kind === "matrix");
       return [
         {
           action: structuredClone(e.action),

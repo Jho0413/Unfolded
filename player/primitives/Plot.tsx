@@ -70,8 +70,8 @@ export function Plot({
         </clipPath>
       </defs>
       <g data-axes fontSize={VIZ_FONT.tick} fill={MUTED}>
-        {xTicks.map((t) => (
-          <g key={`x${t}`} data-x-tick={t}>
+        {xTicks.map((t, i) => (
+          <g key={`x${i}`} data-x-tick={t}>
             <line
               x1={xAt(t)}
               x2={xAt(t)}
@@ -96,8 +96,8 @@ export function Plot({
             </text>
           </g>
         ))}
-        {yTicks.map((t) => (
-          <g key={`y${t}`} data-y-tick={t}>
+        {yTicks.map((t, i) => (
+          <g key={`y${i}`} data-y-tick={t}>
             <line
               x1={area.x}
               x2={area.x + area.w}

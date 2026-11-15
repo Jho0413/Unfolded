@@ -180,6 +180,30 @@ describe("heatmap and plot schema", () => {
     ).toBe(true);
   });
 
+  it("too small: a box whose labels leave cells under 20 px or a plot area under 80 px is rejected", () => {
+    const long = "x".repeat(24);
+    expect(
+      errorsOf(step([], [heatmap({ w: 120, rowLabels: [long, long] })])),
+    ).toEqual([errors.tooSmall("h")]);
+    expect(
+      errorsOf(
+        step(
+          [],
+          [plot({ w: 120, yRange: [0, 1e9], xLabel: "x", yLabel: "y" })],
+        ),
+      ),
+    ).toEqual([errors.tooSmall("p")]);
+  });
+
+  it("plot: a range too narrow for its magnitude is rejected (its ticks can't be told apart)", () => {
+    expect(schemaError(plot({ yRange: [1e16, 1e16 + 2] }))).toContain(
+      "range is too narrow for its size (shift the data nearer 0)",
+    );
+    expect(SceneObject.safeParse(plot({ yRange: [-1e-6, 1e-6] })).success).toBe(
+      true,
+    );
+  });
+
   it("off canvas: a heatmap or plot box past the canvas is rejected", () => {
     expect(errorsOf(step([], [heatmap({ x: 1400 })]))).toContain(
       errors.offCanvas("h"),
@@ -245,10 +269,42 @@ describe("heatmap and plot actions", () => {
     ).toEqual([errors.targetOutOfRange("p")]);
   });
 
-  it("plot: show on a point is rejected (show draws a series)", () => {
+  it("plot: show or hide on a point is rejected (they draw a whole series)", () => {
     expect(
       errorsOf(step([{ do: "show", target: { id: "p", row: 0, col: 1 } }])),
-    ).toEqual([errors.showNeedsSeries("p")]);
+    ).toEqual([errors.needsSeries("show", "p")]);
+    expect(
+      errorsOf(step([{ do: "hide", target: { id: "p", row: 0, col: 0 } }])),
+    ).toEqual([errors.needsSeries("hide", "p")]);
+    expectValid(
+      validateStep(step([{ do: "hide", target: { id: "p", row: 0 } }]), limits),
+    );
+  });
+
+  it("an anchor past a heatmap's grid or a plot's series is out of range; a plot point needs its series", () => {
+    const arrow = (to: Record<string, number | string>) =>
+      errorsOf(
+        step(
+          [],
+          [
+            heatmap(),
+            plot(),
+            { kind: "arrow", id: "a", from: { x: 1, y: 1 }, to },
+          ],
+        ),
+      );
+    expect(arrow({ id: "h", row: 99 })).toEqual([errors.targetOutOfRange("h")]);
+    expect(arrow({ id: "p", row: 1, col: 5 })).toEqual([
+      errors.targetOutOfRange("p"),
+    ]);
+    expect(arrow({ id: "p", col: 0 })).toEqual([errors.targetOutOfRange("p")]);
+    expect(
+      errorsOf(
+        step([
+          { do: "move", target: { id: "h" }, to: { id: "p", row: 0, col: 3 } },
+        ]),
+      ),
+    ).toEqual([errors.targetOutOfRange("p")]);
   });
 
   it("heatmap and plot: write is rejected", () => {

@@ -9,8 +9,14 @@ import { Heatmap } from "@/player/primitives/Heatmap";
 import { Plot } from "@/player/primitives/Plot";
 import { resolveAnchor, sceneAt, timeline } from "@/player/sceneAt";
 import { drawnPoints, heatColor, revealOf } from "@/player/primitives/vizStyle";
-import { BoardState, type SceneObject } from "@/shared/scene";
-import { heatmapCellCentre, niceTicks, plotPoint } from "@/shared/viz";
+import { BoardState, type SceneObject, type Step } from "@/shared/scene";
+import {
+  heatmapCellCentre,
+  heatmapLayout,
+  niceTicks,
+  plotPoint,
+} from "@/shared/viz";
+import { targetBox } from "@/player/primitives/arrowGeometry";
 
 const timed = timeline(VIZ_STEP.actions, VIZ_CUE_TIMES);
 const at = (t: number) => sceneAt(VIZ_STEP.objects, timed, t);
@@ -124,6 +130,109 @@ describe("sceneAt: plot draw-on", () => {
   });
 });
 
+describe("sceneAt: hides, whole-object highlights, and matrices unchanged", () => {
+  const cued = (extra: Step["actions"], times: Record<string, number>) =>
+    timeline([...VIZ_STEP.actions, ...extra], { ...VIZ_CUE_TIMES, ...times });
+
+  it("a plot series hide fades it out, then leaves it undrawn", () => {
+    const t = cued(
+      [
+        {
+          cue: "off",
+          do: "hide",
+          target: { id: "soft", row: 1 },
+          durationMs: 400,
+        },
+      ],
+      { off: 10_000 },
+    );
+    const mid = sceneAt(VIZ_STEP.objects, t, 10_100);
+    expect(state(mid, "soft").cellVisible![1].every(Boolean)).toBe(true);
+    expect(revealOf(mid.active, "soft", 1, 0).fade).toBe(0.75);
+    const end = sceneAt(VIZ_STEP.objects, t, 10_400);
+    expect(state(end, "soft").cellVisible![1].some(Boolean)).toBe(false);
+    expect(state(end, "soft").cellVisible![0].every(Boolean)).toBe(true);
+  });
+
+  it("a whole heatmap or plot highlight sets every cell", () => {
+    const t = cued(
+      [
+        { cue: "all", do: "highlight", target: { id: "attn" }, durationMs: 0 },
+        {
+          cue: "all",
+          do: "highlight",
+          target: { id: "soft" },
+          color: "warn",
+          durationMs: 0,
+        },
+      ],
+      { all: 10_000 },
+    );
+    const board = sceneAt(VIZ_STEP.objects, t, 10_000);
+    const attn = state(board, "attn").cellHighlight!.flat();
+    // The whole-object highlight repaints the earlier warn peak too, as on a matrix.
+    expect(attn.every((h) => h === "accent")).toBe(true);
+    expect(
+      state(board, "soft")
+        .cellHighlight!.flat()
+        .every((h) => h === "warn"),
+    ).toBe(true);
+  });
+
+  it("a matrix part's hide (its copy) carries no cells", () => {
+    const objects: SceneObject[] = [
+      { kind: "matrix", id: "m", x: 100, y: 100, rows: [["1", "2"]] },
+    ];
+    const board = sceneAt(
+      objects,
+      [
+        {
+          action: {
+            do: "move",
+            target: { id: "m", row: 0 },
+            to: { x: 600, y: 400 },
+            durationMs: 0,
+          },
+          startMs: 0,
+          durationMs: 0,
+        },
+        {
+          action: { do: "hide", target: { id: "m", row: 0 }, durationMs: 400 },
+          startMs: 100,
+          durationMs: 400,
+        },
+      ],
+      300,
+    );
+    expect(board.active).toHaveLength(1);
+    expect(board.active[0]).not.toHaveProperty("cells");
+  });
+});
+
+describe("arrows to a heatmap or plot stop at its box", () => {
+  const board = at(20_000);
+  const [, attn] = VIZ_STEP.objects;
+  if (attn.kind !== "heatmap") throw new Error();
+  const { cellW, cellH } = heatmapLayout(attn);
+  it("a whole heatmap or plot is its box", () => {
+    expect(targetBox(board, { id: "attn" })).toEqual({ w: 640, h: 560 });
+    expect(targetBox(board, { id: "soft" })).toEqual({ w: 620, h: 560 });
+  });
+  it("a heatmap cell or row is its cells", () => {
+    expect(targetBox(board, { id: "attn", row: 1, col: 2 })).toEqual({
+      w: cellW,
+      h: cellH,
+    });
+    expect(targetBox(board, { id: "attn", row: 1 })).toEqual({
+      w: 6 * cellW,
+      h: cellH,
+    });
+  });
+  it("a plot point is exact", () => {
+    expect(targetBox(board, { id: "soft", row: 0, col: 3 })).toBeUndefined();
+  });
+});
+
 describe("draw-on geometry", () => {
   const line = [
     [0, 0],
@@ -202,6 +311,10 @@ describe("anchors and scales", () => {
   it("ticks are round and about five", () => {
     expect(niceTicks(0, 1)).toEqual([0, 0.2, 0.4, 0.6, 0.8, 1]);
     expect(niceTicks(-6, 6)).toEqual([-6, -4, -2, 0, 2, 4, 6]);
+  });
+
+  it("ticks always end, even where a step is below the values' precision", () => {
+    expect(niceTicks(1e16, 1e16 + 2).length).toBeLessThanOrEqual(50);
   });
 });
 

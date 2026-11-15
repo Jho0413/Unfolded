@@ -9,6 +9,9 @@ export const VIZ_FONT = { label: 20, tick: 18, axis: 22, title: 28 } as const;
 const CHAR_EM = 0.6;
 const GAP = 10;
 
+/** The smallest heatmap cell and plot area (px) that stay legible: validate.ts holds boxes to it. */
+export const VIZ_MIN = { cell: 20, area: 80 } as const;
+
 /** A box on the canvas. */
 export interface Rect {
   x: number;
@@ -32,7 +35,13 @@ export interface HeatmapLayout {
 export function heatmapLayout(m: HeatmapObject): HeatmapLayout {
   const left = m.rowLabels ? labelWidth(m.rowLabels, VIZ_FONT.label) + GAP : 0;
   const top = m.colLabels ? VIZ_FONT.label * 1.4 + GAP : 0;
-  const grid = { x: m.x + left, y: m.y + top, w: m.w - left, h: m.h - top };
+  // Never negative: validate.ts rejects a box too small for its labels, this is the safety net.
+  const grid = {
+    x: m.x + left,
+    y: m.y + top,
+    w: Math.max(1, m.w - left),
+    h: Math.max(1, m.h - top),
+  };
   return {
     grid,
     cellW: grid.w / m.values[0].length,
@@ -90,8 +99,8 @@ export function plotLayout(p: PlotObject): PlotLayout {
   const area = {
     x: p.x + left,
     y: p.y + top,
-    w: p.w - left - right,
-    h: p.h - top - bottom,
+    w: Math.max(1, p.w - left - right),
+    h: Math.max(1, p.h - top - bottom),
   };
   const [x0, x1] = p.xRange;
   const [y0, y1] = p.yRange;
@@ -116,14 +125,12 @@ export function plotPoint(p: PlotObject, s: number, i: number): Point {
  */
 export function niceTicks(lo: number, hi: number, target = 5): number[] {
   const mag = 10 ** Math.floor(Math.log10((hi - lo) / target));
+  // Counted, not accumulated: adding a step too small for v's precision would never end.
   const ticks = (step: number) => {
     const out: number[] = [];
-    for (
-      let v = Math.ceil(lo / step - 1e-9) * step;
-      v <= hi + step * 1e-9;
-      v += step
-    )
-      out.push(Math.abs(v) < step * 1e-9 ? 0 : Number(v.toPrecision(12)));
+    const first = Math.ceil(lo / step - 1e-9);
+    for (let k = first; k * step <= hi + step * 1e-9 && out.length < 50; k++)
+      out.push(k === 0 ? 0 : Number((k * step).toPrecision(12)));
     return out;
   };
   const options = [1, 2, 5, 10].map((m) => ticks(m * mag));

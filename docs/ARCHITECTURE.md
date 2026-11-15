@@ -168,13 +168,13 @@ type BoardObject = (                          // discriminated on `kind`
 // #103: the data objects. A step's objects are SceneObject[]; BoardObject stays what the
 // generators write today, because the wire format embeds it and has no grammar headroom (S3).
 type SceneObject = BoardObject | (
-  | { kind: "heatmap"; id; x; y; w; h;                     // everything, labels included, inside the box; w,h >= 120
+  | { kind: "heatmap"; id; x; y; w; h;                     // the grid and its row/col labels inside the box; w,h >= 120
       values: number[][];                                  // 1..12 x 1..12, rectangular, finite
       rowLabels?: string[]; colLabels?: string[];          // one per row / column, 1..24 chars
       scale?: { min: number; max: number };                // colour scale ends (min < max); default the values' min and max
       showValues?: boolean;                                // write each value in its cell
       cellsHidden?: boolean;                               // cells start blank; `show` on a row, column or cell reveals them
-      label?: string }                                     // a title above the box
+      label?: string }                                     // a title drawn above the box (outside it, like a matrix's; not counted for canvas bounds)
   | { kind: "plot"; id; x; y; w; h;                        // axes, ticks and axis labels inside the box; w,h >= 120
       xRange: [number, number]; yRange: [number, number];  // [min, max], min < max; points outside are clipped
       series: { points: [number, number][];                // 1..4 series of 2..200 [x, y] points; a line's x never decreases
@@ -244,10 +244,11 @@ type Sketch = {                               // what /api/sketch returns for a 
 | `write` on a matrix without both `row` and `col` | rejected: `write needs a cell` |
 | `write` on a `latex`, `arrow`, `image`, `heatmap` or `plot` | rejected: `can't write to "x"` |
 | `show` with `row` or `col`, except on a heatmap or a plot | rejected: `show needs a whole object` |
-| `show` on a plot point (`col` set) | rejected: `show on "x" needs the whole plot or one series ({ id, row })` |
+| `show` or `hide` on a plot point (`col` set) | rejected: `show on "x" needs the whole plot or one series ({ id, row })` (or `hide on ...`) |
+| A heatmap or plot box too small once its labels take their room: cells under 20 px, or a plot area under 80 px | rejected: `"x" is too small for its labels (make the box bigger)` |
 | `move` on an `arrow`, or on a part of a heatmap or plot | rejected: `can't move "x"` |
-| (schema) A heatmap with ragged rows, labels that don't match its rows or columns, `scale.min >= scale.max`, over 12 x 12, or non-finite values; a plot range with min >= max, over 4 series or 200 points, a point that isn't two numbers, or a line series whose x decreases | rejected: the schema error, e.g. `heatmap rows must all have the same length`, `rowLabels needs one label per row (6)`, `range must be [min, max] with min < max`, `a line series' x values must not decrease (it draws on along x)` |
-| `show` on a visible object, `hide` on a hidden one, or `hide` on a part that hasn't moved | allowed (no change) |
+| (schema) A heatmap with ragged rows, labels that don't match its rows or columns, `scale.min >= scale.max`, over 12 x 12, or non-finite values; a plot range with min >= max or too narrow for its magnitude (`range is too narrow for its size (shift the data nearer 0)`), over 4 series or 200 points, a point that isn't two numbers, or a line series whose x decreases | rejected: the schema error, e.g. `heatmap rows must all have the same length`, `rowLabels needs one label per row (6)`, `range must be [min, max] with min < max`, `a line series' x values must not decrease (it draws on along x)` |
+| `show` on a visible object, `hide` on a hidden one, or `hide` on a matrix part that hasn't moved | allowed (no change). A `show` or `hide` on a heatmap or plot part reveals or conceals it instead; on a hidden heatmap or plot, revealed parts stay unseen until the object is shown |
 | `tex` that KaTeX can't parse, or that uses a command `trust: false` refuses (`\href`, `\url`, `\includegraphics`, `\htmlClass` and the like) | rejected: `invalid LaTeX in "x"` (the renderer also uses `throwOnError: false` as a safety net) |
 | An object, or an `{x, y}` point in an anchor, outside the 1600 × 900 canvas (for a matrix, its whole cell box; for an image, heatmap or plot, its box; for `text` and `latex`, only their x,y) | rejected: `off canvas "x"` (x is the object, an arrow for its own point ends, or for a `move` to a point, the object that moves) |
 | Two objects with the same id | rejected: `duplicate id "x"` |
