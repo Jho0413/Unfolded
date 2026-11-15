@@ -66,7 +66,9 @@ export function LessonAsk({
   useSessionSync(player, session);
   const { send, state, loaded, step, tMs } = player;
   // The always-on mic (issue #93): the lesson's voice session and spoken commands.
-  const voice = useLessonVoice({ player, session });
+  // "Hold on" while asking closes Ask only when a drawn answer is up (#97): a bare "go back".
+  const isAnswerShowing = useCallback(() => answerShowing(session), [session]);
+  const voice = useLessonVoice({ player, session, isAnswerShowing });
 
   // The panel's tellAgent, once it has made the tools: the Answer view's updates use it.
   const tellRef = useRef<AskApi["tellAgent"] | null>(null);

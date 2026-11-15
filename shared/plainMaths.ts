@@ -63,7 +63,7 @@ function repairObject(obj: BoardObject): BoardObject {
   }
 }
 
-function repairAction(action: Action): Action {
+function repairAction<A extends Action>(action: A): A {
   return action.do === "write"
     ? { ...action, value: repairPlainMaths(action.value) }
     : action;

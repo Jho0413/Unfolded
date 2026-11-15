@@ -207,7 +207,8 @@ describe("POST /api/sketch: a fresh answer and its template (#90)", () => {
     quietLogs();
     const hardFirst: Sketch = {
       ...CRAMPED,
-      objects: [{ kind: "text", id: "t", x: 800, y: 110, text: "d_k" }],
+      // Outside the answer area: a hard error.
+      objects: [{ kind: "text", id: "t", x: 20, y: 400, text: "far left" }],
     };
     script(reply(hardFirst), reply(OVERLAPPING));
     const res = await post({ description: "why", fresh: true, board: EMPTY });
@@ -235,9 +236,29 @@ describe("POST /api/sketch: a fresh answer and its template (#90)", () => {
     expect(res.status).toBe(200);
     expect(SketchResponse.parse(await res.json()).sketch).toEqual(ANSWER);
     const retry = fake.calls[1].body.messages.at(-1)?.content;
-    expect(retry).toContain(errors.mathsInPlainText("title"));
     expect(retry).toContain(errors.outsideAnswerArea("f"));
-    expect(logs.warned()).toContain(errors.mathsInPlainText("title"));
+    // Its "d_k" title is repaired, not sent back as an error (shared/plainMaths.ts).
+    expect(retry).not.toContain(errors.mathsInPlainText("title"));
+    expect(logs.warned()).toContain(errors.outsideAnswerArea("f"));
+  });
+
+  it("maths written as plain text: repaired (d_k → dₖ), 200 at once, no retry", async () => {
+    quietLogs();
+    const plainMaths: Sketch = {
+      ...ANSWER,
+      objects: ANSWER.objects.map((o) =>
+        o.kind === "text" && o.id === ANSWER.objects[0].id
+          ? { ...o, text: "Why divide by d_k?" }
+          : o,
+      ),
+    };
+    const fake = script(reply(plainMaths));
+    const res = await post({ description: "why", fresh: true, board: EMPTY });
+    expect(res.status).toBe(200);
+    const sketch = SketchResponse.parse(await res.json()).sketch;
+    expect(JSON.stringify(sketch)).toContain("Why divide by dₖ?");
+    expect(JSON.stringify(sketch)).not.toMatch(/d_k/);
+    expect(fake.calls).toHaveLength(1);
   });
 
   it('the research request s3-mix, whose two answers wrote to "mix" with no value: Couldn\'t draw that (502), as before the fix', async () => {
