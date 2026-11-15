@@ -1,6 +1,7 @@
 // A lesson's step for POST /api/lessons/<id>/steps/<n> (ARCHITECTURE.md sections 5.1, 6.2 and
 // 7): served from runs/ once it's saved; otherwise written by Claude (G1), narrated (C1) and
-// saved as a new step version with its audio (C2). One generation per step at a time: a request
+// saved as a new step version with its audio (C2), its image objects illustrated by fal
+// meanwhile (E1, lib/media/stepImages.ts). One generation per step at a time: a request
 // while the step is generating waits for that generation, then is decided again from the run
 // folder, so a signal that arrived meanwhile still gets a new version. The decisions are the
 // pure section 6.2 machine in ./stepGeneration.ts and the adaptation rules in ./adaptation.ts;
@@ -27,6 +28,7 @@ import {
   type StepResponse,
 } from "@/shared/lesson";
 import { getEnv } from "@/lib/env";
+import { illustrateStep } from "@/lib/media/stepImages";
 import { narrate } from "@/lib/narration/tts";
 import {
   adaptedFrom,
@@ -231,11 +233,16 @@ async function generate(
     signals: newer,
     paperPages: await readPaperPages(lessonId),
   });
-  const narrated = await narrate(step.narration);
+  // The step's images (E1) are made alongside its narration, so they delay it only when they
+  // outlast TTS; they never fail it.
+  const [narrated, illustrated] = await Promise.all([
+    narrate(step.narration),
+    illustrateStep(lessonId, n, step),
+  ]);
   // Only a regeneration says what it adapted to: a first version has nothing it replaces.
   const adapted = replacing && adaptedFrom(newer, n);
   const saved = SavedStep.parse({
-    step,
+    step: illustrated,
     cueTimes: narrated.cueTimes,
     signalsVersion: signals.version,
     ...(adapted && { adaptedFrom: adapted }),
