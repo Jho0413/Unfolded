@@ -214,3 +214,46 @@
 :global([data-theme="dark"]) .sun {
   display: block;
 }
+
+/*
+ * Phones (#98 real check): the outline becomes a slim header (brand and lesson title) and the
+ * stage takes the whole width; the tutor card's Next and the voice commands move through the
+ * steps. Without this the 252 px column pushed the stage off a 390 px screen.
+ */
+@media (max-width: 760px) {
+  .lesson {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .outline {
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    min-width: 0;
+    overflow: hidden;
+  }
+  .paperKind,
+  .cover,
+  .steps,
+  .keys {
+    display: none;
+  }
+  .paper,
+  .paper > div {
+    padding: 0;
+    min-width: 0;
+  }
+  .paperTitle {
+    margin: 0;
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .main {
+    padding: 10px 12px 12px;
+  }
+}

@@ -17,7 +17,22 @@ export const PAPER_PAGES: readonly (readonly string[])[] = [
     "ed together to give one entry of the product.",
     "In short, every output cell is a row times a column.",
   ],
+  ...[3, 4].map((n) => filler(n, 36)),
+  // A passage at the foot of a later page: scrolled to while the pane widens.
+  [
+    ...filler(5, 34),
+    "Deep down the paper, the scaled scores are what the softmax sees.",
+  ],
 ];
+
+/** Page n of filler text: `lines` numbered lines. */
+function filler(n: number, lines: number): string[] {
+  return Array.from(
+    { length: lines },
+    (_, i) =>
+      `Page ${n}, line ${i + 1}: more words about rows, columns and sums.`,
+  );
+}
 
 /** Escapes a PDF literal string. */
 const literal = (s: string) => s.replace(/[\\()]/g, (c) => `\\${c}`);
