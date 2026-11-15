@@ -14,6 +14,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import { LessonPlanOutput } from "@/shared/lesson";
+import { repairSketchPlainMaths } from "@/shared/plainMaths";
 import {
   type Action,
   Anchor,
@@ -228,13 +229,16 @@ export function validateWireStep(
   );
 }
 
-/** A sketch response (parsed JSON) in the wire format, checked against the contract. */
+/**
+ * A sketch response (parsed JSON) in the wire format, checked against the contract. Maths
+ * written into plain text ("d_k") is repaired first rather than rejected (shared/plainMaths.ts).
+ */
 export function validateWireSketch(
   input: unknown,
   ctx: SketchContext,
 ): ValidationResult<Sketch> {
   return check(WireSketch, input, wireToSketch, (sketch) =>
-    validateSketch(sketch, ctx),
+    validateSketch(repairSketchPlainMaths(sketch), ctx),
   );
 }
 
