@@ -6,7 +6,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { askAboutNote } from "@/player/paper/selection";
-import { PASSAGES_HEADER } from "@/qa/context";
+import { PASSAGES_HEADER, passageLine } from "@/qa/context";
 import { CLIENT_TOOLS } from "@/shared/tools";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
@@ -152,15 +152,26 @@ describe("agent config", () => {
     );
     // highlight_paper quotes come from the context's verified passages (qa/context.ts), never memory.
     expect(prompt).toContain(`under "${PASSAGES_HEADER}"`);
+    const line = passageLine({ page: 7, label: "L", quote: "Q" })
+      .replace("7", "<page>")
+      .replace("(L)", "(<label>)")
+      .replace('"Q"', '"<quote>"');
+    expect(prompt).toContain(`one per line as - ${line}`);
     expect(prompt).toMatch(/passed exactly as written, with its page/);
     expect(prompt).toMatch(/Never quote the paper from memory/);
+    expect(prompt).toMatch(/If no listed passage fits, don't call it/);
     // A passage selected in the paper (player/paper/selection.ts) is what the next question is about.
     const note = askAboutNote({ quote: "Q", page: 7 });
-    expect(prompt).toContain(note.slice(0, note.indexOf("(page 7)")));
-    expect(prompt).toContain("(page N) and is asking about it");
-    // Speech after a control tool counts as barge-in and stops the lesson it just moved.
-    expect(prompt).toMatch(/then call the tool as the last thing in your turn/);
-    expect(prompt).toMatch(/Never speak after calling one of these tools/);
+    const noteStart = note
+      .slice(0, note.indexOf(' "Q"'))
+      .replace("(page 7)", "(page N)");
+    expect(prompt).toContain(`a note that starts '${noteStart}'`);
+    // Speech after a no-result control tool holds up the move it just made and can stop it again.
+    expect(prompt).toMatch(
+      /resume_lesson, pause_lesson, next_step, previous_step and replay_step return nothing, so call them as the last thing in your turn: never speak after calling one of them/,
+    );
+    // go_to_step returns a result, so the agent may relay it (e.g. "no step 9").
+    expect(prompt).toMatch(/go_to_step returns a result/);
     // "Hold on" on a drawn answer keeps it (the learner's voice already paused it).
     expect(prompt).toMatch(
       /While a drawn answer is showing \(see below\), "hold on", "wait" or "pause" call no tool/,
