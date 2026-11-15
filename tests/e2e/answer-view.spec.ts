@@ -166,15 +166,73 @@ test("highlight while the Answer view is up: a no-op, and the agent is told why"
   await expect(object(page, "a")).toHaveCount(0);
 });
 
+// Spoken lesson commands (issue #93) go through closeAsk, so they leave the Answer view like
+// any other way out. The fake's say(text) is the learner speaking (qa/fakeConversation.ts).
+const say = (page: Page, text: string) =>
+  page.evaluate((t) => window.__qaFake?.say(t), text);
+
+/** The lesson plays with its voice session listening; a spoken question opens the Answer view. */
+async function spokenAnswer(page: Page, lessonId: string, skipFirst = false) {
+  await fakeSketches(page);
+  await page.goto(`/lesson/${lessonId}`);
+  await expect(player(page)).toHaveAttribute("data-state", "playing");
+  await expect(page.getByTestId("ask-listening")).toHaveText("Listening");
+  if (skipFirst) {
+    await say(page, "skip ahead");
+    await expect(player(page)).toHaveAttribute("data-step", "1");
+    await expect(player(page)).toHaveAttribute("data-state", "playing");
+  }
+  await say(page, "can you draw it?");
+  await expect(answerView(page)).toBeVisible();
+}
+
+test("voice: next_step from the Answer view: the lesson at the next step, narrating", async ({
+  page,
+}) => {
+  await using run = await savedRun("e2e-answer-voice-next", { steps: 3 });
+  await spokenAnswer(page, run.lessonId);
+  await say(page, "skip ahead");
+  await expect(answerView(page)).toHaveCount(0);
+  await expect(player(page)).toHaveAttribute("data-step", "1");
+  await expect(player(page)).toHaveAttribute("data-state", "playing");
+  await expect.poll(() => contextUpdates(page)).toContain(ANSWER_CONTEXT.back);
+});
+
+test("voice: previous_step from the Answer view: the lesson at the step before", async ({
+  page,
+}) => {
+  await using run = await savedRun("e2e-answer-voice-previous", { steps: 3 });
+  await spokenAnswer(page, run.lessonId, true);
+  await expect(backChip(page)).toHaveText(ANSWER_VIEW_TEXT.back(2));
+  await say(page, "previous step");
+  await expect(answerView(page)).toHaveCount(0);
+  await expect(player(page)).toHaveAttribute("data-step", "0");
+  await expect(player(page)).toHaveAttribute("data-state", "playing");
+});
+
+test("voice: resume_lesson from the Answer view: back to the lesson, narrating again", async ({
+  page,
+}) => {
+  await using run = await savedRun("e2e-answer-voice-resume");
+  await spokenAnswer(page, run.lessonId);
+  await say(page, "ok, carry on");
+  await expect(answerView(page)).toHaveCount(0);
+  await expect(player(page)).toHaveAttribute("data-step", "0");
+  await expect(player(page)).toHaveAttribute("data-state", "playing");
+  await expect(object(page, "a")).toHaveCount(1);
+  await expect.poll(() => contextUpdates(page)).toContain(ANSWER_CONTEXT.back);
+});
+
 const EVIDENCE = path.join(process.cwd(), "evidence", "90");
-// The lesson page is laid out for a desktop browser (ARCHITECTURE.md section 1); the tag and
-// chip scale with the board, so they stay above the answer area at any desktop width.
+// The lesson page is laid out for a desktop browser (ARCHITECTURE.md section 1). The tag and
+// chip scale with the board but never go below 12px, and stay above the answer area; the
+// whole answer area stays above the tutor card and Ask box, at any desktop width.
 for (const theme of ["dark", "light"] as const)
   for (const [width, height] of [
     [1440, 900],
     [1024, 768],
   ] as const)
-    test(`the tag and chip stay above the answer area at ${width} x ${height}, ${theme} (evidence)`, async ({
+    test(`the tag and chip are legible and above the answer area, and the card covers none of it, at ${width} x ${height}, ${theme} (evidence)`, async ({
       page,
     }) => {
       await page.setViewportSize({ width, height });
@@ -192,7 +250,15 @@ for (const theme of ["dark", "light"] as const)
         const box = (await page.getByTestId(id).boundingBox())!;
         expect(box.y).toBeGreaterThanOrEqual(svg.y);
         expect(box.y + box.height).toBeLessThanOrEqual(areaTop);
+        const fontPx = await page
+          .getByTestId(id)
+          .evaluate((e) => parseFloat(getComputedStyle(e).fontSize));
+        expect(fontPx).toBeGreaterThanOrEqual(12);
       }
+      const areaBottom =
+        svg.y + (ANSWER_TEMPLATE.area.y1 / CANVAS.h) * svg.height;
+      const card = (await page.getByTestId("tutor-card").boundingBox())!;
+      expect(areaBottom).toBeLessThanOrEqual(card.y);
       await mkdir(EVIDENCE, { recursive: true });
       await page.screenshot({
         path: path.join(EVIDENCE, `e2e-answer-view-${theme}-${width}.png`),
