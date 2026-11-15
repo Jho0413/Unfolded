@@ -212,3 +212,52 @@ test("no chip for a selection outside the paper or too short; it goes when the s
   await expect(chip(page)).toBeHidden();
   await expect(player(page)).toHaveAttribute("data-state", "paused");
 });
+
+test("a drag that starts on the unfocused paper doesn't grow the pane under it; a click still focuses it", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openLesson(page, "e2e-paper-ask-drag");
+  const split = page.getByTestId("stage-split");
+  const pane = page.getByTestId("paper-pane");
+  await expect(split).toHaveAttribute("data-focus", "board");
+  const width = async () => (await pane.boundingBox())!.width;
+  // The panes settle into their layout once the paper has loaded.
+  let before = 0;
+  await expect
+    .poll(async () => {
+      const now = await width();
+      const still = Math.abs(now - before) < 0.5;
+      before = now;
+      return still;
+    })
+    .toBe(true);
+  // Straight onto the line and pressing, with no rest on the paper first; then a slow drag,
+  // longer than the hover focus (300 ms) and the pane's transition (0.45 s) together.
+  const span = await lineSpan(page, LINE);
+  const box = (await span.boundingBox())!;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + 1, y);
+  await page.mouse.down();
+  const widths: number[] = [];
+  for (let i = 1; i <= 10; i++) {
+    await page.mouse.move(box.x + 1 + ((box.width - 2) * i) / 10, y);
+    await page.waitForTimeout(100);
+    widths.push(await width());
+  }
+  await page.mouse.up();
+  expect(widths.every((w) => Math.abs(w - before) < 1)).toBe(true);
+  await expect(split).toHaveAttribute("data-focus", "board");
+  // The whole line is selected, and the chip sits beside it.
+  expect(await page.evaluate(() => String(getSelection()))).toContain(
+    "every output cell is a row times a column",
+  );
+  await expect(chip(page)).toBeVisible();
+  const at = (await chip(page).boundingBox())!;
+  const line = (await span.boundingBox())!;
+  expect(Math.abs(at.y + at.height - line.y)).toBeLessThan(24);
+  // A click (no drag) on the paper still focuses it.
+  await page.evaluate(() => getSelection()!.removeAllRanges());
+  await pane.click({ position: { x: 20, y: 20 } });
+  await expect(split).toHaveAttribute("data-focus", "paper");
+});

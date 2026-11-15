@@ -281,19 +281,47 @@ function trackDockHeight(dock: HTMLDivElement | null) {
 
 /** How long the mouse rests on a pane before it takes focus, so passing over it doesn't. */
 const HOVER_FOCUS_MS = 300;
+/** A press that moves further than this is a drag (selecting text in the paper), not a click. */
+const DRAG_PX = 5;
 
-/** A pane's pointer handlers: a press focuses it at once, a mouse resting on it after a moment. */
+/**
+ * A pane's pointer handlers: a click focuses it (on release), a mouse resting on it after a
+ * moment. A drag focuses nothing, and no hover focus starts while a button is held, so text
+ * being selected never moves under the pointer as the pane grows (#129 follow-up).
+ */
 function usePaneFocus(pane: Pane, onFocusPane?: (pane: Pane) => void) {
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // Where a press on the pane started, and whether it has moved; null with no press.
+  const press = useRef<{ x: number; y: number; moved: boolean } | null>(null);
   useEffect(() => () => clearTimeout(timer.current), []);
   return {
-    onPointerDown: () => onFocusPane?.(pane),
+    onPointerDown: (e: PointerEvent) => {
+      clearTimeout(timer.current);
+      press.current = { x: e.clientX, y: e.clientY, moved: false };
+    },
+    onPointerMove: (e: PointerEvent) => {
+      const p = press.current;
+      if (p && Math.hypot(e.clientX - p.x, e.clientY - p.y) > DRAG_PX)
+        p.moved = true;
+    },
+    onPointerUp: () => {
+      const p = press.current;
+      press.current = null;
+      if (p !== null && !p.moved) onFocusPane?.(pane);
+    },
+    onPointerCancel: () => {
+      press.current = null;
+    },
     onPointerEnter: (e: PointerEvent) => {
       if (e.pointerType !== "mouse" || onFocusPane === undefined) return;
       clearTimeout(timer.current);
+      if (e.buttons !== 0) return; // a drag coming in from outside
       timer.current = setTimeout(() => onFocusPane(pane), HOVER_FOCUS_MS);
     },
-    onPointerLeave: () => clearTimeout(timer.current),
+    onPointerLeave: () => {
+      clearTimeout(timer.current);
+      press.current = null;
+    },
   };
 }
 
