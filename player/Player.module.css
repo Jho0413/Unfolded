@@ -199,6 +199,19 @@
   .split[data-tab="board"] > .paperPane {
     visibility: hidden;
   }
+  /* On the paper tab the tutor card and the Ask box still float at the bottom, over the
+     paper, so Ask stays in reach ("Ask about this", issue #129); the widget stays with the
+     board. The paper scrolls its last lines up above them. */
+  .split[data-tab="paper"] > .board .dock {
+    visibility: visible;
+    z-index: 3;
+  }
+  .split[data-tab="paper"] > .board .dock > [data-kind] {
+    display: none;
+  }
+  .split[data-tab="paper"] > .paperPane > :first-child {
+    padding-bottom: 180px;
+  }
   .tabs {
     display: flex;
     gap: 4px;

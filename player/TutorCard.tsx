@@ -7,7 +7,7 @@
 // while the narration is captioned (explaining or holding on) and full otherwise (an answer,
 // the end of a step, a failure); the learner's tap on More / Less wins until the status changes.
 // On a desktop the compact state changes nothing.
-import { type FormEvent, type ReactNode, useState } from "react";
+import { type FormEvent, type ReactNode, type Ref, useState } from "react";
 import type { Caption } from "./captions";
 import {
   CARD_TEXT,
@@ -211,6 +211,7 @@ export function AdaptedNote({
 /** The always-visible Ask box: type and press Enter, or press the mic (or A). */
 export function AskBox({
   value,
+  inputRef,
   disabled,
   onChange,
   onSubmit,
@@ -220,6 +221,8 @@ export function AskBox({
   status = null,
 }: {
   value: string;
+  /** The input, for the Ask panel to focus (a prefilled question, issue #129). */
+  inputRef?: Ref<HTMLInputElement>;
   disabled: boolean;
   onChange: (value: string) => void;
   onSubmit: () => void;
@@ -244,6 +247,7 @@ export function AskBox({
   return (
     <form className={styles.composer} onSubmit={submit} data-testid="ask-box">
       <input
+        ref={inputRef}
         aria-label="Type your question"
         placeholder="Ask anything, or just press the mic and talk"
         autoComplete="off"

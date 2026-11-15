@@ -15,6 +15,7 @@
 // Both share one AskSession (qa/askSession.ts), created by LessonView.
 import { useParams } from "next/navigation";
 import {
+  type Ref,
   useCallback,
   useEffect,
   useMemo,
@@ -28,7 +29,7 @@ import type { Player } from "@/player/usePlayer";
 import { Whiteboard } from "@/player/Whiteboard";
 import { stepView } from "@/player/viewport";
 import { tellAnswerContext } from "@/qa/answerContext";
-import { AskPanel } from "@/qa/AskPanel";
+import { AskPanel, type AskPanelHandle } from "@/qa/AskPanel";
 import { type AskSession, frozenBoard } from "@/qa/askSession";
 import { narrationUpTo } from "@/qa/context";
 import { type AskSignals, noteCommands } from "@/qa/askSignals";
@@ -68,6 +69,7 @@ export function LessonAsk({
   captions,
   highlightPaper,
   signals,
+  askHandle,
 }: {
   player: Player;
   session: AskSession;
@@ -78,6 +80,8 @@ export function LessonAsk({
   highlightPaper?: (quote: string, page?: number) => string;
   /** Records the learner's questions and simplify requests (issue #102). */
   signals?: AskSignals;
+  /** The panel's handle: "Ask about this" on a passage in the paper (issue #129). */
+  askHandle?: Ref<AskPanelHandle>;
 }) {
   useSessionSync(player, session);
   const answerPlayer = useAnswerPlayer(session);
@@ -197,6 +201,7 @@ export function LessonAsk({
       onLearnerMessage={signals?.heard}
       // The learner speaking over a drawn answer holds its narration (barge-in, #105).
       onLearnerSpeech={() => answerPlayer.send("learnerSpoke")}
+      handle={askHandle}
     />
   );
 }

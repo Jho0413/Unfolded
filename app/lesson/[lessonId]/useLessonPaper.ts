@@ -7,6 +7,8 @@
 //   changes nothing on screen.
 // - The agent's passage: `highlightPaper` (the highlight_paper tool), shown while that Ask
 //   lasts, over the narration's. Closing Ask throws it away, as it does the board's drawing.
+// - A passage the learner selected and asked about (issue #129): highlighted in the answer
+//   blue for ASK_ABOUT_HIGHLIGHT_MS, over the narration's (the agent's still wins).
 // - Focus (player/paper/focus.ts): a new passage grows the paper; the board starting to animate
 //   (a lesson action, or the Answer view opening during Ask) grows the board; a click or hover on a
 //   pane focuses it.
@@ -27,6 +29,10 @@ import {
 } from "@/player/paper/focus";
 import { locateQuote, type PaperMatch } from "@/player/paper/locate";
 import { paperRefAt } from "@/player/paper/paperAt";
+import {
+  ASK_ABOUT_HIGHLIGHT_MS,
+  type PaperSelection,
+} from "@/player/paper/selection";
 import type { PaperHighlight } from "@/player/paper/PaperViewer";
 import {
   type PaperPage,
@@ -51,6 +57,8 @@ export type LessonPaper = {
   onFocusPane: (pane: Pane) => void;
   /** highlight_paper: "ok: page n", or why nothing was highlighted. */
   highlightPaper: (quote: string, page?: number) => string;
+  /** "Ask about this" on a selection (issue #129): highlights it briefly. */
+  askAbout: (selection: PaperSelection) => void;
 };
 
 export function useLessonPaper(
@@ -106,6 +114,17 @@ export function useLessonPaper(
   const agentShown =
     agent !== null && asking && agent.askId === session.askId() ? agent : null;
 
+  // The passage the learner asked about, for a moment (issue #129).
+  const [picked, setPicked] = useState<{
+    n: number;
+    match: PaperMatch;
+  } | null>(null);
+  useEffect(() => {
+    if (picked === null) return;
+    const id = setTimeout(() => setPicked(null), ASK_ABOUT_HIGHLIGHT_MS);
+    return () => clearTimeout(id);
+  }, [picked]);
+
   // One object per passage, so the viewer only marks and scrolls when it changes.
   const highlight = useMemo<PaperHighlight | null>(
     () =>
@@ -115,10 +134,12 @@ export function useLessonPaper(
             match: agentShown.match,
             tone: "answer",
           }
-        : cueKey !== null && cueMatch !== null
-          ? { key: cueKey, match: cueMatch, tone: "lesson" }
-          : null,
-    [agentShown, cueKey, cueMatch],
+        : picked
+          ? { key: `picked:${picked.n}`, match: picked.match, tone: "answer" }
+          : cueKey !== null && cueMatch !== null
+            ? { key: cueKey, match: cueMatch, tone: "lesson" }
+            : null,
+    [agentShown, picked, cueKey, cueMatch],
   );
 
   // A new passage on screen grows the paper.
@@ -163,11 +184,25 @@ export function useLessonPaper(
     [session],
   );
 
+  const askAbout = useCallback(
+    ({ quote, page }: PaperSelection) => {
+      const text = latest.current.items;
+      const match = text === null ? null : locateQuote(text, quote, page);
+      if (match === null) {
+        console.info(`[paper] selected passage not found: ${quote}`);
+        return;
+      }
+      setPicked({ n: ++n.current, match });
+    },
+    [setPicked],
+  );
+
   return {
     pages,
     highlight,
     focus: focus.pane,
     onFocusPane,
     highlightPaper,
+    askAbout,
   };
 }
