@@ -2,13 +2,16 @@
 // (ARCHITECTURE.md sections 4 and 5.1). The API rejects the contract's own schema with "The
 // compiled grammar is too large": the 5-kind object union times the 6-kind action union (S3,
 // #27). So actions go on the wire as one flat object, `do` an enum and `color`, `to` and
-// `value` optional, and are converted to the shared Step or Sketch here. Objects keep the
-// contract's own schema. shared/ and the player never see the wire format, and every response
-// is still checked against the real contract by validateStep / validateSketch.
+// `value` optional, and are converted to the shared Step or Sketch here. shared/ and the
+// player never see the wire format, and every response is still checked against the real
+// contract by validateStep / validateSketch.
 //
-// Neither schema has headroom: S3 found one more object kind on top of this is rejected too.
-// A new primitive needs a real request first, then the size budget in
-// tests/unit/lib/pipeline/outputFormat.test.ts moves with it.
+// The grammar has almost no headroom: a step's grammar holds only the board objects (matrix,
+// text, latex, arrow), and the kinds it has no room for (heatmap and plot, #103, and the
+// unused image) come as a JSON array in one string, `objectsJson`, parsed and checked here.
+// Even one compact heatmap kind in the grammar was rejected (#103). A sketch keeps the board
+// objects, image included, in its grammar. Probe a bigger schema with a real request before
+// it merges; the size budget in tests/unit/lib/pipeline/outputFormat.test.ts moves with it.
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
@@ -18,15 +21,23 @@ import { repairSketchPlainMaths } from "@/shared/plainMaths";
 import {
   type Action,
   Anchor,
+  ArrowObject,
   BoardObject,
   type CuedAction,
   CuedPaperRef,
+  HeatmapObject,
   HighlightColor,
+  ImageObject,
+  LatexObject,
+  MatrixObject,
   MAX_DURATION_MS,
   OBJECT_ID_RE,
+  PlotObject,
+  type SceneObject,
   type Sketch,
   type Step,
   Target,
+  TextObject,
 } from "@/shared/scene";
 import {
   type SketchContext,
@@ -91,10 +102,35 @@ const WireCuedAction = z.object({
   ...wireOptional,
 });
 
+/** The objects a step's grammar carries, with the contract's own schemas. */
+export const WireStepObject = z.union([
+  MatrixObject,
+  TextObject,
+  LatexObject,
+  ArrowObject,
+]);
+export type WireStepObject = z.infer<typeof WireStepObject>;
+
+/**
+ * The objects that come as JSON text in `objectsJson`, checked with the contract's own schemas.
+ * Never sent as a JSON schema, so a discriminated union: an error names the object's own field.
+ */
+export const JsonStepObject = z.discriminatedUnion("kind", [
+  HeatmapObject,
+  PlotObject,
+  ImageObject,
+]);
+export type JsonStepObject = z.infer<typeof JsonStepObject>;
+
 export const WireStep = z.object({
   title: z.string(),
   narration: z.string(),
-  objects: z.array(BoardObject),
+  objects: z.array(WireStepObject),
+  /**
+   * The heatmap, plot and image objects, as a JSON array in a string ("[]" for none).
+   * Required, so it is written before the actions that name its objects.
+   */
+  objectsJson: z.string(),
   actions: z.array(WireCuedAction),
   /** Last, after everything the board needs (#98). An empty list isn't saved. */
   paperRefs: z.array(WirePaperRef).optional(),
@@ -125,6 +161,10 @@ export const wireErrors = {
   /** Not a rejection: the ref is dropped and this is logged (#98). */
   badPaperRef: (i: number, problems: readonly string[]) =>
     `paperRefs.${i} dropped: ${problems.join("; ")}`,
+  objectsJsonNotJson: (reason: string) =>
+    `objectsJson: not valid JSON (${reason})`,
+  objectsJsonNotArray:
+    "objectsJson: must be a JSON array of heatmap, plot and image objects",
 } as const;
 
 /** A converted step or sketch, without the actions that couldn't convert, and why. */
@@ -178,8 +218,40 @@ function toActions<W extends WireAction, A>(
   return { value, errors: [...new Set(errors)] };
 }
 
-/** The wire step as a shared Step (pure). The inverse of reading a Step as a WireStep. */
+/**
+ * `objectsJson` as objects, without those that fail their schema, and why. Blank is none, like
+ * "[]". Errors carry the wire's own path (`objectsJson.0.values: ...`), as the wire schema's do.
+ */
+function parseObjectsJson(text: string): Converted<JsonStepObject[]> {
+  if (text.trim() === "") return { value: [], errors: [] };
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch (err) {
+    return {
+      value: [],
+      errors: [wireErrors.objectsJsonNotJson((err as Error).message)],
+    };
+  }
+  if (!Array.isArray(json))
+    return { value: [], errors: [wireErrors.objectsJsonNotArray] };
+  const value: JsonStepObject[] = [];
+  const errors: string[] = [];
+  json.forEach((item: unknown, i) => {
+    const parsed = JsonStepObject.safeParse(item);
+    if (parsed.success) value.push(parsed.data);
+    else errors.push(...schemaErrors(parsed.error, ["objectsJson", `${i}`]));
+  });
+  return { value, errors };
+}
+
+/**
+ * The wire step as a shared Step (pure). The inverse of reading a Step as a WireStep, with the
+ * heatmap, plot and image objects first: the board draws in order, so arrows and labels in
+ * `objects` go on top of them.
+ */
 export function wireToStep(wire: WireStep): Converted<Step> {
+  const json = parseObjectsJson(wire.objectsJson);
   const actions = toActions(wire.actions, (w) => ({ cue: w.cue }));
   const paperRefs: CuedPaperRef[] = [];
   const warnings: string[] = [];
@@ -192,12 +264,12 @@ export function wireToStep(wire: WireStep): Converted<Step> {
     value: {
       title: wire.title,
       narration: wire.narration,
-      objects: wire.objects,
+      objects: [...json.value, ...wire.objects] satisfies SceneObject[],
       actions: actions.value satisfies CuedAction[],
       // An empty list isn't saved: a step with no passages has no paperRefs.
       ...(paperRefs.length > 0 && { paperRefs }),
     },
-    errors: actions.errors,
+    errors: [...json.errors, ...actions.errors],
     ...(warnings.length > 0 && { warnings }),
   };
 }
@@ -215,10 +287,16 @@ export function wireToSketch(wire: WireSketch): Converted<Sketch> {
   };
 }
 
-/** The same "path: message" form as validate.ts's schema errors. */
-export function schemaErrors(error: z.ZodError): string[] {
+/**
+ * The same "path: message" form as validate.ts's schema errors, the path under `at` when the
+ * value checked sits inside the wire (objectsJson).
+ */
+export function schemaErrors(
+  error: z.ZodError,
+  at: readonly string[] = [],
+): string[] {
   return error.issues.map((issue) => {
-    const path = issue.path.map(String).join(".");
+    const path = [...at, ...issue.path.map(String)].join(".");
     return path ? `${path}: ${issue.message}` : issue.message;
   });
 }

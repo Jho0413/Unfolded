@@ -425,7 +425,7 @@ describe("section 6.2: failed", () => {
 });
 
 describe("paper quotes (#98), through the route", () => {
-  /** The recorded step with quotes from the e2e paper fixture (./paperPdf), cued on its [[k]]. */
+  /** The recorded step with quotes from the e2e paper fixture (./paperPdf), cued on its [[soft]]. */
   async function replyQuoting(...paperRefs: CuedPaperRef[]) {
     const text = validReply.content.find((b) => b.type === "text");
     const step = { ...JSON.parse(text!.text), paperRefs };
@@ -434,7 +434,7 @@ describe("paper quotes (#98), through the route", () => {
   const FOUND: CuedPaperRef = {
     page: 2,
     quote: "The products of the paired entries are added together",
-    cue: "k",
+    cue: "soft",
   };
 
   it("a run with paper.pdf: the quotes are checked against its text, and the step is saved with them", async () => {

@@ -22,7 +22,8 @@ export interface FakeClaude extends ClaudeMessages {
  * Serves `replies` in order, one per request; a request past the end fails the test. Without
  * `replies`, every request gets `fixture`, a Message in the API's shape in the wire format of
  * lib/pipeline/outputFormat.ts: `config.step.fixture` (a real Sonnet 5.5 step response,
- * Attention paper, scaled dot-product scores, recorded 2026-11-14), `config.sketch.fixture`
+ * Attention paper, softmax over the scores with a heatmap and a plot in objectsJson, recorded
+ * 2026-11-15, #103), `config.sketch.fixture`
  * (a real Sonnet 5.5 sketch) or `config.plan.fixture` (a real Sonnet 5.5 plan of the Attention
  * paper at medium effort, recorded 2026-11-14; plans have no wire format).
  */
