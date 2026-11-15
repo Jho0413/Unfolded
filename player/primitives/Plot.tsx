@@ -35,6 +35,25 @@ const TICK = 6;
 const STROKE = 3.5;
 const DOT = 5;
 
+/**
+ * An SVG path through the points, broken where one isn't finite: a widget's formula can be
+ * NaN or infinite somewhere (issue #110), and the curve then has a gap there. Scene objects
+ * are finite (validate.ts), so for them it is one unbroken line.
+ */
+export function pathThrough(pts: readonly { x: number; y: number }[]): string {
+  let pen = false;
+  const parts: string[] = [];
+  for (const p of pts) {
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) {
+      pen = false;
+      continue;
+    }
+    parts.push(`${pen ? "L" : "M"} ${p.x} ${p.y}`);
+    pen = true;
+  }
+  return parts.join(" ");
+}
+
 /** The colour every point of a series is highlighted in, or null if they differ or none is. */
 function wholeHighlight(row: readonly (HighlightColor | null)[] | undefined) {
   const first = row?.[0] ?? null;
@@ -193,9 +212,7 @@ export function Plot({
             progress >= 1 ? 1 : lengthShareAt(all, toCanvas(cut, 0).x);
           const drawing = progress < 1;
           const ink = drawing ? easeOutCubic(span(progress, 0, 0.2)) : 1;
-          const d = all
-            .map((p, i) => `${i ? "L" : "M"} ${p.x} ${p.y}`)
-            .join(" ");
+          const d = pathThrough(all);
           const hlRow = state.cellHighlight?.[s];
           const whole = wholeHighlight(hlRow);
           const wholeP = whole
@@ -242,6 +259,7 @@ export function Plot({
               )}
               {!joined &&
                 all.map((p, i) => {
+                  if (!Number.isFinite(p.y)) return null;
                   const on = series.points[i][0] <= cut || progress >= 1;
                   return (
                     <circle
@@ -262,6 +280,7 @@ export function Plot({
                   cellProgress(active, "highlight", plot.id, s, i, h),
                 );
                 const at = all[i];
+                if (!Number.isFinite(at.y)) return null;
                 const r = DOT + 5;
                 return (
                   <g key={`hl${i}`} data-point={`${s},${i}`} data-highlight={h}>

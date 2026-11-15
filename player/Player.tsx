@@ -28,6 +28,8 @@ import { AdaptedNote, TutorCard } from "./TutorCard";
 import type { FetchStep } from "./stepLoader";
 import { type Player as PlayerApi, usePlayer } from "./usePlayer";
 import { Whiteboard } from "./Whiteboard";
+import { WidgetPanel, WidgetPrompt } from "./widget/WidgetPanel";
+import { widgetOnScreen } from "./widget/widgetView";
 import styles from "./Player.module.css";
 
 export function Player({
@@ -124,6 +126,8 @@ export function PlayerStage({
   const title = loaded?.step.title ?? titles[player.step] ?? "";
   // A version regenerated after a learner's question says so (issue #102).
   const marker = adaptedMarker(loaded?.adaptedFrom);
+  // A "try it yourself" widget at the end of the step (issue #110).
+  const widget = widgetOnScreen(state, loaded?.step);
   return (
     <section
       data-testid="player"
@@ -167,13 +171,26 @@ export function PlayerStage({
           )}
           {debug && <DebugOverlay tMs={tMs} lastCue={player.lastCue} />}
           <div className={styles.dock} ref={trackDockHeight}>
+            {widget && (
+              <WidgetPanel
+                key={`${player.step}:${loaded?.version ?? 0}`}
+                widget={widget}
+              />
+            )}
             {card !== null && (
               <TutorCard
                 view={card}
                 caption={caption}
                 onAction={send}
                 holdShortcut="Space"
-                notices={marker && <AdaptedNote {...marker} />}
+                notices={
+                  (marker || widget) && (
+                    <>
+                      {marker && <AdaptedNote {...marker} />}
+                      {widget && <WidgetPrompt prompt={widget.prompt} />}
+                    </>
+                  )
+                }
               />
             )}
             {renderAsk?.(player)}

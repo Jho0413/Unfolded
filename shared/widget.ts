@@ -14,6 +14,8 @@ export const WIDGET_LIMITS = {
   maxLabelChars: 24,
   /** Points a plot widget samples its formula at, across `x`. */
   samples: 160,
+  /** The largest score a learner can type into a heatmap cell. */
+  maxScore: 1e6,
 } as const;
 
 /** A parameter name: like an object id, short, and not x, a constant or a function. */
@@ -136,7 +138,20 @@ export function sampleXs(w: PlotWidget): number[] {
 
 /** The sliders' starting values, by parameter name. */
 export function startValues(w: PlotWidget): Record<string, number> {
-  return Object.fromEntries(w.params.map((p) => [p.name, p.value]));
+  return Object.fromEntries(w.params.map((p) => [p.name, snapToStep(p)]));
+}
+
+/** A value on its slider's step grid, as the range input shows it (min 0.5, step 0.3: 1 is 1.1). */
+export function snapToStep(p: {
+  min: number;
+  max: number;
+  step: number;
+  value: number;
+}): number {
+  let k = Math.round((p.value - p.min) / p.step);
+  if (p.min + k * p.step > p.max + 1e-9 * p.step) k--;
+  const v = p.min + k * p.step;
+  return Number(v.toPrecision(12));
 }
 
 /**
@@ -174,7 +189,10 @@ export function softmaxRows(
   temperature = 1,
 ): number[][] {
   return values.map((row) => {
-    const scaled = row.map((v) => v / temperature);
+    // Held finite, so a huge score or a tiny temperature can't make Infinity - Infinity.
+    const scaled = row.map((v) =>
+      Math.min(1e300, Math.max(-1e300, v / temperature)),
+    );
     const top = Math.max(...scaled);
     const exps = scaled.map((v) => Math.exp(v - top));
     const sum = exps.reduce((a, b) => a + b, 0);

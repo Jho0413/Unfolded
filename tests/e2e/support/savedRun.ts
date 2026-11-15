@@ -8,6 +8,7 @@ import { M1_CUE_TIMES } from "@/app/dev/board/scenes";
 import demoM1 from "@/lib/fakes/fixtures/demo-m1.step.json";
 import type { LessonPlan, SavedStep } from "@/shared/lesson";
 import { type CuedPaperRef, Step } from "@/shared/scene";
+import type { Widget } from "@/shared/widget";
 import { RUNS_DIR } from "./runsDir";
 
 /** A lesson as the upload page leaves it, before any step is generated: plan.json and paper.json. */
@@ -64,6 +65,8 @@ export interface SavedRunOptions {
   paper?: boolean;
   /** Paper passages every saved step points at (issue #98). */
   paperRefs?: CuedPaperRef[];
+  /** A "try it yourself" widget step 0 ends with (issue #110). */
+  widget?: Widget;
 }
 
 /** Writes runs/<lessonId>/ and returns a handle that removes it. */
@@ -78,6 +81,7 @@ export async function savedRun(
     cover,
     paper,
     paperRefs,
+    widget,
   } = options;
   const dir = path.join(RUNS_DIR, lessonId);
   // A folder left by an interrupted run must not change the results.
@@ -107,7 +111,12 @@ export async function savedRun(
       const title =
         k === versions ? savedStepTitle(n) : `${savedStepTitle(n)} old v${k}`;
       const saved: SavedStep = {
-        step: { ...m1Step, title, ...(paperRefs && { paperRefs }) },
+        step: {
+          ...m1Step,
+          title,
+          ...(paperRefs && { paperRefs }),
+          ...(widget && n === 0 && { widget }),
+        },
         cueTimes: M1_CUE_TIMES,
       };
       await writeFile(path.join(dir, `step-${n}.v${k}.mp3`), audio);
