@@ -13,11 +13,15 @@ export const config = {
     step: "claude-sonnet-5-5",
     sketch: "claude-sonnet-5-5",
   },
-  /** Step: medium, chosen by spike S3 (ARCHITECTURE.md section 11). Plan and sketch are not measured yet (L1, Q4). */
+  /**
+   * Step: medium, chosen by spike S3 (ARCHITECTURE.md section 11). Plan: not measured yet (L1).
+   * Sketch: medium since #90: the research requests answered in 4.3 to 5.0 s (low took 3 to
+   * 5 s), and 12.7 to 13.1 s when the answer template sent one back for its single retry.
+   */
   effort: {
     plan: "medium",
     step: "medium",
-    sketch: "low",
+    sketch: "medium",
   } satisfies Record<string, Effort>,
   /** Narration cap after cue markers are stripped (`narration too long`, ARCHITECTURE.md section 4). */
   maxNarrationChars: 1500,

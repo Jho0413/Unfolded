@@ -17,6 +17,8 @@ import {
   buildSketchRequest,
   type SketchRequestBody,
 } from "@/lib/pipeline/sketch";
+import { TEXT_CHAR_EM, TEXT_SIZE } from "@/shared/boxes";
+import { ANSWER_TEMPLATE } from "@/shared/validate";
 
 const REQ: SketchRequestBody = {
   description: "why the row goes with the column",
@@ -41,11 +43,11 @@ const userText = (req: SketchRequestBody) => {
 };
 
 describe("buildSketchRequest", () => {
-  it("uses the sketch model, low effort and the output cap from lib/config.ts", () => {
+  it("uses the sketch model, medium effort and the output cap from lib/config.ts", () => {
     const body = buildSketchRequest(REQ);
     expect(body.model).toBe(config.models.sketch);
-    expect(body.output_config?.effort).toBe("low");
-    expect(config.effort.sketch).toBe("low");
+    expect(body.output_config?.effort).toBe("medium");
+    expect(config.effort.sketch).toBe("medium");
     expect(body.max_tokens).toBe(config.sketch.maxTokens);
   });
 
@@ -121,6 +123,39 @@ describe("the sketch prompt", () => {
       expect(SKETCH_SYSTEM_PROMPT).toContain(part);
       expect(STEP_SYSTEM_PROMPT).toContain(part);
     }
+  });
+
+  it("lays a fresh answer out from the validator's template: title, content area, takeaway, count, area and gaps", () => {
+    const { title, content, takeaway, area, maxObjects, gap, arrowGap } =
+      ANSWER_TEMPLATE;
+    for (const text of [
+      `at x ${title.x}, y ${title.y}`,
+      `from x ${content.x0} to ${content.x1} and y ${content.y0} to ${content.y1}`,
+      `at x ${takeaway.x}, y ${takeaway.y}`,
+      `At most ${maxObjects} objects`,
+      `inside x ${area.x0} to ${area.x1} and y ${area.y0} to ${area.y1}`,
+      `at least ${gap} apart`,
+      `at least ${arrowGap} apart`,
+    ])
+      expect(SKETCH_SYSTEM_PROMPT).toContain(text);
+  });
+
+  it("gives the sizes the validator estimates with (shared/boxes.ts)", () => {
+    expect(SKETCH_SYSTEM_PROMPT).toContain(
+      `about ${TEXT_CHAR_EM} of its size wide per character`,
+    );
+    expect(SKETCH_SYSTEM_PROMPT).toContain(
+      `m ${TEXT_SIZE.m}, l ${TEXT_SIZE.l}`,
+    );
+  });
+
+  it("asks for maths as latex, never _ or ^ in plain text, and a value for every write", () => {
+    expect(SKETCH_SYSTEM_PROMPT).toContain(
+      'Never write "_" or "^" in a text, a label or a matrix cell',
+    );
+    expect(SKETCH_SYSTEM_PROMPT).toContain(
+      "Every write action needs its value.",
+    );
   });
 
   it("the retry prompt lists every error", () => {
