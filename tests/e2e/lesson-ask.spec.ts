@@ -36,14 +36,15 @@ function boardAttributes(page: Page): Promise<string> {
 
 const typeQuestion = askQuestion;
 
+/** A drawn answer: on its own board (the Answer view), so it names only its own objects. */
 const SKETCH = {
   objects: [
-    { kind: "text", id: "note", x: 800, y: 700, text: "row times column" },
+    { kind: "text", id: "note", x: 800, y: 450, text: "row times column" },
   ],
-  actions: [{ do: "highlight", target: { id: "b", col: 1 }, atMs: 0 }],
+  actions: [{ do: "highlight", target: { id: "note" }, atMs: 0 }],
 };
 
-test("typed question -> asking -> highlight and draw -> carry on -> the lesson goes on, board restored", async ({
+test("typed question -> asking -> highlight, then draw (the Answer view) -> carry on -> the lesson goes on, board restored", async ({
   page,
 }) => {
   await using run = await savedRun("e2e-lesson-ask");
@@ -109,17 +110,18 @@ test("typed question -> asking -> highlight and draw -> carry on -> the lesson g
     fresh: boolean;
     board: { objects: { object: { id: string } }[] };
   };
-  expect(body.fresh).toBe(false);
-  expect(body.board.objects.map((o) => o.object.id)).toContain("a");
+  // Always a fresh answer board, whatever the agent asked (the fake passes fresh: false).
+  expect(body.fresh).toBe(true);
+  expect(body.board.objects).toEqual([]);
   await expect(answer(page)).toContainText("Let me sketch that");
   const note = board(page).locator('[data-object-id="note"]');
   await expect(note).toHaveCount(0);
   release();
+  // The Answer view: the drawing alone, the lesson hidden.
+  await expect(page.getByTestId("answer-view")).toBeVisible();
   await expect(note).toHaveCount(1);
-  await expect(cell(page, "b", 0, 1)).toHaveAttribute(
-    "data-highlight",
-    "accent",
-  );
+  await expect(note).toHaveAttribute("data-highlight", "accent");
+  await expect(board(page).locator('[data-object-id="a"]')).toHaveCount(0);
 
   // Carry on: Ask closes (paused), then the lesson resumes; the drawing is thrown away.
   await carryOn(page).click();

@@ -204,7 +204,7 @@ test("upload → plan → step plays → highlight at its cue → Next → Ask �
     board(page).locator(`[data-object-id="${first}"] [data-cell="0,0"]`),
   ).toHaveAttribute("data-highlight", "accent");
 
-  // draw_scene: the server's fake sketch, drawn on the current board when it arrives.
+  // draw_scene: the server's fake sketch, drawn in the Answer view when it arrives.
   const sketchAnswer = page.waitForResponse("**/api/sketch");
   await ask(page, "can you draw it?");
   await expect(answer(page)).toContainText("Let me sketch that");
@@ -217,9 +217,10 @@ test("upload → plan → step plays → highlight at its cue → Next → Ask �
     await expect(board(page).locator(`[data-object-id="${o.id}"]`)).toHaveCount(
       1,
     );
-  // On top of the current board, not instead of it.
+  // Instead of the lesson board, not on top of it.
+  await expect(page.getByTestId("answer-view")).toBeVisible();
   await expect(board(page).locator(`[data-object-id="${first}"]`)).toHaveCount(
-    1,
+    0,
   );
 
   // Got it, carry on: Ask closes, the drawing is gone, and the lesson goes on from where it

@@ -197,9 +197,10 @@ function boardAttributes(page: Page): Promise<string> {
     );
 }
 
+/** A drawn answer: always on a fresh board (#90), so it names only its own objects. */
 const SKETCH = {
-  objects: [{ kind: "text", id: "note", x: 600, y: 400, text: "row 1" }],
-  actions: [{ do: "highlight", target: { id: "q", row: 0 }, atMs: 0 }],
+  objects: [{ kind: "text", id: "note", x: 800, y: 400, text: "row 1" }],
+  actions: [{ do: "highlight", target: { id: "note" }, atMs: 0 }],
 };
 
 test.describe("draw_scene on /dev/ask (ROADMAP Q5)", () => {
@@ -224,8 +225,9 @@ test.describe("draw_scene on /dev/ask (ROADMAP Q5)", () => {
       board: { objects: { object: { id: string } }[] };
     };
     expect(body.description).toBe("Circle the first row of q");
-    expect(body.fresh).toBe(false);
-    expect(body.board.objects.map((o) => o.object.id)).toEqual(["q", "a"]);
+    // The agent passed fresh: false; the browser always asks for a fresh answer board.
+    expect(body.fresh).toBe(true);
+    expect(body.board.objects).toEqual([]);
     // The agent answers at once: draw_scene doesn't wait for the sketch.
     await expect(answer(page)).toContainText("Let me sketch that");
     await expect(page.getByTestId("tool-log")).toContainText(
@@ -237,7 +239,7 @@ test.describe("draw_scene on /dev/ask (ROADMAP Q5)", () => {
     await expect(note).toHaveCount(0);
     release();
     await expect(note).toHaveCount(1);
-    // The sketch's highlight on q row 0 shows too.
+    // The sketch's highlight shows too.
     await expect
       .poll(async () => (await boardAttributes(page)).includes("accent"))
       .toBe(true);

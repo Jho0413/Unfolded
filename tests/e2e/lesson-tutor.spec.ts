@@ -1,6 +1,6 @@
 // The tutor UI on the lesson page (ARCHITECTURE.md section 5.6): the card instead of a
 // transport, the always-visible Ask box (typed before any mic answer), the answer's tag and
-// the board dimming only under a sketch, carry on, captions, the outline, the keys, and the
+// a drawn answer's Answer view, carry on, captions, the outline, the keys, and the
 // theme toggle. Saved runs come from ./support/savedRun.ts; the conversation is the scripted
 // fake (NEXT_PUBLIC_FAKE_APIS=1); /api/sketch is faked per test. Screenshots at 1440 x 900, in
 // dark and light, go to evidence/lesson-tutor-ui/ (gitignored).
@@ -60,17 +60,45 @@ async function endStep(page: Page, step: number) {
   await expectState(page, "stepEnded", step);
 }
 
-/** The lesson layer's opacity (it dims to 0.3 under a sketch, with a 0.4 s transition). */
-const mainOpacity = (page: Page) =>
-  board(page)
-    .locator('[data-layer="main"]')
-    .evaluate((g) => Number(getComputedStyle(g).opacity));
+const answerView = (page: Page) => page.getByTestId("answer-view");
 
+/** A drawn answer, laid out from the answer template (it names only its own objects). */
 const SKETCH = {
   objects: [
-    { kind: "text", id: "note", x: 800, y: 760, text: "row times column" },
+    { kind: "text", id: "title", x: 800, y: 110, text: "Row times column" },
+    {
+      kind: "matrix",
+      id: "row",
+      x: 400,
+      y: 420,
+      rows: [["1", "2"]],
+      label: "row",
+    },
+    {
+      kind: "matrix",
+      id: "col",
+      x: 1000,
+      y: 396,
+      rows: [["5"], ["7"]],
+      label: "column",
+    },
+    {
+      kind: "arrow",
+      id: "times",
+      from: { id: "row" },
+      to: { id: "col" },
+      label: "times",
+    },
+    {
+      kind: "text",
+      id: "sum",
+      x: 800,
+      y: 810,
+      text: "1·5 + 2·7 = 19",
+      size: "s",
+    },
   ],
-  actions: [{ do: "highlight", target: { id: "b", col: 1 }, atMs: 0 }],
+  actions: [{ do: "highlight", target: { id: "row", row: 0 }, atMs: 0 }],
 };
 
 test("no transport: Hold on → Holding on → Go on → the step ends → Next: <title> → step 2", async ({
@@ -225,7 +253,7 @@ test("a typed question before any mic answer opens Ask and is answered as text",
   await expect(page.getByTestId("ask-question")).toHaveCount(1);
 });
 
-test("a spoken answer: Spoken answer, and the board isn't dimmed", async ({
+test("a spoken answer: Spoken answer, and the lesson stays on the board", async ({
   page,
 }) => {
   await using run = await savedRun("e2e-tutor-spoken");
@@ -234,11 +262,10 @@ test("a spoken answer: Spoken answer, and the board isn't dimmed", async ({
   await askQuestion(page, "show me the first row");
   await expect(answer(page)).toContainText("first row");
   await expect(page.getByTestId("answer-tag")).toHaveText(CARD_TEXT.tagSpoken);
-  await expect(board(page)).toHaveAttribute("data-sketching", "false");
-  expect(await mainOpacity(page)).toBe(1);
+  await expect(answerView(page)).toHaveCount(0);
 });
 
-test("a draw_scene answer: Drawing on the board, and the lesson dims under the sketch", async ({
+test("a draw_scene answer: Drawing on the board, in the Answer view instead of the lesson", async ({
   page,
 }) => {
   await page.route("**/api/sketch", (route) =>
@@ -249,16 +276,11 @@ test("a draw_scene answer: Drawing on the board, and the lesson dims under the s
   await expectState(page, "playing", 0);
   await askQuestion(page, "can you draw it?");
   await expect(page.getByTestId("answer-tag")).toHaveText(CARD_TEXT.tagDrawing);
-  await expect(board(page).locator('[data-object-id="note"]')).toHaveCount(1);
-  await expect(board(page)).toHaveAttribute("data-sketching", "true");
-  await expect.poll(() => mainOpacity(page)).toBeCloseTo(0.3, 2);
-  // The sketch's own objects are in their layer, not dimmed.
-  await expect(
-    board(page).locator('[data-layer="sketch"] [data-object-id="note"]'),
-  ).toHaveCount(1);
+  await expect(answerView(page)).toBeVisible();
+  await expect(board(page).locator('[data-object-id="title"]')).toHaveCount(1);
 });
 
-test("a draw_scene sketch that fails: Couldn't draw that, tagged Spoken answer, nothing dimmed", async ({
+test("a draw_scene sketch that fails: Couldn't draw that, tagged Spoken answer, the lesson stays", async ({
   page,
 }) => {
   await page.route("**/api/sketch", (route) =>
@@ -272,7 +294,7 @@ test("a draw_scene sketch that fails: Couldn't draw that, tagged Spoken answer, 
     "Couldn't draw that.",
   );
   await expect(page.getByTestId("answer-tag")).toHaveText(CARD_TEXT.tagSpoken);
-  await expect(board(page)).toHaveAttribute("data-sketching", "false");
+  await expect(answerView(page)).toHaveCount(0);
 });
 
 test("Got it, carry on: a lesson stopped mid-step resumes", async ({
@@ -285,7 +307,7 @@ test("Got it, carry on: a lesson stopped mid-step resumes", async ({
   await expect(answer(page)).toBeVisible();
   await carryOn(page).click();
   await expectState(page, "playing", 0);
-  await expect(board(page)).toHaveAttribute("data-sketching", "false");
+  await expect(answerView(page)).toHaveCount(0);
 });
 
 test("Hold on → ask → Got it, carry on: resumes", async ({ page }) => {
@@ -453,8 +475,10 @@ for (const theme of ["dark", "light"] as const) {
     await expect(page.getByTestId("caption")).toBeVisible();
     await screenshot(page, `${theme}-1-explaining`);
     await askQuestion(page, "can you draw it?");
-    await expect(board(page)).toHaveAttribute("data-sketching", "true");
-    await expect.poll(() => mainOpacity(page)).toBeCloseTo(0.3, 2);
+    await expect(answerView(page)).toBeVisible();
+    await expect(page.getByTestId("answer-tag")).toHaveText(
+      CARD_TEXT.tagDrawing,
+    );
     await screenshot(page, `${theme}-2-drawn-answer`);
     await carryOn(page).click();
     await endStep(page, 0);
