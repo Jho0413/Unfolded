@@ -80,7 +80,9 @@ describe("generateStep (G1)", () => {
       fakeMessage(asWire({ ...valid, title: "Multiplying two matrices" })),
     ]);
     await expect(generateStep(REQ, claude)).resolves.toEqual(valid);
-    expect(valid.title).toBe("Second idea");
+    // The fixture as recorded has its own title, so the plan's really replaced it.
+    const recorded = Step.parse(await readFixture("demo-m1.step.json"));
+    expect(recorded.title).not.toBe(PLAN.steps[1].title);
   });
 
   it("invalid then valid: retries once with the errors, then returns the step", async () => {
