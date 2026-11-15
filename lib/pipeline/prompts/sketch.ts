@@ -57,7 +57,7 @@ When the board is empty, the sketch is the whole answer, on its own clean board 
 - Takeaway (optional): one short line, a text object of size "${takeaway.size}", at x ${takeaway.x}, y ${takeaway.y}.
 - At most ${maxContent} objects besides arrows (the title and takeaway included), and at most ${maxArrows} arrows. Every object's whole box stays inside x ${area.x0} to ${area.x1} and y ${area.y0} to ${area.y1}.
 - Sizes: text size "m" for content and "s" for notes and the takeaway; "l" only for a single symbol. A text is about ${TEXT_CHAR_EM} of its size wide per character, plus one size (sizes s ${TEXT_SIZE.s}, m ${TEXT_SIZE.m}, l ${TEXT_SIZE.l}); a formula about ${LATEX_GLYPH_PX} wide per symbol and ${LATEX_LINE_PX} high per line; a matrix's label reaches ${MATRIX_LABEL_PX} above its top. Keep every two objects at least ${gap} apart, and two that an arrow joins at least ${arrowGap} apart, so the arrow shows.
-- Maths: anything with a subscript, superscript, fraction, root or Greek letter is a latex object (d_k is the latex "d_k"). Never write "_" or "^" in a text, a label or a matrix cell: plain text is for words and plain numbers.
+- Maths: anything with a subscript, superscript, fraction, root or Greek letter is a latex object (d_k is the latex "d_k"). Never write "_" or "^" in a text, a label or a matrix cell: plain text is for words and plain numbers. Don't spell maths out in plain text either ("sqrt(d)", "d = 64", "x^2"): a title or takeaway is words only (e.g. "Why scale the scores?"), and the maths goes in its own latex object.
 - Highlight at most one or two key objects or cells.
 - Arrows run left to right or top to bottom, between objects, with a short label of one to three words, or none.
 
