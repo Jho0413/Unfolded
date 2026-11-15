@@ -1,5 +1,5 @@
 // npm run seed:m2's lib side (ROADMAP G2): the committed seed file is valid, a seed writes what
-// POST /api/lessons writes (paper.json, then plan.json), and nothing is uploaded for a bad file
+// POST /api/lessons writes (paper.json, paper.pdf, then plan.json), and nothing is uploaded for a bad file
 // or a bad PDF. The Files API is lib/fakes/claude.ts's fake; runs go to a temp dir.
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -17,8 +17,12 @@ import {
 import {
   listRunFiles,
   PAPER_FILE,
+  PAPER_PDF_FILE,
   PLAN_FILE,
+  readRunFile,
   readRunJson,
+  writeRunFile,
+  writeRunJson,
 } from "@/lib/runs/store";
 import { LessonPlan } from "@/shared/lesson";
 import { makePdf } from "./pdfs";
@@ -104,7 +108,7 @@ describe("parseSeedFile", () => {
 });
 
 describe("seedLesson", () => {
-  it("uploads the PDF once and writes paper.json and plan.json", async () => {
+  it("uploads the PDF once and writes paper.json, paper.pdf (byte for byte) and plan.json", async () => {
     const files = fakeFiles(UPLOADED);
     const pdf = makePdf();
     const paper = await seedLesson(lesson(), pdf, files);
@@ -119,6 +123,24 @@ describe("seedLesson", () => {
     await expect(readRunJson("seeded", PLAN_FILE, LessonPlan)).resolves.toEqual(
       lesson().plan,
     );
+    const saved = await readRunFile("seeded", PAPER_PDF_FILE);
+    expect(saved.kind).toBe("ok");
+    if (saved.kind === "ok") expect(new Uint8Array(saved.data)).toEqual(pdf);
+  });
+
+  it("seeding a run made before #98 again backfills paper.pdf and keeps its saved steps", async () => {
+    await writeRunJson("seeded", PAPER_FILE, {
+      fileId: "file_old",
+      filename: "seeded.pdf",
+    });
+    await writeRunJson("seeded", PLAN_FILE, lesson().plan);
+    await writeRunFile("seeded", "step-0.v1.json", "{}");
+    const pdf = makePdf();
+    await seedLesson(lesson(), pdf, fakeFiles(UPLOADED));
+    const saved = await readRunFile("seeded", PAPER_PDF_FILE);
+    expect(saved.kind).toBe("ok");
+    if (saved.kind === "ok") expect(new Uint8Array(saved.data)).toEqual(pdf);
+    expect(await listRunFiles("seeded")).toContain("step-0.v1.json");
   });
 
   it("bytes that aren't a usable PDF are refused before uploading, and nothing is written", async () => {

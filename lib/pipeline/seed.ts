@@ -1,6 +1,7 @@
 // `npm run seed:m2` (ROADMAP G2): a lesson from a hand-made plan instead of Claude's, so steps
 // can be generated before (or without) the upload page. The paper is uploaded with the Files
-// API and the run folder gets what POST /api/lessons writes: paper.json, then plan.json last.
+// API and the run folder gets what POST /api/lessons writes: paper.json, paper.pdf, then
+// plan.json last.
 // Generic: the papers and their plans are data (scripts/seed-m2.lessons.json), never code.
 import "server-only";
 import { z } from "zod";
@@ -13,7 +14,13 @@ import {
   uploadPaper,
   validatePlan,
 } from "@/lib/pipeline/plan";
-import { PAPER_FILE, PLAN_FILE, writeRunJson } from "@/lib/runs/store";
+import {
+  PAPER_FILE,
+  PAPER_PDF_FILE,
+  PLAN_FILE,
+  writeRunFile,
+  writeRunJson,
+} from "@/lib/runs/store";
 
 const MB = 1024 * 1024;
 
@@ -49,9 +56,9 @@ export function parseSeedFile(input: unknown): SeedLesson[] {
 }
 
 /**
- * Uploads the paper and writes the lesson's run folder: paper.json, then plan.json. Replaces
- * an earlier seed of the same lesson (steps already saved in it are kept). Throws when the
- * bytes aren't a usable PDF (before uploading) or the upload fails (GenerationError).
+ * Uploads the paper and writes the lesson's run folder: paper.json, paper.pdf, then plan.json.
+ * Replaces an earlier seed of the same lesson (steps already saved in it are kept). Throws when
+ * the bytes aren't a usable PDF (before uploading) or the upload fails (GenerationError).
  */
 export async function seedLesson(
   lesson: SeedLesson,
@@ -70,6 +77,8 @@ export async function seedLesson(
     filename,
   };
   await writeRunJson(lesson.lessonId, PAPER_FILE, paper);
+  // The PDF itself, for the paper viewer (#98). Seeding again backfills it.
+  await writeRunFile(lesson.lessonId, PAPER_PDF_FILE, pdf);
   // Last, as POST /api/lessons does, so a lesson the page can open is always complete.
   await writeRunJson(lesson.lessonId, PLAN_FILE, lesson.plan);
   return paper;
