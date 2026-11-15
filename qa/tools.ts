@@ -70,6 +70,8 @@ export type ClientToolDeps = {
   simplifyUpcoming?: (reason: string) => void;
   /** A highlight landed on the board or the paper (AskApi.pointed, #91). Absent: not told. */
   pointed?: (at: "board" | "paper") => void;
+  /** A control tool ran (AskApi.commanded, QA A8). Absent: not told. */
+  commanded?: (command: LessonCommand) => void;
 } & Pick<
   DrawSceneDeps,
   | "askId"
@@ -155,6 +157,7 @@ export function createClientTools(deps: ClientToolDeps): QaTools {
 function command(deps: ClientToolDeps, cmd: LessonCommand): void {
   const { control } = deps;
   if (control === undefined) return;
+  deps.commanded?.(cmd);
   const later = deps.afterAgentSpeaks ?? ((fn: () => void) => fn());
   later(() => control(cmd));
 }

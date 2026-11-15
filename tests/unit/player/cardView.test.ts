@@ -259,6 +259,36 @@ describe("askCard", () => {
     }
   });
 
+  it.each([
+    ["resume", "Carrying on."],
+    ["replay", "Saying it again."],
+    ["pause", "Holding on."],
+    ["next", "On to the next idea."],
+    ["previous", "Going back."],
+  ] as const)(
+    "a spoken command (%s) that ran, with no answer (the agent stays quiet, QA A8): Got it, %s, not Thinking",
+    (command, text) => {
+      const said = { text: "carry on", via: "voice" as const };
+      const v = askCard(ask({ question: said, command }));
+      expect(v.status).toBe(CARD_STATUS.commanded);
+      expect(v.body).toEqual({
+        kind: "ask",
+        question: said,
+        answer: null,
+        wait: text,
+      });
+      expect(CARD_TEXT.commanded[command]).toBe(text);
+      expect(v.buttons).toEqual(carryOn);
+    },
+  );
+
+  it("a command the agent answers anyway shows the answer as usual", () => {
+    const v = askCard(
+      ask({ question: typed, command: "resume", answer: "Sure." }),
+    );
+    expect(v.status).toBe(CARD_STATUS.answering);
+  });
+
   it("answered, no draw_scene: Answering, Spoken answer, the answer, Got it, carry on", () => {
     const v = askCard(ask({ question: typed, answer: "Because." }));
     expect(v.status).toBe(CARD_STATUS.answering);

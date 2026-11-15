@@ -421,13 +421,17 @@ describe("lesson control tools (issue #93)", () => {
     "%s runs control(%s) once the agent has finished speaking, returning nothing",
     async (tool, command) => {
       const control = vi.fn();
+      const commanded = vi.fn();
       let later: (() => void) | null = null;
       const h = harness(asking, {
         control,
+        commanded,
         afterAgentSpeaks: (fn) => (later = fn),
       });
       expect(await h.tools[tool]?.({})).toBeUndefined();
       expect(control).not.toHaveBeenCalled();
+      // The card hears of it at once (QA A8: no "Thinking…" while nothing will answer).
+      expect(commanded).toHaveBeenCalledExactlyOnceWith(command);
       later!();
       expect(control).toHaveBeenCalledExactlyOnceWith(command);
     },

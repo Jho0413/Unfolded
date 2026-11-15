@@ -4,6 +4,7 @@
 // builds the ask card. player/TutorCard.tsx draws either. Every button sends an existing
 // machine event (player/machine.ts); the card adds no state of its own.
 import type { ConnectorPhase } from "@/qa/connector";
+import type { LessonCommand } from "./controls";
 import { MESSAGES, type PlayerEvent, type PlayerState } from "./machine";
 
 export const CARD_STATUS = {
@@ -19,6 +20,8 @@ export const CARD_STATUS = {
   thinking: "Thinking",
   sketching: "Sketching",
   answering: "Answering",
+  /** A spoken command ran while asking (QA A8). */
+  commanded: "Got it",
 } as const;
 
 export const CARD_TEXT = {
@@ -41,6 +44,14 @@ export const CARD_TEXT = {
   sketching: "Sketching…",
   carryOn: "Carry on",
   gotIt: "Got it, carry on",
+  /** What a spoken command did, shown instead of "Thinking…" (the agent stays quiet, QA A8). */
+  commanded: {
+    resume: "Carrying on.",
+    pause: "Holding on.",
+    next: "On to the next idea.",
+    previous: "Going back.",
+    replay: "Saying it again.",
+  } satisfies Record<LessonCommand, string>,
   askedTyped: "You asked",
   askedVoice: "You said",
   tagDrawing: "Drawing on the board",
@@ -260,6 +271,8 @@ export type AskCardInput = {
   pointedAtPaper?: boolean;
   /** A draw_scene answer is being made (#105): the card says "Sketching…" until it plays. */
   sketching?: boolean;
+  /** The latest question was a spoken command that ran (QA A8): no answer is coming. */
+  command?: LessonCommand | null;
   captions: boolean;
 };
 
@@ -288,6 +301,13 @@ export function askCard(input: AskCardInput): CardView<AskAction> {
       status: CARD_STATUS.sketching,
       speaking: answer === null ? null : "answer",
       body: ask(CARD_TEXT.sketching, showText ? answer : null),
+    };
+  // A command (carry on, say that again): the agent says nothing after one, by design.
+  if (question !== null && answer === null && input.command)
+    return {
+      ...base,
+      status: CARD_STATUS.commanded,
+      body: ask(CARD_TEXT.commanded[input.command]),
     };
   if (question !== null && answer === null)
     return {

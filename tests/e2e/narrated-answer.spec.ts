@@ -8,6 +8,7 @@ import { answerShownResult } from "@/qa/drawScene";
 import { CARD_TEXT } from "@/player/cardView";
 import { fakeAnswerAudio, lessonOf, narratedReply } from "./support/answer";
 import { savedRun } from "./support/savedRun";
+import { card } from "./support/tutor";
 
 test.use({
   launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
@@ -120,6 +121,10 @@ test("playing x the learner speaks: the narration stops and the drawing holds; c
   await expect(player(page)).toHaveAttribute("data-state", "asking");
 
   await say(page, "ok, carry on");
+  // The agent says nothing after a command (#138): the card says what it did, not
+  // "Thinking…" forever (QA A8).
+  await expect(card(page)).toContainText(CARD_TEXT.commanded.resume);
+  await expect(card(page)).not.toContainText(CARD_TEXT.thinking);
   // The answer goes on (not the lesson): Ask stays open and the second part arrives.
   await expect
     .poll(() => visible(page, "p2"), { timeout: CUES.second + 3000 })
@@ -144,6 +149,8 @@ test("done x say that again: from 0, the drawing reset; then carry on closes Ask
     .toEqual([answerShownResult(NARRATION)]);
 
   await say(page, "say that again");
+  await expect(card(page)).toContainText(CARD_TEXT.commanded.replay);
+  await expect(card(page)).not.toContainText(CARD_TEXT.thinking);
   // From the start: the parts are hidden again, then come back on their cues.
   await expect.poll(() => visible(page, "p2")).toBe("false");
   await expect.poll(() => visible(page, "p2"), { timeout: 4000 }).toBe("true");
