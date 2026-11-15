@@ -165,7 +165,24 @@ type BoardObject = (                          // discriminated on `kind`
   | { kind: "image";  id; x; y; w; h; prompt: string }      // fal illustration, x,y top-left; the server adds mediaUrl
 ) & { hidden?: boolean };                     // true: not drawn until a `show` (default false)
 
-type Target = { id: ObjectId; row?: number; col?: number };  // an object, or a row, column or cell of a matrix (0-based)
+// #103: the data objects. A step's objects are SceneObject[]; BoardObject stays what the
+// generators write today, because the wire format embeds it and has no grammar headroom (S3).
+type SceneObject = BoardObject | (
+  | { kind: "heatmap"; id; x; y; w; h;                     // everything, labels included, inside the box; w,h >= 120
+      values: number[][];                                  // 1..12 x 1..12, rectangular, finite
+      rowLabels?: string[]; colLabels?: string[];          // one per row / column, 1..24 chars
+      scale?: { min: number; max: number };                // colour scale ends (min < max); default the values' min and max
+      showValues?: boolean;                                // write each value in its cell
+      cellsHidden?: boolean;                               // cells start blank; `show` on a row, column or cell reveals them
+      label?: string }                                     // a title above the box
+  | { kind: "plot"; id; x; y; w; h;                        // axes, ticks and axis labels inside the box; w,h >= 120
+      xRange: [number, number]; yRange: [number, number];  // [min, max], min < max; points outside are clipped
+      series: { points: [number, number][];                // 1..4 series of 2..200 [x, y] points; a line's x never decreases
+                label?: string; style?: "line" | "points"; hidden?: boolean }[];  // hidden: drawn on by a `show`
+      xLabel?: string; yLabel?: string }
+) & { hidden?: boolean };
+
+type Target = { id: ObjectId; row?: number; col?: number };  // an object, or a row, column or cell of a matrix or heatmap, or a plot's series (row) or point (row + col), 0-based
 type Anchor = Target | { x: number; y: number };             // the centre of a target, or a point
 
 type Action =
@@ -178,7 +195,7 @@ type Action =
 type Step = {                                 // what Claude writes for one lesson step
   title: string;
   narration: string;                          // with cue markers: "Take the first [[row1]]row..."
-  objects: BoardObject[];                     // the board when the step starts
+  objects: SceneObject[];                     // the board when the step starts
   actions: (Action & { cue: string })[];      // fired when the cue's word is spoken
   paperRefs?: (PaperRef & { cue?: string })[]; // #98: highlighted in the paper from cueTimes[cue], or from 0 without a cue, until the next one
 };
@@ -202,6 +219,7 @@ type Sketch = {                               // what /api/sketch returns for a 
 - **Hidden objects.** An object with `hidden: true` is on the board from the start but isn't drawn until a `show`. That's how product terms and sums appear partway through a step.
 - **Moving part of a matrix.** `move` on a whole object moves it. `move` on a row, column or cell slides a **copy** of those cells (same values and highlight), so the source matrix stays whole, with no gap. Each row, column or cell gets its own copy the first time it moves. After that, an anchor or a later `move` naming that part uses the copy, `hide` on the part removes the copy, and `highlight`, `unhighlight` and `write` change the source cells and the copy together. The source cells are never hidden on their own.
 - **Arrows** are drawn between their anchors where they are now, so an arrow follows an object that moves. An arrow itself can't be moved.
+- **Heatmaps and plots (#103).** Their parts are cells, named as a matrix's are: a heatmap's `row`, `col` or both; a plot's series is `row` and its point `row` + `col`. `show` and `hide` on a part reveal or conceal it in place (no copy): a heatmap row, column or cell fades in, and a plot series draws on along x over the show's `durationMs`. `highlight` and `unhighlight` work on any part or the whole object, as on a matrix; a whole-object `show`, `hide` and `move` work as for any object. A part can't move, and nothing can be written to either. Anchors: a heatmap cell's centre, a plot point where it is drawn, a series' mean point, a whole object's box centre (`shared/viz.ts` holds the layout the renderer uses). The heatmap's colour scale and the series colours are per theme (`player/primitives/Viz.module.css`), colour-blind safe. `ObjectState.cellVisible` (same shape as `cellHighlight`) says which cells are revealed and which series drawn. Generator guidance: `docs/snippets/viz-objects.md`.
 - **Writing.** `write` replaces a matrix cell's value or a text object's text, so a text showing `1·5 + 2·7` can become `19` and then move into a cell.
 
 **The M1 demo in this contract** (`lib/fakes/fixtures/demo-m1.step.json`, hand-written in F3 as the contract's acceptance test). Matrices `a` and `b` and an empty result `c` are visible; `p1` (`1·5`), `p2` (`2·7`) and `sum` are hidden `text` objects.
@@ -222,14 +240,16 @@ type Sketch = {                               // what /api/sketch returns for a 
 | A malformed marker (`[[Row 1]]`, a stray `[[` or `]]`) | rejected: `malformed marker "[[Row 1]]"` (otherwise it would be read aloud) |
 | A marker in `narration` that no action uses | allowed (it's ignored) |
 | A `target.id`, or an anchor's `id`, with no object | rejected: `unknown object "x"` |
-| `row` or `col` outside the matrix, or set on a non-matrix (in a target or an anchor) | rejected: `target out of range "x"` (x is the id the target or anchor names) |
+| `row` or `col` outside the matrix or heatmap, a series or point past a plot's (a point by its own series' length, and only with its series), or set on any other object (in a target or an anchor) | rejected: `target out of range "x"` (x is the id the target or anchor names) |
 | `write` on a matrix without both `row` and `col` | rejected: `write needs a cell` |
-| `write` on a `latex`, `arrow` or `image` | rejected: `can't write to "x"` |
-| `show` with `row` or `col` | rejected: `show needs a whole object` |
-| `move` on an `arrow` | rejected: `can't move "x"` |
+| `write` on a `latex`, `arrow`, `image`, `heatmap` or `plot` | rejected: `can't write to "x"` |
+| `show` with `row` or `col`, except on a heatmap or a plot | rejected: `show needs a whole object` |
+| `show` on a plot point (`col` set) | rejected: `show on "x" needs the whole plot or one series ({ id, row })` |
+| `move` on an `arrow`, or on a part of a heatmap or plot | rejected: `can't move "x"` |
+| (schema) A heatmap with ragged rows, labels that don't match its rows or columns, `scale.min >= scale.max`, over 12 x 12, or non-finite values; a plot range with min >= max, over 4 series or 200 points, a point that isn't two numbers, or a line series whose x decreases | rejected: the schema error, e.g. `heatmap rows must all have the same length`, `rowLabels needs one label per row (6)`, `range must be [min, max] with min < max`, `a line series' x values must not decrease (it draws on along x)` |
 | `show` on a visible object, `hide` on a hidden one, or `hide` on a part that hasn't moved | allowed (no change) |
 | `tex` that KaTeX can't parse, or that uses a command `trust: false` refuses (`\href`, `\url`, `\includegraphics`, `\htmlClass` and the like) | rejected: `invalid LaTeX in "x"` (the renderer also uses `throwOnError: false` as a safety net) |
-| An object, or an `{x, y}` point in an anchor, outside the 1600 × 900 canvas (for a matrix, its whole cell box; for `text` and `latex`, only their x,y) | rejected: `off canvas "x"` (x is the object, an arrow for its own point ends, or for a `move` to a point, the object that moves) |
+| An object, or an `{x, y}` point in an anchor, outside the 1600 × 900 canvas (for a matrix, its whole cell box; for an image, heatmap or plot, its box; for `text` and `latex`, only their x,y) | rejected: `off canvas "x"` (x is the object, an arrow for its own point ends, or for a `move` to a point, the object that moves) |
 | Two objects with the same id | rejected: `duplicate id "x"` |
 | Narration longer than `config.maxNarrationChars` after the markers are stripped | rejected: `narration too long` |
 | Narration with nothing left after the markers are stripped (only markers or spaces) | rejected: `narration empty` (TTS would fail after validation, too late to retry) |

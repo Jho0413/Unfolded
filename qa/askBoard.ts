@@ -4,11 +4,11 @@
 // `fresh` sketch, the step and earlier drawings are left out. Closing Ask
 // throws the layer away (the page goes back to `sceneAt(step, pausedT)`).
 import { sceneAt, type TimedAction } from "@/player/sceneAt";
-import type { Action, BoardObject, BoardState, Sketch } from "@/shared/scene";
+import type { Action, SceneObject, BoardState, Sketch } from "@/shared/scene";
 
 /** What Ask drew, with times in ms since Ask opened. */
 export type AskLayer = {
-  objects: readonly BoardObject[];
+  objects: readonly SceneObject[];
   timed: readonly TimedAction[];
   /** A fresh sketch started an empty board: the lesson board is left out. */
   fresh: boolean;
@@ -18,7 +18,7 @@ export const EMPTY_LAYER: AskLayer = { objects: [], timed: [], fresh: false };
 
 /** The frozen lesson board: the step's objects and timeline, at `pausedT`. */
 export type FrozenBoard = {
-  objects: readonly BoardObject[];
+  objects: readonly SceneObject[];
   timed: readonly TimedAction[];
   pausedT: number;
 };

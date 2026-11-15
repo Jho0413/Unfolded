@@ -1,0 +1,41 @@
+/*
+ * The heatmap's colour scale and the plot's series colours (issue #103), per theme. Kept with
+ * the primitives (not player/theme.css) because only they use them. Both scales are
+ * colour-blind safe: the heatmap's lightness changes monotonically, low values receding into
+ * the board in either theme, and the series colours are from Okabe and Ito's palette.
+ */
+.viz {
+  /* Dark board: dim navy (low) to bright yellow-green (high). */
+  --wb-heat-0: #1b2440;
+  --wb-heat-1: #2b5486;
+  --wb-heat-2: #23898a;
+  --wb-heat-3: #52b96f;
+  --wb-heat-4: #cbe57a;
+  /* Value text on low and high cells. */
+  --wb-heat-text-lo: #ecebe6;
+  --wb-heat-text-hi: #0e0f12;
+  /* An unrevealed cell's outline. */
+  --wb-heat-empty: rgba(255, 255, 255, 0.12);
+  --wb-series-0: #56b4e9;
+  --wb-series-1: #e69f00;
+  --wb-series-2: #009e73;
+  --wb-series-3: #cc79a7;
+  --wb-grid: rgba(255, 255, 255, 0.08);
+}
+
+:global([data-theme="light"]) .viz {
+  /* White board: pale blue (low) to deep navy (high). */
+  --wb-heat-0: #e9f2f9;
+  --wb-heat-1: #a8cde4;
+  --wb-heat-2: #5aa2c8;
+  --wb-heat-3: #2a6aa6;
+  --wb-heat-4: #183c72;
+  --wb-heat-text-lo: #1a1a19;
+  --wb-heat-text-hi: #ffffff;
+  --wb-heat-empty: rgba(0, 0, 0, 0.12);
+  --wb-series-0: #0072b2;
+  --wb-series-1: #b26b00;
+  --wb-series-2: #007a5a;
+  --wb-series-3: #a8467c;
+  --wb-grid: rgba(0, 0, 0, 0.08);
+}

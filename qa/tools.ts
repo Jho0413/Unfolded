@@ -17,7 +17,7 @@ import type { LessonCommand } from "@/player/controls";
 import type { PlayerEvent, TransitionResult } from "@/player/machine";
 import {
   type Action,
-  type BoardObject,
+  type SceneObject,
   type BoardState,
   DEFAULT_DURATION_MS,
 } from "@/shared/scene";
@@ -143,7 +143,7 @@ function command(deps: ClientToolDeps, cmd: LessonCommand): void {
 }
 
 /** Only objects the learner can see can be highlighted. */
-function visibleObjects(board: BoardState): Map<string, BoardObject> {
+function visibleObjects(board: BoardState): Map<string, SceneObject> {
   return new Map(
     board.objects.filter((s) => s.visible).map((s) => [s.object.id, s.object]),
   );

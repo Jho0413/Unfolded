@@ -35,7 +35,12 @@ const LIMITS = { maxNarrationChars: config.maxNarrationChars };
  * A parsed contract step read as wire. This compiles only while every contract action kind
  * and field type fits the wire; a new field is caught by the field-coverage tests below.
  */
-const stepToWire = (step: Step): WireStep => step;
+const stepToWire = (step: Step): WireStep => ({
+  ...step,
+  // Heatmap and plot objects (#103) aren't on the wire yet (S3: no grammar headroom), so only
+  // the objects are cast. Jason removes the cast once the wire has them.
+  objects: step.objects as WireStep["objects"],
+});
 const sketchToWire = (sketch: Sketch): WireSketch => sketch;
 
 // ------------------------------------------------------------ arbitraries

@@ -11,8 +11,10 @@ import type { BoardState } from "@/shared/scene";
 import { CANVAS } from "@/shared/scene";
 import { partKey } from "./sceneAt";
 import { Arrow } from "./primitives/Arrow";
+import { Heatmap } from "./primitives/Heatmap";
 import { Latex } from "./primitives/Latex";
 import { Copy, Matrix } from "./primitives/Matrix";
+import { Plot } from "./primitives/Plot";
 import { Text } from "./primitives/Text";
 import { BOARD_BG, FONT } from "./primitives/style";
 
@@ -82,6 +84,19 @@ function Layer({
             return null; // drawn last, below
           case "image":
             return null; // arrives with E1
+          case "heatmap":
+            return (
+              <Heatmap
+                key={object.id}
+                heatmap={object}
+                state={s}
+                active={active}
+              />
+            );
+          case "plot":
+            return (
+              <Plot key={object.id} plot={object} state={s} active={active} />
+            );
         }
       })}
       {/* Copies are drawn after the objects, so a sliding row passes over the board. */}

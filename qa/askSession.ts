@@ -4,7 +4,7 @@
 // `asking`; the client tools and the board read it. A small store, so tool
 // handlers can read it outside render.
 import type { TimedAction } from "@/player/sceneAt";
-import type { Action, BoardObject, BoardState, Sketch } from "@/shared/scene";
+import type { Action, SceneObject, BoardState, Sketch } from "@/shared/scene";
 import {
   addAction,
   addSketch,
@@ -80,7 +80,7 @@ export function createAskSession(now: () => number = () => performance.now()) {
 /** The frozen board for a step at `tMs` (an empty board when no step is on screen). */
 export function frozenBoard(
   step: {
-    objects: readonly BoardObject[];
+    objects: readonly SceneObject[];
     timed: readonly TimedAction[];
   } | null,
   tMs: number,

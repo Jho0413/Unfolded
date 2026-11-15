@@ -6,6 +6,7 @@ import demoM1 from "@/lib/fakes/fixtures/demo-m1.step.json";
 import { type Box, boxGap, objectBox } from "@/shared/boxes";
 import {
   type BoardObject,
+  type SceneObject,
   type BoardState,
   MAX_PAPER_QUOTE_CHARS,
   type Sketch,
@@ -94,7 +95,7 @@ function expectErrors<T>(r: ValidationResult<T>, ...errs: string[]): void {
   if (!r.ok) for (const e of errs) expect(r.errors).toContain(e);
 }
 
-function board(objects: BoardObject[]): BoardState {
+function board(objects: SceneObject[]): BoardState {
   return {
     objects: objects.map((object) => ({
       object,
