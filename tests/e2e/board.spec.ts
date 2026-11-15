@@ -485,7 +485,8 @@ test.describe("heatmap and plot through sceneAt", () => {
     await at(page, 5250);
     await expect(series(page, 0)).toHaveAttribute("data-drawn", "true");
     await expect(series(page, 0)).toHaveAttribute("data-draw-progress", "0.5");
-    await expect(series(page, 0)).toHaveAttribute("data-drawn-points", "13");
+    // The pen is eased (motion.ts): halfway in time it is at z = 4.5, past 22 of 25 points.
+    await expect(series(page, 0)).toHaveAttribute("data-drawn-points", "22");
     await expect(series(page, 1)).toHaveAttribute("data-drawn", "false");
     await at(page, 6000);
     await expect(series(page, 0)).toHaveAttribute("data-draw-progress", "1");

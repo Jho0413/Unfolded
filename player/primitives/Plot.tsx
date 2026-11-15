@@ -18,8 +18,18 @@ import {
   highlightAttr,
   opacityAttr,
 } from "./style";
+import { easeOutCubic, span } from "@/player/easing";
+import {
+  appearance,
+  drawAttr,
+  drawOnProps,
+  highlightLook,
+  motionProps,
+  quickFade,
+} from "./motion";
+import { PulseRing } from "./Pulse";
 import styles from "./Viz.module.css";
-import { drawnPoints, revealOf, seriesColor } from "./vizStyle";
+import { drawnPoints, lengthShareAt, revealOf, seriesColor } from "./vizStyle";
 
 const TICK = 6;
 const STROKE = 3.5;
@@ -44,6 +54,8 @@ export function Plot({
   const clipId = `plot-clip-${useId().replace(/:/g, "")}`;
   const { area, toCanvas } = plotLayout(plot);
   const opacity = state.visible ? fadeOpacity(active, { id: plot.id }) : 0;
+  // Arrives as a stroke (motion.ts): its axes draw on with the show.
+  const look = appearance(active, { id: plot.id }, state.visible, "stroke");
   const xTicks = niceTicks(plot.xRange[0], plot.xRange[1]);
   const yTicks = niceTicks(plot.yRange[0], plot.yRange[1]);
   const bottom = area.y + area.h;
@@ -56,12 +68,13 @@ export function Plot({
       data-kind="plot"
       data-visible={String(state.visible)}
       data-opacity={opacityAttr(opacity)}
+      data-draw={drawAttr(look.draw)}
       data-left={plot.x}
       data-top={plot.y}
       data-cx={plot.x + plot.w / 2}
       data-cy={plot.y + plot.h / 2}
-      className={styles.viz}
-      opacity={opacity}
+      opacity={look.opacity}
+      {...motionProps(look, styles.viz)}
       visibility={state.visible ? undefined : "hidden"}
     >
       <defs>
@@ -127,6 +140,7 @@ export function Plot({
           fill="none"
           stroke={INK}
           strokeWidth={2}
+          {...drawOnProps(look.draw)}
         />
         {plot.xLabel && (
           <text
@@ -154,34 +168,55 @@ export function Plot({
         {plot.series.map((series, s) => {
           const color = seriesColor(s);
           const joined = series.style !== "points";
-          const visibleRow = state.cellVisible?.[s];
-          const drawn = visibleRow?.[0] ?? true;
-          const { draw, fade } = revealOf(active, plot.id, s, 0);
-          const progress = drawn ? draw : 0;
-          const pts = drawnPoints(series.points, progress, joined).map(
-            ([x, y]) => toCanvas(x, y),
-          );
+          const drawn = state.cellVisible?.[s]?.[0] ?? true;
+          if (!drawn)
+            return (
+              <g
+                key={s}
+                data-series={s}
+                data-drawn="false"
+                data-draw-progress="0"
+                data-draw="0"
+                data-drawn-points={0}
+              />
+            );
+          const { draw: progress, fade } = revealOf(active, plot.id, s, 0);
+          // The pen travels along x with the show's eased progress (motion.ts), and the full
+          // path is dashed to where it stands, so reduced motion (board.css) shows it whole.
+          const eased = easeOutCubic(progress);
+          const all = series.points.map(([x, y]) => toCanvas(x, y));
+          const xs = series.points.map(([x]) => x);
+          const [lo, hi] = [Math.min(...xs), Math.max(...xs)];
+          const cut = lo + eased * (hi - lo);
+          const count = drawnPoints(series.points, eased, false).length;
+          const share =
+            progress >= 1 ? 1 : lengthShareAt(all, toCanvas(cut, 0).x);
+          const drawing = progress < 1;
+          const ink = drawing ? easeOutCubic(span(progress, 0, 0.2)) : 1;
+          const d = all
+            .map((p, i) => `${i ? "L" : "M"} ${p.x} ${p.y}`)
+            .join(" ");
           const hlRow = state.cellHighlight?.[s];
           const whole = wholeHighlight(hlRow);
           const wholeP = whole
             ? cellProgress(active, "highlight", plot.id, s, 0, whole)
             : 0;
-          const d = pts
-            .map((p, i) => `${i ? "L" : "M"} ${p.x} ${p.y}`)
-            .join(" ");
+          const wholeLook = highlightLook(wholeP);
           return (
             <g
               key={s}
               data-series={s}
-              data-drawn={String(drawn)}
+              data-drawn="true"
               data-draw-progress={opacityAttr(progress)}
-              data-drawn-points={pts.length}
-              data-fade={opacityAttr(drawn ? fade : 0)}
+              data-draw={drawAttr(share)}
+              data-drawn-points={count}
+              data-fade={opacityAttr(fade)}
               data-highlight={highlightAttr(whole)}
               data-highlight-opacity={opacityAttr(wholeP)}
-              opacity={fade}
+              opacity={ink * fade}
+              {...(drawing ? motionProps({ quick: quickFade(progress) }) : {})}
             >
-              {whole && joined && pts.length > 1 && (
+              {whole && joined && (
                 <path
                   d={d}
                   fill="none"
@@ -190,10 +225,11 @@ export function Plot({
                   strokeWidth={STROKE + 9}
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  opacity={wholeP}
+                  opacity={wholeLook.opacity}
+                  {...drawOnProps(share)}
                 />
               )}
-              {joined && pts.length > 1 && (
+              {joined && (
                 <path
                   d={d}
                   fill="none"
@@ -201,37 +237,56 @@ export function Plot({
                   strokeWidth={STROKE}
                   strokeLinecap="round"
                   strokeLinejoin="round"
+                  {...drawOnProps(share)}
                 />
               )}
               {!joined &&
-                pts.map((p, i) => (
-                  <circle key={i} cx={p.x} cy={p.y} r={DOT} fill={color} />
-                ))}
+                all.map((p, i) => {
+                  const on = series.points[i][0] <= cut || progress >= 1;
+                  return (
+                    <circle
+                      key={i}
+                      cx={p.x}
+                      cy={p.y}
+                      r={DOT}
+                      fill={color}
+                      {...(on ? {} : { className: "wb-stagger", opacity: 0 })}
+                    />
+                  );
+                })}
               {/* Highlighted points (or every point of a highlighted points series) get a ring. */}
               {series.points.map((_, i) => {
                 const h = hlRow?.[i] ?? null;
-                if (!h || i >= pts.length || (whole && joined)) return null;
-                const at = toCanvas(series.points[i][0], series.points[i][1]);
+                if (!h || (whole && joined)) return null;
+                const hl = highlightLook(
+                  cellProgress(active, "highlight", plot.id, s, i, h),
+                );
+                const at = all[i];
+                const r = DOT + 5;
                 return (
-                  <circle
-                    key={`hl${i}`}
-                    data-point={`${s},${i}`}
-                    data-highlight={h}
-                    cx={at.x}
-                    cy={at.y}
-                    r={DOT + 5}
-                    fill={HIGHLIGHT[h].fill}
-                    stroke={HIGHLIGHT[h].stroke}
-                    strokeWidth={3}
-                    opacity={cellProgress(
-                      active,
-                      "highlight",
-                      plot.id,
-                      s,
-                      i,
-                      h,
-                    )}
-                  />
+                  <g key={`hl${i}`} data-point={`${s},${i}`} data-highlight={h}>
+                    <circle
+                      {...motionProps(hl, "wb-glow", {
+                        "--hl": HIGHLIGHT[h].stroke,
+                      })}
+                      cx={at.x}
+                      cy={at.y}
+                      r={r}
+                      fill={HIGHLIGHT[h].fill}
+                      stroke={HIGHLIGHT[h].stroke}
+                      strokeWidth={3}
+                      opacity={hl.opacity}
+                    />
+                    <PulseRing
+                      x={at.x - r}
+                      y={at.y - r}
+                      w={2 * r}
+                      h={2 * r}
+                      rx={r}
+                      color={HIGHLIGHT[h].stroke}
+                      pulse={hl.pulse}
+                    />
+                  </g>
                 );
               })}
             </g>

@@ -13,6 +13,16 @@ import {
   heatmapLayout,
   heatmapLevel,
 } from "@/shared/viz";
+import { easeOutCubic } from "@/player/easing";
+import {
+  appearance,
+  drawAttr,
+  highlightLook,
+  motionProps,
+  quickFade,
+  staggerIn,
+} from "./motion";
+import { PulseRing } from "./Pulse";
 import {
   BOARD_BG,
   HIGHLIGHT,
@@ -24,7 +34,7 @@ import {
   opacityAttr,
 } from "./style";
 import styles from "./Viz.module.css";
-import { heatColor, heatTextColor, revealOf } from "./vizStyle";
+import { heatColor, heatTextColor, revealOf, revealOrder } from "./vizStyle";
 
 const LABEL_GAP = 8;
 
@@ -40,6 +50,10 @@ export function Heatmap({
 }) {
   const { grid, cellW, cellH } = heatmapLayout(heatmap);
   const opacity = state.visible ? fadeOpacity(active, { id: heatmap.id }) : 0;
+  // Arrives as a matrix does (motion.ts): the frame and labels ink in at once.
+  const look = appearance(active, { id: heatmap.id }, state.visible, "stroke");
+  const nRows = heatmap.values.length;
+  const nCols = heatmap.values[0].length;
   const valueFont = Math.min(
     VIZ_FONT.label,
     cellH * 0.45,
@@ -69,12 +83,13 @@ export function Heatmap({
       data-kind="heatmap"
       data-visible={String(state.visible)}
       data-opacity={opacityAttr(opacity)}
+      data-draw={drawAttr(look.draw)}
       data-left={heatmap.x}
       data-top={heatmap.y}
       data-cx={heatmap.x + heatmap.w / 2}
       data-cy={heatmap.y + heatmap.h / 2}
-      className={styles.viz}
-      opacity={opacity}
+      opacity={look.opacity}
+      {...motionProps(look, styles.viz)}
       visibility={state.visible ? undefined : "hidden"}
     >
       {heatmap.label && (
@@ -119,8 +134,14 @@ export function Heatmap({
       ))}
       {cells.map(({ r, c, value, revealed, highlight, x, y }) => {
         const level = heatmapLevel(heatmap, value);
-        const { draw, fade } = revealOf(active, heatmap.id, r, c);
+        const { draw, fade, by } = revealOf(active, heatmap.id, r, c);
         const shown = revealed ? draw * fade : 0;
+        // Drawn: a revealed row fills in left to right behind the pen, eased (motion.ts).
+        const order = by && revealOrder(by, r, c, nRows, nCols);
+        const fill = revealed
+          ? (order ? staggerIn(draw, order.i, order.n) : easeOutCubic(draw)) *
+            fade
+          : 0;
         const hl = highlight
           ? cellProgress(active, "highlight", heatmap.id, r, c, highlight)
           : 0;
@@ -149,7 +170,12 @@ export function Heatmap({
               strokeWidth={1.5}
             />
             {shown > 0 && (
-              <g opacity={shown}>
+              <g
+                opacity={fill}
+                {...(draw < 1
+                  ? motionProps({ quick: quickFade(draw) * fade }, "wb-stagger")
+                  : {})}
+              >
                 <rect
                   x={x}
                   y={y}
@@ -177,30 +203,37 @@ export function Heatmap({
         );
       })}
       {/* Highlights go over every cell, so a neighbour never covers an outline. */}
-      {cells.map(({ r, c, highlight, x, y }) =>
-        highlight ? (
-          <rect
-            key={`hl${r},${c}`}
-            data-highlight-of={`${r},${c}`}
-            x={x + 2}
-            y={y + 2}
-            width={cellW - 4}
-            height={cellH - 4}
-            rx={4}
-            fill="none"
-            stroke={HIGHLIGHT[highlight].stroke}
-            strokeWidth={4}
-            opacity={cellProgress(
-              active,
-              "highlight",
-              heatmap.id,
-              r,
-              c,
-              highlight,
-            )}
-          />
-        ) : null,
-      )}
+      {cells.map(({ r, c, highlight, x, y }) => {
+        if (!highlight) return null;
+        const hl = highlightLook(
+          cellProgress(active, "highlight", heatmap.id, r, c, highlight),
+        );
+        const box = { x: x + 2, y: y + 2, w: cellW - 4, h: cellH - 4 };
+        return (
+          <g key={`hl${r},${c}`} data-highlight-of={`${r},${c}`}>
+            <rect
+              {...motionProps(hl, "wb-glow", {
+                "--hl": HIGHLIGHT[highlight].stroke,
+              })}
+              x={box.x}
+              y={box.y}
+              width={box.w}
+              height={box.h}
+              rx={4}
+              fill="none"
+              stroke={HIGHLIGHT[highlight].stroke}
+              strokeWidth={4}
+              opacity={hl.opacity}
+            />
+            <PulseRing
+              {...box}
+              rx={4}
+              color={HIGHLIGHT[highlight].stroke}
+              pulse={hl.pulse}
+            />
+          </g>
+        );
+      })}
       <rect
         x={grid.x}
         y={grid.y}

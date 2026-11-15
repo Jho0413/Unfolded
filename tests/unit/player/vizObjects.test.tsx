@@ -8,7 +8,13 @@ import { Whiteboard } from "@/player/Whiteboard";
 import { Heatmap } from "@/player/primitives/Heatmap";
 import { Plot } from "@/player/primitives/Plot";
 import { resolveAnchor, sceneAt, timeline } from "@/player/sceneAt";
-import { drawnPoints, heatColor, revealOf } from "@/player/primitives/vizStyle";
+import {
+  drawnPoints,
+  heatColor,
+  lengthShareAt,
+  revealOf,
+  revealOrder,
+} from "@/player/primitives/vizStyle";
 import { BoardState, type SceneObject, type Step } from "@/shared/scene";
 import {
   heatmapCellCentre,
@@ -42,6 +48,12 @@ describe("sceneAt: heatmap reveals", () => {
     expect(revealOf(board.active, "attn", 0, 3)).toEqual({
       draw: 0.5,
       fade: 1,
+      by: { id: "attn", row: 0 },
+    });
+    // Cell 3 of 6 in the row fills in after the first ones (motion.ts staggerIn).
+    expect(revealOrder({ id: "attn", row: 0 }, 0, 3, 6, 6)).toEqual({
+      i: 3,
+      n: 6,
     });
     expect(revealOf(board.active, "attn", 1, 3)).toEqual({ draw: 1, fade: 1 });
   });
@@ -251,6 +263,17 @@ describe("draw-on geometry", () => {
       [1.5, 0.5],
     ]);
     expect(drawnPoints(line, 1, true)).toEqual(line);
+  });
+  it("the share of a path's length left of a cut", () => {
+    const pts = [
+      { x: 0, y: 0 },
+      { x: 3, y: 4 },
+      { x: 6, y: 4 },
+    ];
+    expect(lengthShareAt(pts, 0)).toBe(0);
+    expect(lengthShareAt(pts, 3)).toBe(0.625);
+    expect(lengthShareAt(pts, 4.5)).toBe(0.8125);
+    expect(lengthShareAt(pts, 6)).toBe(1);
   });
   it("points style keeps whole points only", () => {
     expect(drawnPoints(line, 0.6, false)).toEqual([

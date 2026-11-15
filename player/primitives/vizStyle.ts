@@ -1,7 +1,7 @@
 // The progress-driven effects of the heatmap and plot primitives (issue #103): a revealed
 // cell fading in, a series drawing on along x. Pure functions of the BoardState, so a seek
 // shows the exact state (ARCHITECTURE.md section 5.3).
-import type { ActiveAction } from "@/shared/scene";
+import type { ActiveAction, Target } from "@/shared/scene";
 import { coversCell } from "@/player/sceneAt";
 
 /** Heatmap colour stops (Viz.module.css), low to high. */
@@ -47,9 +47,10 @@ export function revealOf(
   id: string,
   r: number,
   c: number,
-): { draw: number; fade: number } {
+): { draw: number; fade: number; by?: Target } {
   let draw = 1;
   let fade = 1;
+  let by: Target | undefined;
   for (const a of active) {
     const { action } = a;
     if (action.target.id !== id) continue;
@@ -59,10 +60,27 @@ export function revealOf(
     if (action.do === "show") {
       draw = a.progress;
       fade = 1;
+      by = action.target;
     }
     if (action.do === "hide") fade = Math.min(fade, 1 - a.progress);
   }
-  return { draw, fade };
+  return by ? { draw, fade, by } : { draw, fade };
+}
+
+/**
+ * Where cell (r, c) comes in the reveal `by` makes, for a staggered fill-in (motion.ts
+ * staggerIn): along a row left to right, down a column top to bottom; a cell alone.
+ */
+export function revealOrder(
+  by: Target,
+  r: number,
+  c: number,
+  rows: number,
+  cols: number,
+): { i: number; n: number } {
+  if (by.row !== undefined && by.col === undefined) return { i: c, n: cols };
+  if (by.col !== undefined && by.row === undefined) return { i: r, n: rows };
+  return { i: 0, n: 1 };
 }
 
 /**
@@ -99,4 +117,26 @@ export function drawnPoints(
     break;
   }
   return out;
+}
+
+/**
+ * The share (0..1) of a polyline's length that lies left of canvas x `cut`: how much of a
+ * series' full path to dash on (motion.ts drawOnProps) so the pen stands at `cut`. Its x never
+ * decreases (a line series), so the cut falls in one segment.
+ */
+export function lengthShareAt(
+  pts: readonly { x: number; y: number }[],
+  cut: number,
+): number {
+  let total = 0;
+  let before = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1];
+    const b = pts[i];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    total += len;
+    if (b.x <= cut) before += len;
+    else if (a.x < cut) before += len * ((cut - a.x) / (b.x - a.x));
+  }
+  return total > 0 ? Math.min(1, before / total) : 1;
 }
