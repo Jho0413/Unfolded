@@ -1,7 +1,6 @@
 // The Q&A context message builder (ARCHITECTURE.md section 8, ROADMAP Q3).
 import { describe, expect, it } from "vitest";
 import {
-  answerBoardUpdate,
   buildContextUpdate,
   narrationUpTo,
   type QaContext,
@@ -97,31 +96,5 @@ describe("narrationUpTo", () => {
     expect(narrationUpTo("A [[constructor]]b [[x]]c", { x: 5 }, 0)).toBe(
       "A b ",
     );
-  });
-});
-
-describe("answerBoardUpdate (the agreed answer-board message, #90/#93)", () => {
-  it("says an answer board is showing, with its title, and when the lesson is back", () => {
-    expect(
-      answerBoardUpdate({ showing: true, title: "Why scale by root d" }),
-    ).toBe(
-      "An answer board is showing: Why scale by root d. The lesson board is hidden until the learner goes back to it.",
-    );
-    expect(answerBoardUpdate({ showing: false })).toMatch(
-      /lesson board is showing again/,
-    );
-  });
-
-  it("uses the words the agent's prompt looks for", async () => {
-    const { readFileSync } = await import("node:fs");
-    const agent = JSON.parse(
-      readFileSync("agent/agent_configs/tutor.json", "utf8"),
-    );
-    expect(agent.conversation_config.agent.prompt.prompt).toContain(
-      "an answer board is showing",
-    );
-    expect(
-      answerBoardUpdate({ showing: true, title: "t" }).toLowerCase(),
-    ).toContain("an answer board is showing");
   });
 });

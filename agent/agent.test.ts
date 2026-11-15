@@ -121,6 +121,9 @@ describe("agent config", () => {
     expect(prompt).toMatch(/Stay completely silent while the lesson plays/);
     expect(prompt).toMatch(/Never answer the narration itself/);
     expect(prompt).toMatch(/Never move the lesson on your own/);
+    // The answer view's contextual updates (#90's qa/answerContext.ts), quoted exactly.
+    expect(prompt).toContain('"Answer board showing: <title>"');
+    expect(prompt).toContain('"Back on the lesson."');
   });
 
   it("sends the VAD scores barge-in uses, keeping the events the panel needs (issue #93)", () => {
