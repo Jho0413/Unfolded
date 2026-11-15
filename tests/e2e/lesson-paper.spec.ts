@@ -204,6 +204,26 @@ test("a phone (390 px): the stage and both panes fit the screen, one tab at a ti
   await screenshot(page, "phone-tabs");
 });
 
+test("Ask tells the agent the step's passages verbatim, with page and label (QA A1)", async ({
+  page,
+}) => {
+  await using run = await savedRun("e2e-paper-context", {
+    paperRefs: [{ ...REFS[0], label: "Abstract" }, REFS[1]],
+  });
+  await servePaper(page, run.lessonId);
+  await page.goto(`/lesson/${run.lessonId}`);
+  await askQuestion(page, "Where does the paper say that?");
+  await expect
+    .poll(() => page.evaluate(() => window.__qaFake?.contextUpdates.at(-1)))
+    .toContain(
+      [
+        "Passages this step quotes (verbatim):",
+        '- p.1 (Abstract) "We show how to multiply two matrices"',
+        '- p.2 "The products of the paired entries are added together"',
+      ].join("\n"),
+    );
+});
+
 test("highlight_paper from the conversation highlights its quote in the answer blue", async ({
   page,
 }) => {

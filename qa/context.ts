@@ -1,8 +1,8 @@
 // The Q&A agent's context message (ARCHITECTURE.md section 8). Pure: the Ask
 // panel sends the result through sendContextualUpdate() when the session
 // connects and on every step change, so the agent knows what "this" means and
-// which ids `highlight` can use.
-import { CUE_MARKER_RE } from "@/shared/scene";
+// which ids `highlight` can use, and which passages `highlight_paper` can quote.
+import { CUE_MARKER_RE, type PaperRef } from "@/shared/scene";
 
 export type QaContext = {
   /** The plan's step titles, in order. */
@@ -23,6 +23,11 @@ export type QaContext = {
   stepGoal?: string;
   /** Ids of the objects on the board. */
   boardIds: readonly string[];
+  /**
+   * The current step's paper passages (Step.paperRefs, issue #98), already found in the PDF,
+   * so the agent can quote one exactly to `highlight_paper` (QA A1). Absent or empty: none.
+   */
+  paperRefs?: readonly PaperRef[];
   /** Questions asked earlier in this lesson, oldest first. */
   earlierQuestions: readonly string[];
 };
@@ -61,11 +66,25 @@ export function buildContextUpdate(ctx: QaContext): string {
       ? `Objects on the board (ids for highlight): ${ctx.boardIds.join(", ")}`
       : "The board is empty.",
   );
+  if (ctx.paperRefs && ctx.paperRefs.length > 0) {
+    lines.push(PASSAGES_HEADER);
+    for (const ref of ctx.paperRefs) lines.push(`- ${passageLine(ref)}`);
+  }
   if (ctx.earlierQuestions.length > 0) {
     lines.push("Questions asked earlier in this lesson:");
     for (const q of ctx.earlierQuestions) lines.push(`- ${q}`);
   }
   return lines.join("\n");
+}
+
+/** Heads the list of the step's paper passages in the context message. */
+export const PASSAGES_HEADER = "Passages this step quotes (verbatim):";
+
+/** One passage: `p.<page> (<label>) "<quote>"`, the label only when it has one. */
+export function passageLine(ref: PaperRef): string {
+  const flat = (s: string) => s.replace(/\s+/g, " ").trim();
+  const label = ref.label ? ` (${flat(ref.label)})` : "";
+  return `p.${ref.page}${label} "${flat(ref.quote)}"`;
 }
 
 /**

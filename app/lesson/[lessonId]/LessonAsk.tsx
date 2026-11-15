@@ -182,6 +182,8 @@ export function LessonAsk({
         boardIds: (asking ? session.board() : player.board).objects
           .filter((s) => s.visible)
           .map((s) => s.object.id),
+        // The step's passages, so highlight_paper can quote one exactly (QA A1).
+        paperRefs: loaded?.step.paperRefs,
       }}
       tools={tools}
       onAsk={onAsk}

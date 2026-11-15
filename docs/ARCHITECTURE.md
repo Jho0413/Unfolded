@@ -799,6 +799,7 @@ The developer gets the full error in the server log, tagged with the route, less
   - the plan titles
   - the current step's narration up to the point where it was paused (or, while a step is loading, that step's goal from the plan)
   - the ids of the objects on the board
+  - the current step's paper passages (`paperRefs`, already found in the PDF), verbatim, one per line under `Passages this step quotes (verbatim):`, each as `- p.<page> (<label>) "<quote>"` (no label, no brackets), so `highlight_paper` quotes one exactly (QA A1); nothing when the step has none
   - the questions asked earlier in this lesson
   - after a `go_to_step` jump, that step as the next one: the board ids and narration stay those of the frozen board until Ask closes
 
