@@ -16,7 +16,7 @@ import { Latex } from "./primitives/Latex";
 import { Copy, Matrix } from "./primitives/Matrix";
 import { Plot } from "./primitives/Plot";
 import { Text } from "./primitives/Text";
-import { BOARD_BG, FONT } from "./primitives/style";
+import { BOARD_BG, FONT, fadeOpacity } from "./primitives/style";
 import { FULL_VIEW, type ViewBox } from "./viewport";
 
 type ObjectState = BoardState["objects"][number];
@@ -88,7 +88,25 @@ function Layer({
           case "arrow":
             return null; // drawn last, below
           case "image":
-            return null; // arrives with E1
+            // STAND-IN (#152, team B's branch only): team A's Image primitive replaces this.
+            return object.mediaUrl === undefined ? null : (
+              <g
+                key={object.id}
+                data-object-id={object.id}
+                data-kind="image"
+                opacity={s.visible ? fadeOpacity(active, { id: object.id }) : 0}
+                visibility={s.visible ? undefined : "hidden"}
+              >
+                <image
+                  href={object.mediaUrl}
+                  x={object.x}
+                  y={object.y}
+                  width={object.w}
+                  height={object.h}
+                  preserveAspectRatio="xMidYMid meet"
+                />
+              </g>
+            );
           case "heatmap":
             return (
               <Heatmap
