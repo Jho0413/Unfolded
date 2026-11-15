@@ -17,6 +17,7 @@ import {
   validateWireStep,
   WireSketch,
   WireStep,
+  WireImageObject,
   WireStepObject,
   wireErrors,
   wireToSketch,
@@ -25,6 +26,7 @@ import {
 import {
   type BoardState,
   CuedAction,
+  ImageObject,
   MAX_DURATION_MS,
   MAX_PAPER_QUOTE_CHARS,
   SceneObject,
@@ -583,12 +585,17 @@ describe("field coverage: every contract object kind is on the wire step once", 
     expect(grammar.filter((k) => json.includes(k))).toEqual([]);
   });
 
-  it("the grammar's objects are the contract's own schemas, and so are objectsJson's", () => {
+  it("the grammar's objects are the contract's own schemas, and so are objectsJson's (an image without its server-set mediaUrl)", () => {
     const byKind = new Map(
       SceneObject.options.map((o) => [o.shape.kind.value, o]),
     );
     for (const o of [...WireStepObject.options, ...JsonStepObject.options])
-      expect(o).toBe(byKind.get(o.shape.kind.value));
+      if (o !== WireImageObject) expect(o).toBe(byKind.get(o.shape.kind.value));
+    expect(Object.keys(WireImageObject.shape).sort()).toEqual(
+      Object.keys(ImageObject.shape)
+        .filter((k) => k !== "mediaUrl")
+        .sort(),
+    );
   });
 });
 
@@ -891,6 +898,25 @@ describe("objectsJson: one test per row", () => {
       image,
       wireStepWith().objects[0],
     ]);
+  });
+
+  it("an image with a mediaUrl the model wrote: the mediaUrl is stripped, the image kept (E1)", () => {
+    const image = {
+      kind: "image",
+      id: "img",
+      x: 0,
+      y: 0,
+      w: 10,
+      h: 10,
+      prompt: "a cat",
+    };
+    const { value, errors: errs } = wireToStep(
+      withJson(
+        JSON.stringify([{ ...image, mediaUrl: "https://evil.example/x.jpg" }]),
+      ),
+    );
+    expect(errs).toEqual([]);
+    expect(value.objects[0]).toStrictEqual(image);
   });
 
   it("not JSON: rejected with objectsJson: not valid JSON, and no more objects", () => {
@@ -1208,6 +1234,31 @@ describe("validateWireStep / validateWireSketch", () => {
       ok: false,
       errors: ['move needs to "t"', errors.unknownObject("ghost")],
     });
+  });
+
+  it("a sketch image with a mediaUrl the model wrote: the mediaUrl is stripped (E1), and it isn't in the grammar", () => {
+    const image = {
+      kind: "image",
+      id: "img",
+      x: 100,
+      y: 100,
+      w: 200,
+      h: 200,
+      prompt: "a cat",
+    };
+    const result = validateWireSketch(
+      {
+        narration: SAID,
+        objects: [{ ...image, mediaUrl: "https://evil.example/x.jpg" }],
+        actions: [],
+      },
+      { board: EMPTY_BOARD },
+    );
+    expect(result.ok && result.value.objects).toStrictEqual([image]);
+    expect(JSON.stringify(SKETCH_OUTPUT_FORMAT.schema)).not.toContain(
+      "mediaUrl",
+    );
+    expect(JSON.stringify(STEP_OUTPUT_FORMAT.schema)).not.toContain("mediaUrl");
   });
 
   it("a fresh sketch with a conversion error and an overlap: not drawable (no softOnly)", () => {
