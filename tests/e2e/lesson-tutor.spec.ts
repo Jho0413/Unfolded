@@ -219,7 +219,7 @@ test("keys: Space holds on and goes on, → next idea, ← back, R again", async
   await expect(askInput(page)).toHaveValue("r");
 });
 
-test("the outline: done, current, and a row goes to its step", async ({
+test("the outline: current, and a row goes to its step; steps skipped past aren't Done", async ({
   page,
 }) => {
   await using run = await savedRun("e2e-tutor-outline", { steps: 3 });
@@ -235,9 +235,34 @@ test("the outline: done, current, and a row goes to its step", async ({
   await expect(rows.nth(2)).toContainText("Not ready");
   await rows.nth(2).click();
   await expectState(page, "playing", 2);
-  await expect(rows.nth(0)).toHaveAttribute("data-place", "done");
-  await expect(rows.nth(1)).toHaveAttribute("data-place", "done");
+  // Neither step 1 (left mid-step) nor step 2 (never played) played to its end.
+  await expect(rows.nth(0)).toHaveAttribute("data-place", "upcoming");
+  await expect(rows.nth(1)).toHaveAttribute("data-place", "upcoming");
+  await expect(rows.nth(0)).not.toContainText("Done");
   await expect(rows.nth(2)).toHaveAttribute("aria-current", "step");
+});
+
+test("the outline: a step is Done once it has played to its end, and stays Done", async ({
+  page,
+}) => {
+  await using run = await savedRun("e2e-tutor-outline-done", { steps: 3 });
+  await page.goto(`/lesson/${run.lessonId}`);
+  const rows = page.getByTestId("outline-step");
+  await endStep(page, 0);
+  await nextIdea(page).click();
+  await expectState(page, "playing", 1);
+  await expect(rows.nth(0)).toHaveAttribute("data-place", "done");
+  await expect(rows.nth(0)).toContainText("Done");
+  // Skip step 2 from the outline: it isn't Done; step 1 still is.
+  await rows.nth(2).click();
+  await expectState(page, "playing", 2);
+  await expect(rows.nth(0)).toHaveAttribute("data-place", "done");
+  await expect(rows.nth(1)).toHaveAttribute("data-place", "upcoming");
+  // Back to step 1 from the outline: step 1 is on screen, so it's current again.
+  await rows.nth(0).click();
+  await expectState(page, "playing", 0);
+  await expect(rows.nth(0)).toHaveAttribute("aria-current", "step");
+  await expect(rows.nth(1)).toHaveAttribute("data-place", "upcoming");
 });
 
 test("captions: the sentence being said, with the said part apart; the toggle hides it", async ({

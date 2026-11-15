@@ -25,7 +25,14 @@ export function Outline({
   statuses: readonly StepFetchStatus[];
   send: (event: PlayerEvent) => unknown;
 }) {
-  const rows = outlineRows(current, state, statuses);
+  // Steps played to their end ("Done"), noted as the player reaches one (React's "adjust
+  // state while rendering"); a step skipped past never is.
+  const [ended, setEnded] = useState<ReadonlySet<number>>(() => new Set());
+  const endedNow =
+    state.kind === "stepEnded" || state.kind === "finished" ? state.step : null;
+  if (endedNow !== null && !ended.has(endedNow))
+    setEnded(new Set(ended).add(endedNow));
+  const rows = outlineRows(current, state, statuses, ended);
   return (
     <nav className={styles.outline} aria-label="Lesson outline">
       <div className={styles.brand}>
