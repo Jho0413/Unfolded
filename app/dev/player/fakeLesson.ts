@@ -10,9 +10,11 @@
 //   ?audio=missing    the audio request answers 404
 //   ?delay=ms         each step request takes this long (shows `loading`)
 //   ?debug=1          the player's debug overlay
+//   ?widget=plot      step 1 ends with a "try it yourself" widget (or =heatmap; issue #110)
 import type { FetchStep } from "@/player/stepLoader";
 import type { StepResponse } from "@/shared/lesson";
 import { m1, M1_CUE_TIMES } from "../board/scenes";
+import { FAKE_WIDGETS } from "./fakeWidgets";
 import { first, type SearchParams } from "../query";
 
 export const FAKE_STEP_COUNT = 2;
@@ -35,8 +37,12 @@ export type AudioKind = (typeof AUDIO_KINDS)[number];
 /** Above this, a delay would only slow the tests down. */
 const MAX_DELAY_MS = 5000;
 
+export const WIDGET_KINDS = ["none", "plot", "heatmap"] as const;
+export type WidgetKind = (typeof WIDGET_KINDS)[number];
+
 export interface FakeOptions {
   fail: FailKind;
+  widget: WidgetKind;
   audio: AudioKind;
   delayMs: number;
   debug: boolean;
@@ -53,9 +59,11 @@ function oneOf<T extends string>(
 export function parseFakeOptions(params: SearchParams): FakeOptions {
   const fail = first(params.fail);
   const audio = first(params.audio);
+  const widget = first(params.widget);
   const delay = Number(first(params.delay) ?? 0);
   return {
     fail: oneOf(FAIL_KINDS, fail) ? fail : "none",
+    widget: oneOf(WIDGET_KINDS, widget) ? widget : "none",
     audio: oneOf(AUDIO_KINDS, audio) ? audio : "ok",
     delayMs:
       Number.isFinite(delay) && delay > 0 ? Math.min(delay, MAX_DELAY_MS) : 0,
@@ -76,7 +84,13 @@ export function fakeFetchStep(options: FakeOptions): FetchStep {
       if (options.fail === "network") throw new TypeError("Failed to fetch");
     }
     const response: StepResponse = {
-      step: { ...m1, title: `${m1.title} (fake step ${n + 1})` },
+      step: {
+        ...m1,
+        title: `${m1.title} (fake step ${n + 1})`,
+        ...(n === 0 && options.widget !== "none"
+          ? { widget: FAKE_WIDGETS[options.widget] }
+          : {}),
+      },
       version: 1,
       audioUrl: `/dev/player/audio?kind=${options.audio}`,
       cueTimes: M1_CUE_TIMES,

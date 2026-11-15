@@ -134,6 +134,7 @@ export function lengthShareAt(
     const a = pts[i - 1];
     const b = pts[i];
     const len = Math.hypot(b.x - a.x, b.y - a.y);
+    if (!Number.isFinite(len)) continue; // a gap in the curve (pathThrough)
     total += len;
     if (b.x <= cut) before += len;
     else if (a.x < cut) before += len * ((cut - a.x) / (b.x - a.x));
