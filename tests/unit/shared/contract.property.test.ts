@@ -186,11 +186,12 @@ describe("schema details", () => {
 });
 
 describe("client tools (ARCHITECTURE.md section 8)", () => {
-  it("is one list with the board tools and the lesson control tools (#93), their waits and their parameters", () => {
+  it("is one list with the board tools, highlight_paper (#98) and the lesson control tools (#93), their waits and their parameters", () => {
     expect(CLIENT_TOOL_NAMES).toEqual([
       "highlight",
       "go_to_step",
       "draw_scene",
+      "highlight_paper",
       "simplify_upcoming",
       "resume_lesson",
       "pause_lesson",
@@ -205,6 +206,7 @@ describe("client tools (ARCHITECTURE.md section 8)", () => {
       highlight: true,
       go_to_step: true,
       draw_scene: true, // waits for the drawing (#90), so the agent explains what's drawn
+      highlight_paper: true,
       simplify_upcoming: false,
       resume_lesson: false,
       pause_lesson: false,
@@ -219,6 +221,7 @@ describe("client tools (ARCHITECTURE.md section 8)", () => {
       highlight: ["col", "row", "target_id"],
       go_to_step: ["step"],
       draw_scene: ["description", "fresh"],
+      highlight_paper: ["page", "quote"],
       simplify_upcoming: ["reason"],
       resume_lesson: [],
       pause_lesson: [],

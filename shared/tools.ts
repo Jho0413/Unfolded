@@ -31,7 +31,6 @@ export const SimplifyUpcomingParams = z.object({
 /**
  * highlight_paper (issue #98): scrolls the paper viewer to a passage and highlights it. The
  * quote is found with shared/paperText.ts `findQuote`, on `page` first, then on any page.
- * Registered in CLIENT_TOOLS together with its agent config (agent/tool_configs).
  */
 export const HighlightPaperParams = z.object({
   quote: z
@@ -71,6 +70,13 @@ export const CLIENT_TOOLS = [
       "Sketch an answer on a clean answer board. Waits until it is drawn, then returns what is on the board (or why it couldn't be drawn): explain the drawing only after that.",
     expectsResponse: true,
     parameters: DrawSceneParams,
+  },
+  {
+    name: "highlight_paper",
+    description:
+      "Scroll the paper beside the board to a passage and highlight it. Returns ok, or why it couldn't.",
+    expectsResponse: true,
+    parameters: HighlightPaperParams,
   },
   {
     name: "simplify_upcoming",

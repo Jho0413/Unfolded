@@ -7,6 +7,7 @@
 //   go_to_step         goToStep(step - 1); "ok" or "no step n". The step the lesson stopped on
 //                      means back to where it stopped (the "Back to step N" chip), not a restart
 //   simplify_upcoming  stub until A1 (returns nothing)
+//   highlight_paper    highlights a passage in the paper beside the board; "ok: …" or why not
 //   draw_scene         waits: resolves once the sketch is drawn (what's on the board), failed or
 //                      superseded, so the agent explains what is drawn (qa/drawScene.ts)
 //   resume_lesson, pause_lesson, next_step, previous_step, replay_step
@@ -36,6 +37,11 @@ export type ClientToolDeps = {
   /** True while the player is `asking`. A tool call can land after Ask closed. */
   isAsking: () => boolean;
   /**
+   * Highlights a quote in the paper beside the board (the lesson page's useLessonPaper): what
+   * goes back to the agent. Without it (no paper viewer, e.g. /dev/ask) the tool says so.
+   */
+  highlightPaper?: (quote: string, page?: number) => string;
+  /**
    * Carries out a spoken lesson command (closing Ask first if it's open). Without it the
    * control tools do nothing (e.g. /dev/ask, which has no lesson).
    */
@@ -64,6 +70,9 @@ export type ClientToolDeps = {
 
 /** What a tool that changes the board or the step returns after Ask closed. */
 export const ASK_CLOSED = "Ask is closed";
+
+/** What highlight_paper returns where the page has no paper viewer. */
+export const NO_PAPER_VIEWER = "There is no paper on screen.";
 
 /** What `go_to_step` returns for the step the lesson stopped on. */
 export const BACK_WHERE_STOPPED =
@@ -102,6 +111,10 @@ export function createClientTools(deps: ClientToolDeps): QaTools {
       }
       const result = deps.send({ type: "goToStep", n: step - 1 });
       return result.outcome === "rejected" ? result.message : "ok";
+    },
+    highlight_paper: ({ quote, page }) => {
+      if (!deps.isAsking()) return ASK_CLOSED;
+      return deps.highlightPaper?.(quote, page) ?? NO_PAPER_VIEWER;
     },
     // Waits until the sketch is drawn, so the agent explains what the learner sees.
     // Always a clean board of its own (the agent's `fresh` isn't taken), latest request only.

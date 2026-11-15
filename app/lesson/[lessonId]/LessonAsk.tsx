@@ -56,12 +56,15 @@ export function LessonAsk({
   plan,
   replay,
   captions,
+  highlightPaper,
 }: {
   player: Player;
   session: AskSession;
   plan: LessonPlan;
   replay: boolean;
   captions: boolean;
+  /** highlight_paper (issue #98): the paper beside the board. */
+  highlightPaper?: (quote: string, page?: number) => string;
 }) {
   useSessionSync(player, session);
   const { send, state, loaded, step, tMs } = player;
@@ -103,9 +106,10 @@ export function LessonAsk({
           return now.kind === "asking" ? now.from.step : now.step;
         },
         backToLesson: () => leaveAsk(send, session, "back", stateRef.current),
+        highlightPaper,
       });
     },
-    [session, send, voice.control],
+    [session, send, voice.control, highlightPaper],
   );
   useBackOnLesson(session, tellRef);
 
