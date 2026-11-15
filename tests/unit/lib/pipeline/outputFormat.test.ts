@@ -10,6 +10,7 @@ import { config } from "@/lib/config";
 import { readFixture } from "@/lib/fakes";
 import {
   JsonStepObject,
+  JsonWidget,
   SKETCH_OUTPUT_FORMAT,
   STEP_OUTPUT_FORMAT,
   validateWireSketch,
@@ -30,6 +31,7 @@ import {
   Sketch,
   Step,
 } from "@/shared/scene";
+import { Widget } from "@/shared/widget";
 import { ANSWER_TEMPLATE, errors } from "@/shared/validate";
 
 /** A narrated answer's narration (#105): its one cue, "c", fires on the first word. */
@@ -301,24 +303,35 @@ const widget = fc.oneof(
     },
     { requiredKeys: ["kind", "prompt", "expr", "x", "params"] },
   ),
-  fc.integer({ min: 1, max: 8 }).chain((n) =>
-    fc.record(
-      {
-        kind: fc.constant("heatmap" as const),
-        prompt: widgetPrompt,
-        values: fc.array(fc.array(value, { minLength: n, maxLength: n }), {
-          minLength: n,
-          maxLength: n,
-        }),
-        rowLabels: fc.array(vizLabel, { minLength: n, maxLength: n }),
-        colLabels: fc.array(vizLabel, { minLength: n, maxLength: n }),
-        transform: fc.constant("softmax-rows" as const),
-        temperature: sliderOf(0.1, 3),
-      },
-      // A temperature needs softmax-rows, so a heatmap widget here always transforms.
-      { requiredKeys: ["kind", "prompt", "values", "transform"] },
-    ),
-  ),
+  fc
+    .tuple(fc.integer({ min: 1, max: 8 }), fc.integer({ min: 1, max: 8 }))
+    .chain(([rows, cols]) =>
+      fc.record(
+        {
+          kind: fc.constant("heatmap" as const),
+          prompt: widgetPrompt,
+          values: fc.array(
+            fc.array(value, { minLength: cols, maxLength: cols }),
+            { minLength: rows, maxLength: rows },
+          ),
+          rowLabels: fc.array(vizLabel, { minLength: rows, maxLength: rows }),
+          colLabels: fc.array(vizLabel, { minLength: cols, maxLength: cols }),
+          // A temperature needs softmax-rows: both, softmax-rows alone, or neither.
+          softmax: fc.option(
+            fc.record(
+              {
+                transform: fc.constant("softmax-rows" as const),
+                temperature: sliderOf(0.1, 3),
+              },
+              { requiredKeys: ["transform"] },
+            ),
+            { nil: undefined },
+          ),
+        },
+        { requiredKeys: ["kind", "prompt", "values", "softmax"] },
+      ),
+    )
+    .map(({ softmax, ...w }) => ({ ...w, ...softmax })),
 );
 
 /**
@@ -544,7 +557,6 @@ describe("field coverage: the wire has every contract action field and kind", ()
   });
 
   it("the wire step and sketch have the contract's top-level fields", () => {
-    // objectsJson is the wire's own: it carries some of the contract's objects.
     // objectsJson and widgetJson carry the objects and the widget the grammar has no room for.
     expect(Object.keys(WireStep.shape).sort()).toEqual(
       [
@@ -669,6 +681,10 @@ describe("widgetJson (#110): one test per row", () => {
       [noPrompt, /^widgetJson\.prompt: /],
       [noTransform, /^widgetJson\.temperature: /],
       [[PLOT_WIDGET], /^widgetJson: /],
+      [
+        { ...PLOT_WIDGET, params: [{ ...PLOT_WIDGET.params[0], value: 9 }] },
+        /^widgetJson\.params\.0: a slider needs/,
+      ],
     ] as const) {
       const { value, errors: errs } = wireToStep(
         withWidget(JSON.stringify(bad)),
@@ -687,6 +703,22 @@ describe("widgetJson (#110): one test per row", () => {
       ok: false,
       errors: [expect.stringMatching(/^widget expr: unknown name "y"/)],
     });
+  });
+
+  it("a widget with a reserved param name: validateStep's named error, for the retry", () => {
+    const pi = { ...PLOT_WIDGET.params[0], name: "pi" };
+    const result = validateWireStep(
+      withWidget(JSON.stringify({ ...PLOT_WIDGET, expr: "x", params: [pi] })),
+      LIMITS,
+    );
+    expect(result).toStrictEqual({
+      ok: false,
+      errors: [expect.stringMatching(/^widget param: reserved name "pi"/)],
+    });
+  });
+
+  it("widgetJson reads every kind of the contract's Widget, with its own schema", () => {
+    expect(JsonWidget.options).toEqual(Widget.options);
   });
 
   it("widgetJson's errors come back with objectsJson's and the actions', in one list", () => {

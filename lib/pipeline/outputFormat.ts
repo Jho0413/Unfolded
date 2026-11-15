@@ -19,7 +19,7 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import { LessonPlanOutput } from "@/shared/lesson";
 import { repairSketchPlainMaths } from "@/shared/plainMaths";
-import { HeatmapWidget, PlotWidget, type Widget } from "@/shared/widget";
+import { Widget } from "@/shared/widget";
 import {
   type Action,
   Anchor,
@@ -124,11 +124,8 @@ export const JsonStepObject = z.discriminatedUnion("kind", [
 ]);
 export type JsonStepObject = z.infer<typeof JsonStepObject>;
 
-/** The widget as `widgetJson` carries it: the contract's own schemas, by kind (see above). */
-export const JsonWidget = z.discriminatedUnion("kind", [
-  PlotWidget,
-  HeatmapWidget,
-]);
+/** The widget as `widgetJson` carries it: the contract's own kinds, by kind (see above). */
+export const JsonWidget = z.discriminatedUnion("kind", Widget.options);
 
 export const WireStep = z.object({
   title: z.string(),
@@ -140,7 +137,10 @@ export const WireStep = z.object({
    */
   objectsJson: z.string(),
   actions: z.array(WireCuedAction),
-  /** The step's widget (#110) as a JSON object in a string; absent or blank for none. */
+  /**
+   * The step's widget (#110) as a JSON object in a string; absent or blank for none. Optional,
+   * so it is written after the actions: a widget belongs to the step's end.
+   */
   widgetJson: z.string().optional(),
   /** Last, after everything the board needs (#98). An empty list isn't saved. */
   paperRefs: z.array(WirePaperRef).optional(),
