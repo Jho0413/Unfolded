@@ -88,3 +88,17 @@ export function narrationUpTo(
   }
   return narration.slice(0, end).replace(CUE_MARKER_RE, "");
 }
+
+/**
+ * The one message for the answer board (#90's Answer view, agreed in #93): sent through
+ * AskApi.tellAgent when a drawn answer replaces the lesson board and when the lesson is back.
+ * The agent's prompt reads it: with an answer board showing, a bare "go back" returns to the
+ * lesson (pause_lesson) and "say that again" repeats the answer.
+ */
+export function answerBoardUpdate(
+  board: { showing: true; title: string } | { showing: false },
+): string {
+  return board.showing
+    ? `An answer board is showing: ${board.title}. The lesson board is hidden until the learner goes back to it.`
+    : "The answer board is gone: the lesson board is showing again.";
+}

@@ -173,6 +173,7 @@ export function AskBox({
   onFocus,
   onBlur,
   mic,
+  status = null,
 }: {
   value: string;
   disabled: boolean;
@@ -186,7 +187,11 @@ export function AskBox({
     disabled: boolean;
     /** A voice session is listening. */
     live: boolean;
+    /** The lesson's mic is muted (issue #93): the icon is struck through. */
+    muted?: boolean;
   };
+  /** The lesson's always-on mic (issue #93): "Listening" or "Mic muted", or none. */
+  status?: string | null;
 }) {
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -205,6 +210,16 @@ export function AskBox({
         onChange={(e) => onChange(e.target.value)}
         enterKeyHint="send"
       />
+      {status !== null && (
+        <span
+          role="status"
+          className={styles.listening}
+          data-testid="ask-listening"
+          data-muted={mic.muted === true}
+        >
+          {status}
+        </span>
+      )}
       <kbd className={styles.kbd} aria-hidden>
         A
       </kbd>
@@ -229,6 +244,7 @@ export function AskBox({
         >
           <rect x="9" y="2" width="6" height="12" rx="3" />
           <path d="M5 10a7 7 0 0 0 14 0M12 17v5" />
+          {mic.muted === true && <path d="M3 3l18 18" />}
         </svg>
       </button>
     </form>

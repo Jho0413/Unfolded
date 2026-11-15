@@ -218,6 +218,39 @@
   background: var(--answer);
   color: #fff;
 }
+/* The lesson's always-on mic (issue #93): a small "Listening" / "Mic muted" status. */
+.listening {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 500 11.5px var(--ui-font);
+  color: var(--answer);
+  white-space: nowrap;
+}
+.listening::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: listening 1.6s ease-in-out infinite;
+}
+.listening[data-muted="true"] {
+  color: var(--muted);
+}
+.listening[data-muted="true"]::before {
+  animation: none;
+}
+@keyframes listening {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .listening::before {
+    animation: none;
+  }
+}
 .mic:disabled {
   opacity: 0.5;
   cursor: not-allowed;

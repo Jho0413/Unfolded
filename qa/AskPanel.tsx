@@ -69,7 +69,6 @@ export type AskPanelProps = {
   live?: boolean;
 };
 
-
 const NO_DRAWING: { asked: number; drewFor: number | null } = {
   asked: 0,
   drewFor: null,
@@ -375,23 +374,34 @@ export function AskPanel({
     captions,
   });
 
+  // The lesson's always-on mic (issue #93): the mic button is its mute switch.
+  const lessonMic =
+    session.live && session.phase === "connected" && !session.textOnly;
   const offerMic =
     usable && phase === "connected" && session.textOnly && !session.micDenied;
-  const mic = !open
-    ? { label: "Ask by voice", onClick: ask, disabled: !canAsk, live: false }
-    : offerMic
-      ? {
-          label: "Use the mic",
-          onClick: () => void connectorRef.current?.useMic(),
-          disabled: false,
-          live: false,
-        }
-      : {
-          label: "Ask by voice",
-          onClick: () => {},
-          disabled: true,
-          live: voice,
-        };
+  const mic = lessonMic
+    ? {
+        label: muted ? "Unmute the mic" : "Mute the mic",
+        onClick: () => setMuted((m) => !m),
+        disabled: false,
+        live: !muted,
+        muted,
+      }
+    : !open
+      ? { label: "Ask by voice", onClick: ask, disabled: !canAsk, live: false }
+      : offerMic
+        ? {
+            label: "Use the mic",
+            onClick: () => void connectorRef.current?.useMic(),
+            disabled: false,
+            live: false,
+          }
+        : {
+            label: "Ask by voice",
+            onClick: () => {},
+            disabled: true,
+            live: voice,
+          };
 
   const notices = (
     <>
@@ -445,6 +455,7 @@ export function AskPanel({
           if (voice && !muted) conversation.setMicMuted(false);
         }}
         mic={mic}
+        status={lessonMic ? (muted ? "Mic muted" : "Listening") : null}
       />
     </div>
   );
