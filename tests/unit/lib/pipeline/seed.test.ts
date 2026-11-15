@@ -17,6 +17,8 @@ import {
 import {
   listRunFiles,
   PAPER_FILE,
+  PAPER_PDF_FILE,
+  readRunFile,
   PLAN_FILE,
   readRunJson,
 } from "@/lib/runs/store";
@@ -104,7 +106,7 @@ describe("parseSeedFile", () => {
 });
 
 describe("seedLesson", () => {
-  it("uploads the PDF once and writes paper.json and plan.json", async () => {
+  it("uploads the PDF once and writes paper.json, paper.pdf (byte for byte) and plan.json", async () => {
     const files = fakeFiles(UPLOADED);
     const pdf = makePdf();
     const paper = await seedLesson(lesson(), pdf, files);
@@ -119,6 +121,9 @@ describe("seedLesson", () => {
     await expect(readRunJson("seeded", PLAN_FILE, LessonPlan)).resolves.toEqual(
       lesson().plan,
     );
+    const saved = await readRunFile("seeded", PAPER_PDF_FILE);
+    expect(saved.kind).toBe("ok");
+    if (saved.kind === "ok") expect(new Uint8Array(saved.data)).toEqual(pdf);
   });
 
   it("bytes that aren't a usable PDF are refused before uploading, and nothing is written", async () => {

@@ -129,6 +129,8 @@ describe("servable names", () => {
     expect(type("cover.jpg")).toBe("image/jpeg");
     expect(type("cover.jpeg")).toBe("image/jpeg");
     expect(type("cover.webp")).toBe("image/webp");
+    // The uploaded paper, for the paper viewer (#98).
+    expect(type("paper.pdf")).toBe("application/pdf");
   });
 
   it("never serves an unknown extension", () => {

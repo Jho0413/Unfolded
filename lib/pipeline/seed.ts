@@ -13,7 +13,13 @@ import {
   uploadPaper,
   validatePlan,
 } from "@/lib/pipeline/plan";
-import { PAPER_FILE, PLAN_FILE, writeRunJson } from "@/lib/runs/store";
+import {
+  PAPER_FILE,
+  PAPER_PDF_FILE,
+  PLAN_FILE,
+  writeRunFile,
+  writeRunJson,
+} from "@/lib/runs/store";
 
 const MB = 1024 * 1024;
 
@@ -70,6 +76,8 @@ export async function seedLesson(
     filename,
   };
   await writeRunJson(lesson.lessonId, PAPER_FILE, paper);
+  // The PDF itself, for the paper viewer (#98). Seeding again backfills it.
+  await writeRunFile(lesson.lessonId, PAPER_PDF_FILE, pdf);
   // Last, as POST /api/lessons does, so a lesson the page can open is always complete.
   await writeRunJson(lesson.lessonId, PLAN_FILE, lesson.plan);
   return paper;

@@ -23,7 +23,13 @@ import {
 } from "@/lib/fakes/claude";
 import { type FakeImages, fakeImages } from "@/lib/fakes/fal";
 import { SavedPaper } from "@/lib/pipeline/plan";
-import { PAPER_FILE, PLAN_FILE, readRunJson } from "@/lib/runs/store";
+import {
+  PAPER_FILE,
+  PAPER_PDF_FILE,
+  PLAN_FILE,
+  readRunFile,
+  readRunJson,
+} from "@/lib/runs/store";
 import {
   ApiError,
   CreateLessonResponse,
@@ -207,6 +213,13 @@ describe("POST /api/lessons: a valid PDF", () => {
       fileId: UPLOADED.id,
       filename: "paper.pdf",
     });
+    // And the PDF itself, byte for byte, for the paper viewer (#98).
+    const saved = await readRunFile(lessonId, PAPER_PDF_FILE);
+    expect(saved.kind).toBe("ok");
+    if (saved.kind === "ok")
+      expect(new Uint8Array(saved.data)).toEqual(
+        new Uint8Array(pdfs["tiny.pdf"]),
+      );
   });
 
   it("the upload is the PDF's bytes, as application/pdf, under its name", async () => {

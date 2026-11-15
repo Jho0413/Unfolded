@@ -31,6 +31,7 @@ const CONTENT_TYPES: Record<string, string> = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".webp": "image/webp",
+  ".pdf": "application/pdf",
 };
 
 /**
@@ -50,6 +51,11 @@ export function servableContentType(
 export const PLAN_FILE = "plan.json";
 /** The paper's Files API id (lib/pipeline/plan.ts SavedPaper), for the step requests. */
 export const PAPER_FILE = "paper.json";
+/**
+ * The uploaded PDF itself, byte for byte, for the paper viewer beside the board (#98), served
+ * by GET /api/runs/<lessonId>/paper.pdf.
+ */
+export const PAPER_PDF_FILE = "paper.pdf";
 
 // ---------------------------------------------------------------- versioned step files
 

@@ -30,7 +30,13 @@ import {
   PLAN_SYSTEM_PROMPT,
   planRetryPrompt,
 } from "@/lib/pipeline/prompts/plan";
-import { PAPER_FILE, PLAN_FILE, writeRunJson } from "@/lib/runs/store";
+import {
+  PAPER_FILE,
+  PAPER_PDF_FILE,
+  PLAN_FILE,
+  writeRunFile,
+  writeRunJson,
+} from "@/lib/runs/store";
 
 export const SavedPaper = z.object({
   fileId: z.string().min(1),
@@ -166,6 +172,8 @@ export async function createLesson(
     fileId,
     filename: pdf.filename,
   } satisfies SavedPaper);
+  // The PDF itself, for the paper viewer (#98).
+  await writeRunFile(lessonId, PAPER_PDF_FILE, pdf.bytes);
   const plan = await addCover(lessonId, output, clients.images);
   await writeRunJson(lessonId, PLAN_FILE, plan);
   return { lessonId, plan };

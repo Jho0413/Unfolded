@@ -78,6 +78,16 @@ describe("serves a saved file", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("image/png");
   });
+
+  it("the paper as application/pdf, byte for byte (the paper viewer, #98)", async () => {
+    const bytes = new TextEncoder().encode("%PDF-1.7\n%%EOF\n");
+    await writeRunFile("demo-m1", "paper.pdf", bytes);
+    const res = await get("demo-m1", "paper.pdf");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/pdf");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(bytes);
+  });
 });
 
 describe("missing file -> 404 with a clear message", () => {
