@@ -175,7 +175,8 @@ export type LessonCommand = "resume" | "pause" | "next" | "previous" | "replay";
 /**
  * The machine event for a spoken command, in the state the player is in once Ask is closed
  * (ARCHITECTURE.md section 8). Existing events only, so machine.ts doesn't change:
- * - resume: Go on from held on (`resume`).
+ * - resume: Go on from held on (`resume`); at a step's end, "carry on" means the next step
+ *   (`next`, or finished on the last step), as the machine takes no `resume` there.
  * - pause: hold on while explaining (`pause`).
  * - next: the end-of-step Next (`next`, or finished on the last step); mid-step, where the
  *   machine only takes Next after the step ends, a jump to the next step (`goToStep`, which
@@ -192,7 +193,9 @@ export function commandEvent(
   const event = ((): PlayerEvent | null => {
     switch (command) {
       case "resume":
-        return { type: "resume" };
+        return state.kind === "stepEnded"
+          ? { type: "next" }
+          : { type: "resume" };
       case "pause":
         return { type: "pause" };
       case "previous":
