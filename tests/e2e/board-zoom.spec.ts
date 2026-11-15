@@ -38,7 +38,12 @@ const cellTextPx = (page: Page) =>
 
 for (const theme of ["light", "dark"] as const)
   test.describe(`390 px, ${theme}`, () => {
-    test.use({ viewport: { width: 390, height: 844 }, colorScheme: theme });
+    // A touch screen: the drag below is a real touch gesture.
+    test.use({
+      viewport: { width: 390, height: 844 },
+      colorScheme: theme,
+      hasTouch: true,
+    });
 
     test("a tap zooms the board at least 2x and holds the lesson; a touch drag pans; X closes and the lesson goes on", async ({
       page,
