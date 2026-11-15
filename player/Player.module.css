@@ -168,3 +168,87 @@
   border-radius: 6px;
   pointer-events: none;
 }
+
+/*
+ * Phones (under 760 px). The board and the paper are tabs, not tiny stacked panes: the shown
+ * one fills the stage (data-tab, Player.tsx). The hidden one keeps its size (visibility), so the
+ * paper's pages and its highlight survive a switch. The drawing sits above the dock's measured
+ * height, so the compact card and the Ask box never cover it.
+ */
+.tabs {
+  display: none;
+}
+@media (max-width: 760px) {
+  .stage {
+    gap: 8px;
+  }
+  .split[data-paper="1"] {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+  .split[data-paper="1"] > .board,
+  .split[data-paper="1"] > .paperPane {
+    grid-area: 2 / 1;
+  }
+  .split[data-tab="paper"] > .board,
+  .split[data-tab="board"] > .paperPane {
+    visibility: hidden;
+  }
+  .tabs {
+    display: flex;
+    gap: 4px;
+    padding: 3px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface);
+  }
+  .tab {
+    flex: 1;
+    min-height: 44px;
+    border: 0;
+    border-radius: 9px;
+    background: none;
+    color: var(--muted);
+    font: 500 14px var(--ui-font);
+    cursor: pointer;
+    position: relative;
+  }
+  .tab[aria-selected="true"] {
+    background: var(--surface-2);
+    color: var(--ink);
+    box-shadow: inset 0 0 0 1px var(--line-2);
+  }
+  /* A new passage in the paper while the learner keeps the board on. */
+  .tab[data-new]::after {
+    content: "";
+    position: absolute;
+    top: 10px;
+    right: calc(50% - 34px);
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  .board {
+    --dock-bottom: 8px;
+  }
+  .drawing {
+    inset: 8px 8px calc(var(--dock-height, 120px) + var(--dock-bottom) + 8px);
+  }
+  .board:has([data-clear-of-dock]) .drawing {
+    bottom: calc(var(--dock-height, 120px) + var(--dock-bottom) + 8px);
+  }
+  .preparing {
+    bottom: calc(var(--dock-height, 120px) + var(--dock-bottom));
+  }
+  .preparing b {
+    font-size: 24px;
+  }
+  .dock {
+    width: calc(100% - 16px);
+    gap: 6px;
+  }
+}

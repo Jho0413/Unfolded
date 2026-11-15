@@ -42,6 +42,8 @@ const clock = (page: Page) =>
 
 /** Drags a range input's thumb to `share` (0..1) of its track with the mouse. */
 async function drag(slider: Locator, share: number) {
+  // On a phone the panel scrolls (Widget.module.css), so bring the slider into view first.
+  await slider.scrollIntoViewIfNeeded();
   const box = (await slider.boundingBox())!;
   const page = slider.page();
   const value = Number(await slider.inputValue());

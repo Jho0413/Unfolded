@@ -93,6 +93,14 @@ export function PlayerStage({
   useShortcuts(send);
   const boardFocus = usePaneFocus("board", onFocusPane);
   const paperFocus = usePaneFocus("paper", onFocusPane);
+  // On a phone the panes are tabs (Player.module.css): the learner's tab for this step wins,
+  // otherwise the focus rules pick it.
+  const [chosenTab, setChosenTab] = useState<{
+    step: number;
+    pane: Pane;
+  } | null>(null);
+  const userTab = chosenTab?.step === player.step ? chosenTab.pane : null;
+  const tab = userTab ?? focus;
   // The audio's duration, the captions' last anchor, for the audio it was read from: a new
   // step's audio has none until its metadata loads.
   const [duration, setDuration] = useState<{ src: string; ms: number } | null>(
@@ -151,7 +159,39 @@ export function PlayerStage({
         data-testid="stage-split"
         data-paper={paper ? "1" : "0"}
         data-focus={paper ? focus : "board"}
+        data-tab={paper ? tab : "board"}
       >
+        {paper && (
+          <div
+            className={styles.tabs}
+            role="tablist"
+            aria-label="Board or paper"
+            data-testid="pane-tabs"
+          >
+            {(["board", "paper"] as const).map((pane) => (
+              <button
+                key={pane}
+                type="button"
+                role="tab"
+                className={styles.tab}
+                aria-selected={tab === pane}
+                data-testid={`tab-${pane}`}
+                // A new passage while the learner keeps the board on.
+                data-new={
+                  pane === "paper" && tab === "board" && focus === "paper"
+                    ? ""
+                    : undefined
+                }
+                onClick={() => {
+                  setChosenTab({ step: player.step, pane });
+                  onFocusPane?.(pane);
+                }}
+              >
+                {pane === "board" ? "Board" : "Paper"}
+              </button>
+            ))}
+          </div>
+        )}
         <div className={styles.board} data-testid="board-pane" {...boardFocus}>
           <div className={styles.drawing}>
             <div className={styles.fit}>

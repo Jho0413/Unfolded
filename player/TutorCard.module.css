@@ -268,3 +268,74 @@
   height: 16px;
   display: block;
 }
+
+/* ---------- phones ---------- */
+/* The compact / full switch only exists on a phone. */
+.more {
+  display: none;
+}
+@media (max-width: 760px) {
+  .card {
+    padding: 8px 10px 10px;
+  }
+  .head {
+    min-height: 44px;
+  }
+  /* Touch targets: 44 px. */
+  .button,
+  .hold {
+    min-height: 44px;
+    padding: 0 14px;
+  }
+  .more {
+    display: inline-block;
+    margin-left: auto;
+    background: none;
+  }
+  .hold + .more {
+    margin-left: 0;
+  }
+  .said,
+  .caption {
+    margin-top: 4px;
+    font-size: 15.5px;
+    line-height: 1.45;
+  }
+  .answer {
+    max-height: 30dvh;
+  }
+  /* Compact: the head, two lines of what's said, and only the primary action. */
+  .card[data-compact="1"] :is(.said, .caption, .wait) {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+  }
+  .card[data-compact="1"] :is(.notice, .adapted, .asked, .answer),
+  .card[data-compact="1"] .chips .button:not(.primary) {
+    display: none;
+  }
+  .card[data-compact="1"] .chips {
+    margin-top: 8px;
+  }
+  .card[data-compact="1"] .chips:not(:has(.primary)) {
+    display: none;
+  }
+
+  /* The Ask box: a 44 px mic, 16 px text (no zoom on focus in iOS), no keyboard hint. */
+  .composer {
+    padding: 3px 3px 3px 12px;
+  }
+  .composer input {
+    height: 44px;
+    font-size: 16px;
+  }
+  .kbd {
+    display: none;
+  }
+  .mic {
+    width: 44px;
+    height: 44px;
+  }
+}

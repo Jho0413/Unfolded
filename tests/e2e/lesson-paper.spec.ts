@@ -176,7 +176,7 @@ test("a passage far down the paper stays in view while the pane widens, and afte
   await expect(mark).toBeInViewport();
 });
 
-test("a phone (390 px): the stage and both panes fit the screen, stacked", async ({
+test("a phone (390 px): the stage and both panes fit the screen, one tab at a time (phone.spec.ts has the tabs)", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -195,10 +195,13 @@ test("a phone (390 px): the stage and both panes fit the screen, stacked", async
     expect(box.x).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width).toBeLessThanOrEqual(390);
   }
+  // Both panes share the screen's space; the tab not chosen is hidden, not unmounted.
   const board = (await boardPane(page).boundingBox())!;
   const paperBox = (await paperPane(page).boundingBox())!;
-  expect(paperBox.y).toBeGreaterThan(board.y + board.height - 1);
-  await screenshot(page, "phone-stacked");
+  expect(Math.abs(paperBox.y - board.y)).toBeLessThan(1);
+  await expect(boardPane(page)).toBeVisible();
+  await expect(paperPane(page)).toBeHidden();
+  await screenshot(page, "phone-tabs");
 });
 
 test("highlight_paper from the conversation highlights its quote in the answer blue", async ({

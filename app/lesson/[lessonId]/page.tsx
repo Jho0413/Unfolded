@@ -7,7 +7,7 @@
 // (./not-found.tsx). A step the route can't give fails in the player with the route's message
 // ("Couldn't make this step.", or in replay "This step isn't in the saved run."), and Retry,
 // Next or Back recover.
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { getEnv } from "@/lib/env";
@@ -15,6 +15,13 @@ import { LessonView } from "./LessonView";
 import { loadLesson } from "./loadLesson";
 
 export const metadata: Metadata = { title: "Lesson" };
+
+/** Phones: the page reaches under the notch, and lesson.module.css pads by the safe areas. */
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+};
 
 export default async function LessonPage({
   params,
