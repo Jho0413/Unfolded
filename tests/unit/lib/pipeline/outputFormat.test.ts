@@ -584,12 +584,12 @@ describe("validateWireStep / validateWireSketch", () => {
     });
   });
 
-  it("a fresh sketch with a conversion error and a spacing problem: not drawable (no softOnly)", () => {
+  it("a fresh sketch with a conversion error and an overlap: not drawable (no softOnly)", () => {
     const result = validateWireSketch(
       {
         objects: [
           { kind: "latex", id: "f", x: 700, y: 450, tex: "x" },
-          { kind: "latex", id: "g", x: 760, y: 450, tex: "y" },
+          { kind: "latex", id: "g", x: 715, y: 450, tex: "y" },
         ],
         actions: [
           { do: "move", target: { id: "f" }, durationMs: 400, atMs: 0 },
@@ -601,7 +601,7 @@ describe("validateWireStep / validateWireSketch", () => {
       ok: false,
       errors: [
         'move needs to "f"',
-        errors.tooClose("f", "g", ANSWER_TEMPLATE.gap),
+        errors.overlap("f", "g", ANSWER_TEMPLATE.gap),
       ],
     });
   });

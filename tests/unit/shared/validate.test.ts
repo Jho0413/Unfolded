@@ -792,28 +792,42 @@ describe("validate: a fresh sketch's answer template (#90)", () => {
     );
   });
 
-  it('Two objects closer than 40 (or overlapping): soft: "a" and "b" are too close, still drawable', () => {
-    const near: BoardObject = { ...f, x: 480, id: "near" };
-    const r = validateSketch(answer(a, near), FRESH);
-    expectErrors(r, errors.tooClose("a", "near", ANSWER_TEMPLATE.gap));
+  it('Two objects whose boxes overlap (or touch): soft, retried: "a" and "b" overlap, still drawable', () => {
+    // a's box ends at x 434; this formula's starts left of it.
+    const over: BoardObject = { ...f, x: 420, id: "over" };
+    const r = validateSketch(answer(a, over), FRESH);
+    expectErrors(r, errors.overlap("a", "over", ANSWER_TEMPLATE.gap));
     expect(r.ok === false && r.softOnly).toEqual({
-      value: answer(a, near),
+      value: answer(a, over),
       count: 1,
     });
   });
 
-  it("Two objects an arrow joins, 40 or more apart: valid (the arrow shows in the gap)", () => {
-    // About 60 apart.
-    const close: BoardObject = { ...f, x: 530 };
-    expectValid(validateSketch(answer(a, close, join), FRESH));
+  it('Two objects closer than 40 without touching: valid, with the warning "a" and "b" are too close', () => {
+    // About 20 apart.
+    const near: BoardObject = { ...f, x: 480, id: "near" };
+    expect(validateSketch(answer(a, near), FRESH)).toEqual({
+      ok: true,
+      value: answer(a, near),
+      warnings: [errors.tooClose("a", "near", ANSWER_TEMPLATE.gap)],
+    });
   });
 
-  it("A spacing problem with a hard one: not drawable (no softOnly)", () => {
-    const near: BoardObject = { ...f, x: 480, id: "near", tex: "x" };
-    const r = validateSketch(answer(a, near, { ...title, text: "d_k" }), FRESH);
+  it("Two objects an arrow joins, 40 or more apart: valid, no warning (the arrow shows in the gap)", () => {
+    // About 60 apart.
+    const close: BoardObject = { ...f, x: 530 };
+    expect(validateSketch(answer(a, close, join), FRESH)).toEqual({
+      ok: true,
+      value: answer(a, close, join),
+    });
+  });
+
+  it("An overlap with a hard problem: not drawable (no softOnly)", () => {
+    const over: BoardObject = { ...f, x: 420, id: "over", tex: "x" };
+    const r = validateSketch(answer(a, over, { ...title, text: "d_k" }), FRESH);
     expectErrors(
       r,
-      errors.tooClose("a", "near", ANSWER_TEMPLATE.gap),
+      errors.overlap("a", "over", ANSWER_TEMPLATE.gap),
       errors.mathsInPlainText("title"),
     );
     expect(r.ok === false && r.softOnly).toBeUndefined();
@@ -1046,7 +1060,7 @@ describe("validate: the answer template (property, #90)", () => {
     );
   });
 
-  it("two objects whose estimated boxes overlap are always too close", () => {
+  it("two objects whose estimated boxes overlap always overlap (retried)", () => {
     fc.assert(
       fc.property(
         contentObject,
@@ -1066,8 +1080,34 @@ describe("validate: the answer template (property, #90)", () => {
           };
           expectErrors(
             validateSketch({ objects: [first, second], actions: [] }, FRESH),
-            errors.tooClose("p", "q", gap),
+            errors.overlap("p", "q", gap),
           );
+        },
+      ),
+    );
+  });
+
+  it("two objects side by side, 1 to 39 apart, are always drawn, with a tight-spacing warning", () => {
+    fc.assert(
+      fc.property(
+        contentObject,
+        contentObject,
+        fc.double({ min: 0.5, max: gap - 0.5, noNaN: true }),
+        (p, q, apart) => {
+          const first = { ...placeAt(p, area.x0 + 1, 400), id: "p" };
+          const second = {
+            ...placeAt(q, objectBox(first)!.x1 + apart, 400),
+            id: "q",
+          };
+          fc.pre(objectBox(second)!.x1 <= area.x1);
+          const r = validateSketch(
+            { objects: [first, second], actions: [] },
+            FRESH,
+          );
+          expect(r).toMatchObject({
+            ok: true,
+            warnings: [errors.tooClose("p", "q", gap)],
+          });
         },
       ),
     );

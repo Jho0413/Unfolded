@@ -27,13 +27,18 @@ import {
 } from "./scene";
 
 export type ValidationResult<T> =
-  | { ok: true; value: T }
+  | {
+      ok: true;
+      value: T;
+      /** Problems that don't stop it (a sketch's tight spacing, section 4), for the log. */
+      warnings?: string[];
+    }
   | {
       ok: false;
       errors: string[];
       /**
-       * Present when every error is soft (a sketch's spacing, ARCHITECTURE.md section 4): the
-       * value can still be drawn, and `count` is how many soft errors it has.
+       * Present when no error is hard, only overlaps (a sketch's, ARCHITECTURE.md section 4):
+       * the value can still be drawn, and `count` is how many overlaps it has.
        */
       softOnly?: { value: T; count: number };
     };
@@ -104,6 +109,8 @@ export const errors = {
   outsideAnswerArea: (id: string) => `outside the answer area "${id}"`,
   tooClose: (a: string, b: string, gap: number) =>
     `"${a}" and "${b}" are too close (leave ${gap} between them)`,
+  overlap: (a: string, b: string, gap: number) =>
+    `"${a}" and "${b}" overlap (leave ${gap} between them)`,
   mathsInPlainText: (id: string) =>
     `"_" or "^" in plain text "${id}" (write maths as a latex object)`,
 } as const;
@@ -126,8 +133,8 @@ const halfLine = (line: TemplateLine) =>
  * a layout that follows the template always passes. The prompt describes it from these
  * numbers, and checkSketch holds a fresh sketch to the counts and `area`, and asks for `gap`
  * between any two objects' estimated boxes (shared/boxes.ts; an arrow shows in it too). The
- * gap is soft: a sketch with only spacing problems can still be drawn (validateSketch's
- * `softOnly`). The area keeps clear of the Answer view's tag and chip above it
+ * gap is soft: boxes that overlap are retried, and drawn anyway if the retry is no better
+ * (validateSketch's `softOnly`); boxes closer than `gap` without touching are only a warning. The area keeps clear of the Answer view's tag and chip above it
  * (app/lesson/[lessonId]/AnswerView.module.css).
  */
 export const ANSWER_TEMPLATE = {
@@ -376,14 +383,16 @@ export function validateStep(
 // ---------------------------------------------------------------- sketch
 
 /**
- * The rules zod can't express, for a sketch that already passed the schema, as hard errors
- * (the sketch can't be drawn) and soft ones (a fresh sketch's spacing: it can, if no better
- * one comes). Known ids are the sketch's own objects plus the board's (none if `fresh`).
+ * The rules zod can't express, for a sketch that already passed the schema: hard errors (the
+ * sketch can't be drawn), and a fresh sketch's spacing, `overlap` (boxes that touch or
+ * intersect: retried, but drawable if no better one comes) and `tight` (closer than the gap
+ * without touching: drawn, with a warning). Known ids are the sketch's own objects plus the
+ * board's (none if `fresh`).
  */
 export function sketchProblems(
   sketch: Sketch,
   ctx: SketchContext,
-): { hard: string[]; soft: string[] } {
+): { hard: string[]; overlap: string[]; tight: string[] } {
   const out: string[] = ctx.fresh ? checkAnswerLayout(sketch) : [];
   const boardObjects = ctx.fresh ? [] : ctx.board.objects.map((s) => s.object);
   const objects = byId(sketch.objects, boardObjects);
@@ -395,16 +404,16 @@ export function sketchProblems(
   );
   for (const action of sketch.actions)
     out.push(...checkAction(action, objects));
-  return {
-    hard: unique(out),
-    soft: ctx.fresh ? unique(checkGaps(sketch.objects)) : [],
-  };
+  const gaps = ctx.fresh
+    ? checkGaps(sketch.objects)
+    : { overlap: [], tight: [] };
+  return { hard: unique(out), ...gaps };
 }
 
 /** Every rule zod can't express, hard and soft, for a sketch that passed the schema. */
 export function checkSketch(sketch: Sketch, ctx: SketchContext): string[] {
-  const { hard, soft } = sketchProblems(sketch, ctx);
-  return [...hard, ...soft];
+  const { hard, overlap, tight } = sketchProblems(sketch, ctx);
+  return [...hard, ...overlap, ...tight];
 }
 
 /** Underscores and carets are maths, which plain text shows raw ("d_k"). */
@@ -444,22 +453,31 @@ function checkAnswerLayout(sketch: Sketch): string[] {
   return out;
 }
 
-/** Every two boxed objects at least `gap` apart (soft: spacing never stops a drawing alone). */
-function checkGaps(objects: readonly BoardObject[]): string[] {
+/**
+ * Every two boxed objects at least `gap` apart. Soft: spacing never stops a drawing alone.
+ * Boxes that touch or intersect are an overlap; closer than `gap` without touching, tight.
+ */
+function checkGaps(objects: readonly BoardObject[]): {
+  overlap: string[];
+  tight: string[];
+} {
   const { gap } = ANSWER_TEMPLATE;
   const boxed = objects.flatMap((obj) => {
     const box = objectBox(obj);
     return box === undefined ? [] : [{ id: obj.id, box }];
   });
-  const out: string[] = [];
+  const overlap: string[] = [];
+  const tight: string[] = [];
   boxed.forEach((a, i) => {
     for (const b of boxed.slice(0, i)) {
+      const between = boxGap(a.box, b.box);
       // Estimated boxes are fractional: a gap a rounding error short still counts.
-      if (boxGap(a.box, b.box) < gap - 1e-6)
-        out.push(errors.tooClose(b.id, a.id, gap));
+      if (between <= 0) overlap.push(errors.overlap(b.id, a.id, gap));
+      else if (between < gap - 1e-6)
+        tight.push(errors.tooClose(b.id, a.id, gap));
     }
   });
-  return out;
+  return { overlap, tight };
 }
 
 /** What an object shows as plain text, not LaTeX. */
@@ -483,14 +501,18 @@ export function validateSketch(
 ): ValidationResult<Sketch> {
   const parsed = Sketch.safeParse(input);
   if (!parsed.success) return { ok: false, errors: schemaErrors(parsed.error) };
-  const { hard, soft } = sketchProblems(parsed.data, ctx);
-  if (hard.length === 0 && soft.length === 0)
-    return { ok: true, value: parsed.data };
+  const { hard, overlap, tight } = sketchProblems(parsed.data, ctx);
+  if (hard.length === 0 && overlap.length === 0)
+    return {
+      ok: true,
+      value: parsed.data,
+      ...(tight.length > 0 && { warnings: tight }),
+    };
   return {
     ok: false,
-    errors: [...hard, ...soft],
+    errors: [...hard, ...overlap, ...tight],
     ...(hard.length === 0 && {
-      softOnly: { value: parsed.data, count: soft.length },
+      softOnly: { value: parsed.data, count: overlap.length },
     }),
   };
 }

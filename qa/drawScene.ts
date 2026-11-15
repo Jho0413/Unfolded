@@ -100,7 +100,7 @@ async function requestSketch(
   if (!parsed.success) return fail(current, deps, description, "bad response");
   // Checked again in the browser, with the same rules as the route (section 4).
   const checked = validateSketch(parsed.data.sketch, ctx);
-  // Spacing is soft: the route may send a sketch whose only problems are spacing.
+  // Spacing is soft: the route may send a sketch whose only problems are overlaps.
   if (checked.ok) deps.drawSketch(checked.value, description);
   else if (checked.softOnly)
     deps.drawSketch(checked.softOnly.value, description);

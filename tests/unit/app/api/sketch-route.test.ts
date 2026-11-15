@@ -142,7 +142,7 @@ describe("POST /api/sketch: a fresh answer and its template (#90)", () => {
     actions: [],
   };
 
-  /** Two formulas about 37 apart: only a spacing problem, so still drawable. */
+  /** Two formulas about 37 apart, not touching: tight spacing, only a warning. */
   const CRAMPED: Sketch = {
     objects: [
       { kind: "text", id: "title", x: 800, y: 110, text: "Why scale?" },
@@ -151,38 +151,68 @@ describe("POST /api/sketch: a fresh answer and its template (#90)", () => {
     ],
     actions: [],
   };
-  /** Three formulas side by side, each pair too close: more spacing problems. */
-  const MORE_CRAMPED: Sketch = {
+  /** Two formulas whose boxes overlap: retried, but still drawable. */
+  const OVERLAPPING: Sketch = {
     ...CRAMPED,
     objects: [
-      ...CRAMPED.objects,
-      { kind: "latex", id: "h", x: 820, y: 450, tex: "z" },
+      CRAMPED.objects[0],
+      { kind: "latex", id: "f", x: 700, y: 450, tex: "x" },
+      { kind: "latex", id: "g", x: 715, y: 450, tex: "y" },
+    ],
+  };
+  /** A third formula over the second: more overlaps. */
+  const MORE_OVERLAPPING: Sketch = {
+    ...OVERLAPPING,
+    objects: [
+      ...OVERLAPPING.objects,
+      { kind: "latex", id: "h", x: 730, y: 450, tex: "z" },
     ],
   };
 
-  it("spacing only, twice: retried with the feedback, then 200 with the attempt with fewer spacing problems, and a warning", async () => {
+  it("tight spacing only: 200 with the first attempt, no retry, and a warning", async () => {
     const logs = quietLogs();
-    const fake = script(reply(CRAMPED), reply(MORE_CRAMPED));
+    const fake = script(reply(CRAMPED));
     const res = await post({ description: "why", fresh: true, board: EMPTY });
     expect(res.status).toBe(200);
     expect(SketchResponse.parse(await res.json()).sketch).toEqual(CRAMPED);
-    expect(fake.calls).toHaveLength(2);
-    expect(fake.calls[1].body.messages.at(-1)?.content).toContain(
+    expect(fake.calls).toHaveLength(1);
+    expect(logs.warned()).toContain(
       errors.tooClose("f", "g", ANSWER_TEMPLATE.gap),
     );
+  });
+
+  it("an overlap: retried once with the feedback, 200 with a valid retry", async () => {
+    quietLogs();
+    const fake = script(reply(OVERLAPPING), reply(ANSWER));
+    const res = await post({ description: "why", fresh: true, board: EMPTY });
+    expect(res.status).toBe(200);
+    expect(SketchResponse.parse(await res.json()).sketch).toEqual(ANSWER);
+    expect(fake.calls).toHaveLength(2);
+    expect(fake.calls[1].body.messages.at(-1)?.content).toContain(
+      errors.overlap("f", "g", ANSWER_TEMPLATE.gap),
+    );
+  });
+
+  it("overlaps twice: 200 with the attempt with fewer overlaps, and a warning", async () => {
+    const logs = quietLogs();
+    const fake = script(reply(OVERLAPPING), reply(MORE_OVERLAPPING));
+    const res = await post({ description: "why", fresh: true, board: EMPTY });
+    expect(res.status).toBe(200);
+    expect(SketchResponse.parse(await res.json()).sketch).toEqual(OVERLAPPING);
+    expect(fake.calls).toHaveLength(2);
     expect(logs.warned()).toContain("used with soft problems only");
   });
 
-  it("hard, then spacing only: 200 with the second", async () => {
+  it("hard, then overlaps only: 200 with the second", async () => {
     quietLogs();
     const hardFirst: Sketch = {
       ...CRAMPED,
       objects: [{ kind: "text", id: "t", x: 800, y: 110, text: "d_k" }],
     };
-    script(reply(hardFirst), reply(CRAMPED));
+    script(reply(hardFirst), reply(OVERLAPPING));
     const res = await post({ description: "why", fresh: true, board: EMPTY });
     expect(res.status).toBe(200);
-    expect(SketchResponse.parse(await res.json()).sketch).toEqual(CRAMPED);
+    expect(SketchResponse.parse(await res.json()).sketch).toEqual(OVERLAPPING);
   });
 
   it("rejected twice: the second attempt's output goes to the server log", async () => {

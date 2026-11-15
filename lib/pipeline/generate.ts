@@ -2,8 +2,8 @@
 // 4 and 6.2). Shared by the step, sketch and plan generators: a rejection (output that isn't JSON, a
 // zod schema error or a validate.ts rejection) is retried once with the errors, and a second
 // rejection, a refusal, a cut-off or a provider error fails with a typed GenerationError. An
-// attempt with only soft problems (a sketch's spacing) is used when neither is valid
-// (chooseAttempt).
+// attempt with only soft problems (a sketch's overlaps) is used when neither is valid
+// (chooseAttempt), and a valid one's warnings (a sketch's tight spacing) are only logged.
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import type { ValidationResult } from "@/shared/validate";
@@ -58,7 +58,10 @@ export async function generateWithRetry<T>(
   messages: ClaudeMessages,
 ): Promise<T> {
   const firstTry = await attempt(gen, messages, gen.request);
-  if (firstTry.result.ok) return firstTry.result.value;
+  if (firstTry.result.ok) {
+    logSoft(gen.label, firstTry.result.warnings ?? []);
+    return firstTry.result.value;
+  }
 
   console.warn(
     `[pipeline] ${gen.label} rejected, retrying once: ${firstTry.result.errors.join("; ")}`,
@@ -80,10 +83,7 @@ export async function generateWithRetry<T>(
   const secondTry = await attempt(gen, messages, retry);
   const chosen = chooseAttempt(firstTry.result, secondTry.result);
   if ("value" in chosen) {
-    if (chosen.softErrors.length > 0)
-      console.warn(
-        `[pipeline] ${gen.label} used with soft problems only: ${chosen.softErrors.join("; ")}`,
-      );
+    logSoft(gen.label, chosen.softErrors);
     return chosen.value;
   }
   // The rejected output, so the next failure can be diagnosed (server log only).
@@ -97,6 +97,13 @@ export async function generateWithRetry<T>(
   );
 }
 
+function logSoft(label: string, softErrors: readonly string[]): void {
+  if (softErrors.length > 0)
+    console.warn(
+      `[pipeline] ${label} used with soft problems only: ${softErrors.join("; ")}`,
+    );
+}
+
 /** How much of a rejected output goes to the server log. */
 export const MAX_LOGGED_OUTPUT_CHARS = 4000;
 
@@ -108,16 +115,17 @@ function truncate(text: string, max: number): string {
 
 /**
  * Which of two attempts to use (pure; ARCHITECTURE.md section 4). A valid attempt wins, the
- * first if both are. Failing that, one with only soft problems (a sketch's spacing) can still
- * be used: the one with fewer, the second on a tie. With a hard problem in both, it fails
- * with the second attempt's errors.
+ * first if both are, with its warnings (a sketch's tight spacing) to log. Failing that, one
+ * with only soft problems (a sketch's overlaps) can still be used: the one with fewer, the
+ * second on a tie. With a hard problem in both, it fails with the second attempt's errors.
  */
 export function chooseAttempt<T>(
   first: ValidationResult<T>,
   second: ValidationResult<T>,
 ): { value: T; softErrors: string[] } | { errors: string[] } {
-  if (first.ok) return { value: first.value, softErrors: [] };
-  if (second.ok) return { value: second.value, softErrors: [] };
+  if (first.ok) return { value: first.value, softErrors: first.warnings ?? [] };
+  if (second.ok)
+    return { value: second.value, softErrors: second.warnings ?? [] };
   const [a, b] = [first.softOnly, second.softOnly];
   if (b && (!a || b.count <= a.count))
     return { value: b.value, softErrors: second.errors };

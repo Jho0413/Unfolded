@@ -121,11 +121,11 @@ describe("drawScene", () => {
     );
   });
 
-  it("a sketch whose only problems are spacing is drawn (spacing is soft)", async () => {
+  it("a sketch whose only problems are overlaps is drawn (spacing is soft)", async () => {
     const cramped = {
       objects: [
         { kind: "latex", id: "f", x: 700, y: 450, tex: "x" },
-        { kind: "latex", id: "g", x: 760, y: 450, tex: "y" },
+        { kind: "latex", id: "g", x: 715, y: 450, tex: "y" },
       ],
       actions: [],
     };
