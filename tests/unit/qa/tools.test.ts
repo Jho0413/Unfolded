@@ -14,6 +14,7 @@ import {
   ASK_CLOSED,
   BACK_WHERE_STOPPED,
   createClientTools,
+  NO_PAPER_VIEWER,
   type HighlightAction,
 } from "@/qa/tools";
 import type { BoardObject, BoardState } from "@/shared/scene";
@@ -216,6 +217,34 @@ describe("a tool call that lands after Ask closed", () => {
     const h = harness(paused);
     expect(await h.tools.go_to_step?.({ step: 2 })).toBe(ASK_CLOSED);
     expect(h.state()).toEqual(paused);
+  });
+});
+
+describe("highlight_paper (issue #98)", () => {
+  it("passes the quote and page to the paper and returns its answer", async () => {
+    const highlightPaper = vi.fn(() => "ok: highlighted on page 2");
+    const h = harness(asking, { highlightPaper });
+    expect(
+      await h.tools.highlight_paper?.({
+        quote: "a row times a column",
+        page: 2,
+      }),
+    ).toBe("ok: highlighted on page 2");
+    expect(highlightPaper).toHaveBeenCalledWith("a row times a column", 2);
+  });
+
+  it("without a paper viewer (e.g. /dev/ask): says there's no paper on screen", async () => {
+    const h = harness(asking);
+    expect(await h.tools.highlight_paper?.({ quote: "q" })).toBe(
+      NO_PAPER_VIEWER,
+    );
+  });
+
+  it("after Ask closed: Ask is closed, nothing highlighted", async () => {
+    const highlightPaper = vi.fn(() => "ok");
+    const h = harness({ kind: "paused", step: 0 }, { highlightPaper });
+    expect(await h.tools.highlight_paper?.({ quote: "q" })).toBe(ASK_CLOSED);
+    expect(highlightPaper).not.toHaveBeenCalled();
   });
 });
 

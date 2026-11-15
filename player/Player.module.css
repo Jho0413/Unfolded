@@ -48,6 +48,46 @@
   flex: 1;
 }
 
+/*
+ * The board and, when the lesson has a paper, the paper beside it (issue #98). The pane in
+ * focus is about 60 % of the width (player/paper/focus.ts); narrow screens stack them.
+ */
+.split {
+  min-height: 0;
+  display: flex;
+  gap: 12px;
+}
+.split > * {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+.split[data-paper="1"] > .board {
+  flex: 0 0 calc(60% - 6px);
+  transition: flex-basis 0.45s cubic-bezier(0.3, 0, 0.2, 1);
+}
+.split[data-paper="1"][data-focus="paper"] > .board {
+  flex-basis: calc(40% - 6px);
+}
+@media (max-width: 900px) {
+  .split {
+    flex-direction: column;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .split[data-paper="1"] > .board {
+    transition: none;
+  }
+}
+
+.paperPane {
+  position: relative;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
 .board {
   /* The dock floats this far above the board's bottom. */
   --dock-bottom: 18px;

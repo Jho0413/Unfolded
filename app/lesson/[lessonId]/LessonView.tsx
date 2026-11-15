@@ -7,6 +7,9 @@
 //
 // The Ask panel (./LessonAsk.tsx) is mounted through the stage's `renderAsk` and
 // `renderBoard`, sharing one AskSession; `replay` makes it say "Q&A needs a connection".
+//
+// The paper (issue #98, ./useLessonPaper.ts) sits beside the board when the lesson has one,
+// the pane in focus the larger.
 import { useState, useSyncExternalStore } from "react";
 import { PlayerStage } from "@/player/Player";
 import { usePlayer } from "@/player/usePlayer";
@@ -14,10 +17,12 @@ import type { LessonPlan } from "@/shared/lesson";
 import { ConversationProvider } from "@/qa/conversation";
 import { createAskSession } from "@/qa/askSession";
 import { createPrefetcher } from "@/player/prefetch";
+import { PaperViewer } from "@/player/paper/PaperViewer";
 import { LessonAsk, LessonBoard } from "./LessonAsk";
 import { Outline } from "./Outline";
 import { stepRouteFetcher } from "./stepRoute";
 import { CaptionsToggle, ThemeToggle } from "./Toggles";
+import { useLessonPaper } from "./useLessonPaper";
 import styles from "./lesson.module.css";
 
 export interface LessonViewProps {
@@ -46,6 +51,8 @@ export function LessonView({ lessonId, plan, replay, debug }: LessonViewProps) {
     steps.statuses,
     steps.statuses,
   );
+  // The paper beside the board (issue #98): none until it loads, or with no paper.
+  const paper = useLessonPaper(lessonId, player, askSession);
   const titles = plan.steps.map((s) => s.title);
   return (
     <div
@@ -80,6 +87,13 @@ export function LessonView({ lessonId, plan, replay, debug }: LessonViewProps) {
               </>
             }
             renderBoard={(p) => <LessonBoard player={p} session={askSession} />}
+            paper={
+              paper.pages && (
+                <PaperViewer pages={paper.pages} highlight={paper.highlight} />
+              )
+            }
+            focus={paper.focus}
+            onFocusPane={paper.onFocusPane}
             renderAsk={(p) => (
               <LessonAsk
                 player={p}
@@ -87,6 +101,7 @@ export function LessonView({ lessonId, plan, replay, debug }: LessonViewProps) {
                 plan={plan}
                 replay={replay}
                 captions={captions}
+                highlightPaper={paper.highlightPaper}
               />
             )}
           />

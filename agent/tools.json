@@ -44,6 +44,11 @@
       "type": "client",
       "config": "tool_configs/replay_step.json",
       "id": "tool_0801m7eacw0df7f9a87gmeb6ffn1"
+    },
+    {
+      "type": "client",
+      "config": "tool_configs/highlight_paper.json",
+      "id": "tool_pending_highlight_paper"
     }
   ]
 }

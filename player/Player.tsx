@@ -11,10 +11,18 @@
 //   its own card. `renderBoard` replaces the board (Ask draws on the frozen board, section 8).
 // - Keys: Space holds on and goes on (usePlayer), → next idea, ← back, R say that again
 //   (controls.ts `shortcutEvent`), A asks (the Ask panel).
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import {
+  type PointerEvent,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { captionFrom, prepareNarration } from "./captions";
 import { shortcutEvent } from "./controls";
 import { lessonCard } from "./cardView";
+import type { Pane } from "./paper/focus";
 import { TutorCard } from "./TutorCard";
 import type { FetchStep } from "./stepLoader";
 import { type Player as PlayerApi, usePlayer } from "./usePlayer";
@@ -55,6 +63,12 @@ export type PlayerStageProps = {
   renderAsk?: (player: PlayerApi) => ReactNode;
   /** The board; the default is `<Whiteboard state={player.board} />`. */
   renderBoard?: (player: PlayerApi) => ReactNode;
+  /** The paper viewer, beside the board (issue #98); none: the board takes the whole stage. */
+  paper?: ReactNode;
+  /** Which pane is large (player/paper/focus.ts); the board by default. */
+  focus?: Pane;
+  /** The learner clicked a pane, or rested the mouse on it. */
+  onFocusPane?: (pane: Pane) => void;
 };
 
 const NO_TITLES: readonly string[] = [];
@@ -68,9 +82,14 @@ export function PlayerStage({
   debug = false,
   renderAsk,
   renderBoard,
+  paper,
+  focus = "board",
+  onFocusPane,
 }: PlayerStageProps) {
   const { state, send, loaded, tMs } = player;
   useShortcuts(send);
+  const boardFocus = usePaneFocus("board", onFocusPane);
+  const paperFocus = usePaneFocus("paper", onFocusPane);
   // The audio's duration, the captions' last anchor, for the audio it was read from: a new
   // step's audio has none until its metadata loads.
   const [duration, setDuration] = useState<{ src: string; ms: number } | null>(
@@ -120,35 +139,51 @@ export function PlayerStage({
         <span className={styles.spacer} />
         {barEnd}
       </header>
-      <div className={styles.board}>
-        <div className={styles.drawing}>
-          <div className={styles.fit}>
-            {renderBoard ? (
-              renderBoard(player)
-            ) : (
-              <Whiteboard state={player.board} />
-            )}
-          </div>
-        </div>
-        {state.kind === "loading" && (
-          <div className={styles.preparing} data-testid="board-preparing">
-            <div>
-              Preparing the next idea<b>{title}</b>
+      <div
+        className={styles.split}
+        data-testid="stage-split"
+        data-paper={paper ? "1" : "0"}
+        data-focus={paper ? focus : "board"}
+      >
+        <div className={styles.board} data-testid="board-pane" {...boardFocus}>
+          <div className={styles.drawing}>
+            <div className={styles.fit}>
+              {renderBoard ? (
+                renderBoard(player)
+              ) : (
+                <Whiteboard state={player.board} />
+              )}
             </div>
           </div>
-        )}
-        {debug && <DebugOverlay tMs={tMs} lastCue={player.lastCue} />}
-        <div className={styles.dock} ref={trackDockHeight}>
-          {card !== null && (
-            <TutorCard
-              view={card}
-              caption={caption}
-              onAction={send}
-              holdShortcut="Space"
-            />
+          {state.kind === "loading" && (
+            <div className={styles.preparing} data-testid="board-preparing">
+              <div>
+                Preparing the next idea<b>{title}</b>
+              </div>
+            </div>
           )}
-          {renderAsk?.(player)}
+          {debug && <DebugOverlay tMs={tMs} lastCue={player.lastCue} />}
+          <div className={styles.dock} ref={trackDockHeight}>
+            {card !== null && (
+              <TutorCard
+                view={card}
+                caption={caption}
+                onAction={send}
+                holdShortcut="Space"
+              />
+            )}
+            {renderAsk?.(player)}
+          </div>
         </div>
+        {paper && (
+          <div
+            className={styles.paperPane}
+            data-testid="paper-pane"
+            {...paperFocus}
+          >
+            {paper}
+          </div>
+        )}
       </div>
       <audio
         {...player.audioProps}
@@ -175,6 +210,24 @@ function trackDockHeight(dock: HTMLDivElement | null) {
   );
   observer.observe(dock);
   return () => observer.disconnect();
+}
+
+/** How long the mouse rests on a pane before it takes focus, so passing over it doesn't. */
+const HOVER_FOCUS_MS = 300;
+
+/** A pane's pointer handlers: a press focuses it at once, a mouse resting on it after a moment. */
+function usePaneFocus(pane: Pane, onFocusPane?: (pane: Pane) => void) {
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return {
+    onPointerDown: () => onFocusPane?.(pane),
+    onPointerEnter: (e: PointerEvent) => {
+      if (e.pointerType !== "mouse" || onFocusPane === undefined) return;
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => onFocusPane(pane), HOVER_FOCUS_MS);
+    },
+    onPointerLeave: () => clearTimeout(timer.current),
+  };
 }
 
 /** → next idea, ← back, R say that again (Space is usePlayer's, A the Ask panel's). */

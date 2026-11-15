@@ -7,7 +7,7 @@ import path from "node:path";
 import { M1_CUE_TIMES } from "@/app/dev/board/scenes";
 import demoM1 from "@/lib/fakes/fixtures/demo-m1.step.json";
 import type { LessonPlan, SavedStep } from "@/shared/lesson";
-import { Step } from "@/shared/scene";
+import { type CuedPaperRef, Step } from "@/shared/scene";
 import { RUNS_DIR } from "./runsDir";
 
 /** A lesson as the upload page leaves it, before any step is generated: plan.json and paper.json. */
@@ -62,6 +62,8 @@ export interface SavedRunOptions {
   cover?: { name: string; saved: boolean };
   /** Write paper.json too, so the step route can generate the unsaved steps (fakes only). */
   paper?: boolean;
+  /** Paper passages every saved step points at (issue #98). */
+  paperRefs?: CuedPaperRef[];
 }
 
 /** Writes runs/<lessonId>/ and returns a handle that removes it. */
@@ -69,7 +71,14 @@ export async function savedRun(
   lessonId: string,
   options: SavedRunOptions = {},
 ) {
-  const { steps = 2, unsaved = [], versions = 1, cover, paper } = options;
+  const {
+    steps = 2,
+    unsaved = [],
+    versions = 1,
+    cover,
+    paper,
+    paperRefs,
+  } = options;
   const dir = path.join(RUNS_DIR, lessonId);
   // A folder left by an interrupted run must not change the results.
   await rm(dir, { recursive: true, force: true });
@@ -98,7 +107,7 @@ export async function savedRun(
       const title =
         k === versions ? savedStepTitle(n) : `${savedStepTitle(n)} old v${k}`;
       const saved: SavedStep = {
-        step: { ...m1Step, title },
+        step: { ...m1Step, title, ...(paperRefs && { paperRefs }) },
         cueTimes: M1_CUE_TIMES,
       };
       await writeFile(path.join(dir, `step-${n}.v${k}.mp3`), audio);
